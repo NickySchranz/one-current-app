@@ -1,0 +1,690 @@
+import { create } from "zustand";
+import { AccessibilityInfo, Appearance } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { ForkPeriodChoice, PsychologicalBranch, Loudness } from "@/domain/branches/types";
+import type { BranchMerge, MergeDraft } from "@/domain/merges/types";
+import type { IntegratedAction } from "@/domain/actions/types";
+import type { BranchCommit } from "@/domain/moments/types";
+import { createBranch, easeLoudness, type CreateBranchInput } from "@/domain/branches/logic";
+import { advanceSkew, appNow, getSkewMs, setRate, setSkewMs } from "@/domain/time/clock";
+import { addMomentToBranch, createMoment, type CreateMomentInput } from "@/domain/moments/logic";
+import { detectRecurrence, recordRecurrence } from "@/domain/branches/recurrence";
+import { applyMergeToBranch, createMerge, type CreateMergeInput } from "@/domain/merges/logic";
+import { completeAction, composeIntegratedAction } from "@/domain/actions/logic";
+import { heldFeelings } from "@/domain/feelings/logic";
+import { newId } from "@/domain/ids";
+import { repo } from "@/db/repository";
+import { panWindow, weekWindow, type TimeWindow } from "@/visualization/zoom/time-scale";
+import { isThemeId, type ThemeId } from "@/visualization/theme";
+
+/**
+ * Three destinations. Now is where I work — it IS the timeline. History is
+ * where I review. More holds everything else.
+ */
+export type View =
+  | { kind: "now" }
+  | { kind: "history" }
+  | { kind: "merge-review"; mergeId: string }
+  | { kind: "more" };
+
+/**
+ * What is currently happening in Now. The timeline stays mounted and visible;
+ * quick operations render in a light tray beside it, focused ones over it.
+ */
+export type TimelineOperation =
+  | { kind: "idle" }
+  | { kind: "creating-branch" }
+  | { kind: "checking-recurrence"; matchedBranchId: string; pending: CreateBranchInput }
+  /** "What does this branch need from you now?" — the small menu at an endpoint. */
+  | { kind: "quick-touch"; branchId: string }
+  | { kind: "quick-act"; branchId: string }
+  | { kind: "quick-merge"; branchId: string }
+  | { kind: "quick-note"; branchId: string }
+  /** Every decided, still-open action read together in one panel. */
+  | { kind: "viewing-actions" }
+  /** Looking deeper into one branch. Focused: the timeline waits behind it. */
+  | { kind: "understanding"; branchId: string }
+  /** The final, explicit merge confirmation. Focused. */
+  | { kind: "confirming-merge"; branchIds: string[] }
+  /** A branch that needs more support than an app should carry alone. Focused. */
+  | { kind: "seeking-support"; branchId: string };
+
+/** How much of the screen an operation may take. */
+export function operationDepth(op: TimelineOperation): "none" | "quick" | "focused" {
+  switch (op.kind) {
+    case "idle":
+      return "none";
+    case "understanding":
+    case "confirming-merge":
+    case "seeking-support":
+      return "focused";
+    default:
+      return "quick";
+  }
+}
+
+export type StatusFilter = "all" | "active" | "merged" | "recurring";
+
+/** A decision just released these feelings back to the main line (drives the timeline animation). */
+export type ReclaimEvent = { key: number; branchId: string; feelings: string[] };
+
+type AppState = {
+  ready: boolean;
+  branches: PsychologicalBranch[];
+  merges: BranchMerge[];
+  actions: IntegratedAction[];
+  mergeDraft?: MergeDraft;
+  view: View;
+  operation: TimelineOperation;
+  window?: TimeWindow;
+  typeFilter: Set<PsychologicalBranch["type"]>;
+  statusFilter: StatusFilter;
+  reducedMotion: boolean;
+  theme: ThemeId;
+  /** UI language: every app term, never the user's own words. */
+  language: "en" | "es";
+  reclaim?: ReclaimEvent;
+  /** A branch was just created: its line draws itself onto the timeline. */
+  born?: { key: number; branchId: string };
+  /** An optimistic, unsaved line shown while the create form is open. */
+  draftBranchId: string | null;
+  /**
+   * Lines created this session keep the lane they were drawn on: the draft
+   * stays pinned after commit so the quick menu that follows (loudness dial)
+   * never sees the line hop to a packed lane. Resets naturally on reload.
+   */
+  pinnedBranchIds: string[];
+  /** The app's current moment (epoch ms). Refreshed on a slow tick so Now moves without reloading. */
+  nowTick: number;
+  /** How far ahead of real time the app is living (Testing only; resets on reload). */
+  timeSkewMs: number;
+  /** App-milliseconds per real millisecond (Testing only; 1 = real time). */
+  timeRate: number;
+
+  init(): Promise<void>;
+  /** Re-read the clock so everything derived from "now" follows it. */
+  refreshNow(): void;
+  /** Move the app's clock forward (Testing only). */
+  fastForward(ms: number): void;
+  /** Let the app's clock run faster than real time (Testing only). */
+  setTimeRate(rate: number): void;
+  resetTimeSkew(): void;
+  setView(view: View): void;
+  /** Begin (or end, with idle) an operation over the timeline. Jumps to the timeline shell. */
+  setOperation(operation: TimelineOperation): void;
+  returnToNow(): void;
+
+  requestBranch(
+    input: CreateBranchInput,
+  ): Promise<{ recurrenceOf?: string; branch?: PsychologicalBranch }>;
+  createBranchNow(input: CreateBranchInput): Promise<PsychologicalBranch>;
+  /** Draw the line the moment the create form opens; commit or cancel decides its fate. */
+  beginDraftBranch(): void;
+  /** Keep the optimistic line in step with the form (title, period, …). Never persisted. */
+  updateDraftBranch(patch: Partial<PsychologicalBranch>): void;
+  /** The form closed without saving: the optimistic line vanishes. */
+  cancelDraftBranch(): void;
+  updateBranch(id: string, patch: Partial<PsychologicalBranch>): Promise<void>;
+  /** Set the loudness dial by hand: re-anchors the daily drift, so what you set is what is felt today. */
+  dialLoudness(id: string, level: Loudness): Promise<void>;
+  deleteBranch(id: string): Promise<void>;
+  addMoment(input: CreateMomentInput): Promise<BranchCommit>;
+  /** Any decision about a branch loosens its loudness; optionally applies a patch alongside. */
+  easeBranch(id: string, patch?: Partial<PsychologicalBranch>): Promise<void>;
+  /** One small step today for a single branch; eases its loudness. */
+  createTodayAction(branchId: string, step: string): Promise<void>;
+  /** An action was done: it settles into the past instead of waiting ahead. */
+  markActionDone(actionId: string): Promise<void>;
+  /** A folded line came back to mind: it continues as an open line again. */
+  reopenBranch(branchId: string): Promise<void>;
+  clearReclaim(): void;
+  clearBorn(): void;
+  updateMoment(branchId: string, moment: BranchCommit): Promise<void>;
+
+  startMerge(branchIds: string[]): Promise<void>;
+  saveMergeDraft(draft: MergeDraft): Promise<void>;
+  cancelMerge(): Promise<void>;
+  completeMerge(input: CreateMergeInput): Promise<BranchMerge>;
+
+  /** This line is real work now: it leaves your head and lives where your tasks live. */
+  handOffBranch(branchId: string): Promise<void>;
+  recordRecurrenceOn(branchId: string): Promise<void>;
+
+  setWindow(window: TimeWindow): void;
+  panBy(fraction: number): void;
+  setTypeFilter(types: Set<PsychologicalBranch["type"]>): void;
+  setStatusFilter(f: StatusFilter): void;
+  setReducedMotion(v: boolean): void;
+  setTheme(t: ThemeId): void;
+  setLanguage(l: "en" | "es"): void;
+
+  exportData(): Promise<string>;
+  importData(json: string): Promise<void>;
+  deleteEverything(): Promise<void>;
+  /** Fills the timeline with believable example branches to explore the app. */
+  loadExampleData(): Promise<void>;
+};
+
+function todayIso(): string {
+  return appNow().toISOString().slice(0, 10);
+}
+
+/** Operations happen in Now. */
+function nowView(current: View): View {
+  return current.kind === "now" ? current : { kind: "now" };
+}
+
+const LANGUAGE_KEY = "one-current-language";
+const THEME_KEY = "one-current-theme";
+
+function defaultTheme(): ThemeId {
+  return Appearance.getColorScheme() === "dark" ? "duskwood" : "riverbed";
+}
+
+/** Read persisted UI settings (theme, language) and system preferences.
+ * AsyncStorage is async on every platform, so these load during init(). */
+async function loadSettings(): Promise<{
+  theme: ThemeId;
+  language: "en" | "es";
+  reducedMotion: boolean;
+}> {
+  let theme = defaultTheme();
+  let language: "en" | "es" = "en";
+  let reducedMotion = false;
+  try {
+    const [savedTheme, savedLanguage, reduceMotion] = await Promise.all([
+      AsyncStorage.getItem(THEME_KEY),
+      AsyncStorage.getItem(LANGUAGE_KEY),
+      AccessibilityInfo.isReduceMotionEnabled(),
+    ]);
+    if (savedTheme && isThemeId(savedTheme)) theme = savedTheme;
+    if (savedLanguage === "es" || savedLanguage === "en") language = savedLanguage;
+    reducedMotion = reduceMotion;
+  } catch {
+    // storage unavailable; defaults apply
+  }
+  return { theme, language, reducedMotion };
+}
+
+export const useAppStore = create<AppState>((set, get) => ({
+  ready: false,
+  branches: [],
+  merges: [],
+  actions: [],
+  view: { kind: "now" },
+  operation: { kind: "idle" },
+  typeFilter: new Set(),
+  statusFilter: "all",
+  reducedMotion: false,
+  theme: defaultTheme(),
+  language: "en" as const,
+  nowTick: appNow().getTime(),
+  timeSkewMs: 0,
+  timeRate: 1,
+
+  async init() {
+    const [data, settings] = await Promise.all([repo.loadAll(), loadSettings()]);
+    const draft = data.drafts[0];
+    set({
+      ready: true,
+      ...settings,
+      branches: data.branches,
+      merges: data.merges,
+      actions: data.actions,
+      mergeDraft: draft,
+      nowTick: appNow().getTime(),
+      window: weekWindow(appNow()),
+      view: { kind: "now" },
+      // An interrupted merge is restored where it stopped — at the confirmation.
+      operation: draft
+        ? { kind: "confirming-merge", branchIds: draft.branchIds }
+        : { kind: "idle" },
+    });
+  },
+
+  // Leaving Now sets any open operation down.
+  setView: (view) => set({ view, operation: { kind: "idle" } }),
+  // Operations live in Now, so starting one returns there.
+  setOperation: (operation) =>
+    set((s) => ({
+      operation,
+      view: operation.kind === "idle" ? s.view : nowView(s.view),
+    })),
+  returnToNow: () => {
+    set({ view: { kind: "now" }, window: weekWindow(appNow()) });
+  },
+
+  refreshNow: () => {
+    const nowMs = appNow().getTime();
+    set((s) => {
+      // While time runs fast, the camera drifts with it: the window slides by
+      // the same amount the clock moved, so Now stays in view as days stream by.
+      const delta = nowMs - s.nowTick;
+      const window =
+        s.timeRate > 1 && s.window && delta > 0
+          ? {
+              start: new Date(Date.parse(s.window.start) + delta).toISOString(),
+              end: new Date(Date.parse(s.window.end) + delta).toISOString(),
+            }
+          : s.window;
+      return { nowTick: nowMs, timeSkewMs: getSkewMs(), window };
+    });
+  },
+  fastForward: (ms) => {
+    advanceSkew(ms);
+    set({
+      timeSkewMs: getSkewMs(),
+      nowTick: appNow().getTime(),
+      window: weekWindow(appNow()),
+    });
+  },
+  setTimeRate: (rate) => {
+    setRate(rate);
+    set({
+      timeRate: rate,
+      timeSkewMs: getSkewMs(),
+      nowTick: appNow().getTime(),
+      // Entering fast time recenters on Now so the movement is visible.
+      window: rate > 1 ? weekWindow(appNow()) : get().window,
+    });
+  },
+  resetTimeSkew: () => {
+    setSkewMs(0);
+    set({
+      timeRate: 1,
+      timeSkewMs: 0,
+      nowTick: appNow().getTime(),
+      window: weekWindow(appNow()),
+    });
+  },
+
+  draftBranchId: null,
+  pinnedBranchIds: [],
+
+  beginDraftBranch() {
+    const branch = createBranch(
+      { title: "", kindChoiceId: "unnamed", period: { kind: "today" } },
+      appNow(),
+    );
+    set((s) => ({
+      branches: [...s.branches, branch],
+      draftBranchId: branch.id,
+      pinnedBranchIds: [...s.pinnedBranchIds, branch.id],
+      window: weekWindow(appNow()),
+      view: nowView(s.view),
+      born: { key: Date.now(), branchId: branch.id },
+    }));
+  },
+
+  updateDraftBranch(patch) {
+    const id = get().draftBranchId;
+    if (!id) return;
+    set((s) => ({
+      branches: s.branches.map((b) => (b.id === id ? { ...b, ...patch } : b)),
+    }));
+  },
+
+  cancelDraftBranch() {
+    const id = get().draftBranchId;
+    if (!id) return;
+    set((s) => ({
+      branches: s.branches.filter((b) => b.id !== id),
+      draftBranchId: null,
+      pinnedBranchIds: s.pinnedBranchIds.filter((p) => p !== id),
+    }));
+  },
+
+  async requestBranch(input) {
+    const match = detectRecurrence(input.title, get().branches);
+    if (match) {
+      set((s) => ({
+        operation: {
+          kind: "checking-recurrence" as const,
+          matchedBranchId: match.id,
+          pending: input,
+        },
+        view: nowView(s.view),
+      }));
+      return { recurrenceOf: match.id };
+    }
+    const branch = await get().createBranchNow(input);
+    return { branch };
+  },
+
+  async createBranchNow(input) {
+    const draftId = get().draftBranchId;
+    const branch = createBranch(input, appNow());
+    // The optimistic line becomes the real one: same id, so the line the user
+    // has been watching (and its colour) simply stays — and its id remains in
+    // pinnedBranchIds, keeping the lane it was drawn on for the session.
+    if (draftId) branch.id = draftId;
+    await repo.saveBranch(branch);
+    set((s) => ({
+      branches: draftId
+        ? s.branches.map((b) => (b.id === draftId ? branch : b))
+        : [...s.branches, branch],
+      draftBranchId: null,
+      window: weekWindow(appNow()),
+      view: nowView(s.view),
+      // A committed draft already drew itself; only a fresh line is born here.
+      born: draftId ? s.born : { key: Date.now(), branchId: branch.id },
+    }));
+    return branch;
+  },
+
+  async updateBranch(id, patch) {
+    // Apply to the freshest state synchronously so quick successive edits
+    // (e.g. tapping kind then feelings) don't overwrite each other.
+    let next: PsychologicalBranch | undefined;
+    set((s) => ({
+      branches: s.branches.map((b) => {
+        if (b.id !== id) return b;
+        next = { ...b, ...patch };
+        return next;
+      }),
+    }));
+    if (next) await repo.saveBranch(next);
+  },
+
+  async dialLoudness(id, level) {
+    // A touch, not a decision: the day counter is untouched, but the drift
+    // re-anchors here — the level under your thumb is the level that is felt.
+    await get().updateBranch(id, { loudness: level, loudnessSetOn: todayIso() });
+  },
+
+  async deleteBranch(id) {
+    await repo.deleteBranch(id);
+    set((s) => ({
+      branches: s.branches.filter((b) => b.id !== id),
+      view: nowView(s.view),
+      operation: { kind: "idle" },
+    }));
+  },
+
+  async addMoment(input) {
+    const branch = get().branches.find((b) => b.id === input.branchId);
+    if (!branch) throw new Error("Branch not found");
+    const moment = createMoment(input);
+    const next = addMomentToBranch(branch, moment, appNow());
+    await repo.saveBranch(next);
+    set((s) => ({ branches: s.branches.map((b) => (b.id === next.id ? next : b)) }));
+    return moment;
+  },
+
+  async easeBranch(id, patch) {
+    const branch = get().branches.find((b) => b.id === id);
+    if (!branch) return;
+    // What the line was holding until this decision — it returns for today.
+    const freed = heldFeelings(branch);
+    const next: PsychologicalBranch = {
+      ...branch,
+      ...patch,
+      loudness: easeLoudness(branch.loudness),
+      lastDecisionOn: todayIso(),
+      lastActivatedAt: appNow().toISOString(),
+    };
+    await repo.saveBranch(next);
+    // "Nothing can be done" and a planned action are mutually exclusive:
+    // leaving the line for today withdraws its open actions.
+    let removedActionIds: string[] = [];
+    if (patch?.leftOn) {
+      const stale = get().actions.filter(
+        (a) => !a.completedAt && a.branchesIntegrated.some((x) => x.branchId === id),
+      );
+      removedActionIds = stale.map((a) => a.id);
+      await Promise.all(removedActionIds.map((actionId) => repo.deleteAction(actionId)));
+    }
+    set((s) => ({
+      branches: s.branches.map((b) => (b.id === id ? next : b)),
+      actions:
+        removedActionIds.length > 0
+          ? s.actions.filter((a) => !removedActionIds.includes(a.id))
+          : s.actions,
+      reclaim: freed.length > 0 ? { key: Date.now(), branchId: id, feelings: freed } : s.reclaim,
+    }));
+  },
+
+  async reopenBranch(branchId) {
+    const branch = get().branches.find((b) => b.id === branchId);
+    if (!branch) return;
+    const yesterday = new Date(appNow().getTime() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const next: PsychologicalBranch = {
+      ...recordRecurrence(branch),
+      status: "active",
+      mergeDate: undefined,
+      loudness: Math.max(2, branch.loudness) as Loudness,
+      // Reopening is a reactivation, not a decision: dated yesterday so the
+      // line holds its feelings again today without instantly drifting.
+      lastDecisionOn: yesterday,
+      leftOn: undefined,
+    };
+    await repo.saveBranch(next);
+    set((s) => ({ branches: s.branches.map((b) => (b.id === branchId ? next : b)) }));
+  },
+
+  clearReclaim: () => set({ reclaim: undefined }),
+  clearBorn: () => set({ born: undefined }),
+
+  async createTodayAction(branchId, step) {
+    const branch = get().branches.find((b) => b.id === branchId);
+    if (!branch) return;
+    const action = composeIntegratedAction({
+      branches: [branch],
+      title: step,
+      instruction: step,
+      durationMinutes: 10,
+      minimumVersion: "A few honest minutes of it",
+      qualitiesCarried: branch.storedQualities,
+      completionDefinition: "When it has been done once today",
+    });
+    await repo.saveAction(action);
+    set((s) => ({ actions: [...s.actions, action] }));
+    // Deciding an action lifts "nothing can be done" — they cannot coexist.
+    await get().easeBranch(branchId, { leftOn: undefined });
+  },
+
+  async markActionDone(actionId) {
+    const action = get().actions.find((a) => a.id === actionId);
+    if (!action || action.completedAt) return;
+    const done = completeAction(action);
+    await repo.saveAction(done);
+    set((s) => ({ actions: s.actions.map((a) => (a.id === actionId ? done : a)) }));
+  },
+
+  async updateMoment(branchId, moment) {
+    const branch = get().branches.find((b) => b.id === branchId);
+    if (!branch) return;
+    const next = {
+      ...branch,
+      commits: branch.commits.map((m) => (m.id === moment.id ? moment : m)),
+    };
+    await repo.saveBranch(next);
+    set((s) => ({ branches: s.branches.map((b) => (b.id === next.id ? next : b)) }));
+  },
+
+  async startMerge(branchIds) {
+    const draft: MergeDraft = {
+      id: newId("dr"),
+      branchIds,
+      startedAt: appNow().toISOString(),
+      stage: "carrying",
+      partial: {},
+    };
+    await repo.saveDraft(draft);
+    set((s) => ({
+      mergeDraft: draft,
+      operation: { kind: "confirming-merge" as const, branchIds },
+      view: nowView(s.view),
+    }));
+  },
+
+  async saveMergeDraft(draft) {
+    await repo.saveDraft(draft);
+    set({ mergeDraft: draft });
+  },
+
+  async cancelMerge() {
+    const draft = get().mergeDraft;
+    if (draft) await repo.deleteDraft(draft.id);
+    set((s) => ({
+      mergeDraft: undefined,
+      view: nowView(s.view),
+      operation: { kind: "idle" as const },
+    }));
+  },
+
+  async completeMerge(input) {
+    const merge = createMerge(input, appNow());
+    const updated = input.branches.map((b) => applyMergeToBranch(b, merge, appNow()));
+    await repo.saveMerge(merge);
+    await repo.saveBranches(updated);
+    if (merge.action) await repo.saveAction(merge.action);
+    const draft = get().mergeDraft;
+    if (draft) await repo.deleteDraft(draft.id);
+    set((s) => ({
+      merges: [...s.merges, merge],
+      actions: merge.action ? [...s.actions, merge.action] : s.actions,
+      branches: s.branches.map((b) => updated.find((u) => u.id === b.id) ?? b),
+      mergeDraft: undefined,
+      view: nowView(s.view),
+      operation: { kind: "idle" },
+    }));
+    return merge;
+  },
+
+  async handOffBranch(branchId) {
+    const branch = get().branches.find((b) => b.id === branchId);
+    if (!branch) return;
+    const today = todayIso();
+    const freed = heldFeelings(branch);
+    const next: PsychologicalBranch = {
+      ...branch,
+      status: "converted-to-project",
+      mergeDate: today,
+      loudness: 1,
+      lastDecisionOn: today,
+      leftOn: undefined,
+    };
+    // The work lives where your tasks live now: nothing left to do on it here.
+    const openActions = get()
+      .actions.filter(
+        (a) => !a.completedAt && a.branchesIntegrated.some((x) => x.branchId === branchId),
+      )
+      .map((a) => completeAction(a));
+    await repo.saveBranch(next);
+    for (const a of openActions) await repo.saveAction(a);
+    set((s) => ({
+      branches: s.branches.map((b) => (b.id === branchId ? next : b)),
+      actions: s.actions.map((a) => openActions.find((c) => c.id === a.id) ?? a),
+      reclaim: freed.length > 0 ? { key: Date.now(), branchId, feelings: freed } : s.reclaim,
+      view: nowView(s.view),
+      operation: { kind: "idle" },
+    }));
+  },
+
+  async recordRecurrenceOn(branchId) {
+    const branch = get().branches.find((b) => b.id === branchId);
+    if (!branch) return;
+    const next = recordRecurrence(branch);
+    await repo.saveBranch(next);
+    set((s) => ({ branches: s.branches.map((b) => (b.id === branchId ? next : b)) }));
+  },
+
+  setWindow: (window) => set({ window }),
+  panBy(fraction) {
+    const w = get().window;
+    if (!w) return;
+    set({ window: panWindow(w, fraction, todayIso()) });
+  },
+  setTypeFilter: (typeFilter) => set({ typeFilter }),
+  setStatusFilter: (statusFilter) => set({ statusFilter }),
+  setReducedMotion: (reducedMotion) => set({ reducedMotion }),
+  setTheme: (theme) => {
+    AsyncStorage.setItem(THEME_KEY, theme).catch(() => {
+      // storage may be unavailable; the choice still applies now
+    });
+    set({ theme });
+  },
+  setLanguage: (language) => {
+    AsyncStorage.setItem(LANGUAGE_KEY, language).catch(() => {
+      // storage may be unavailable; the choice still applies now
+    });
+    set({ language });
+  },
+
+  exportData: () => repo.exportAll(),
+  async importData(json) {
+    await repo.importAll(json);
+    const data = await repo.loadAll();
+    set({
+      branches: data.branches,
+      merges: data.merges,
+      actions: data.actions,
+      window: weekWindow(appNow()),
+    });
+  },
+  async loadExampleData() {
+    const { buildExampleData } = await import("@/db/example-data");
+    const data = buildExampleData();
+    await repo.saveBranches(data.branches);
+    for (const m of data.merges) await repo.saveMerge(m);
+    for (const a of data.actions) await repo.saveAction(a);
+    set((s) => ({
+      branches: [...s.branches, ...data.branches],
+      merges: [...s.merges, ...data.merges],
+      actions: [...s.actions, ...data.actions],
+      view: nowView(s.view),
+      operation: { kind: "idle" },
+      window: weekWindow(appNow()),
+    }));
+  },
+  async deleteEverything() {
+    await repo.deleteEverything();
+    set({
+      branches: [],
+      merges: [],
+      actions: [],
+      pinnedBranchIds: [],
+      draftBranchId: null,
+      mergeDraft: undefined,
+      view: { kind: "now" },
+      operation: { kind: "idle" },
+      window: weekWindow(appNow()),
+    });
+  },
+}));
+
+export function matchesStatusFilter(
+  b: PsychologicalBranch,
+  statusFilter: StatusFilter,
+): boolean {
+  switch (statusFilter) {
+    case "all":
+      return true;
+    case "active":
+      return !["merged", "archived"].includes(b.status);
+    case "merged":
+      return ["merged", "partly-integrated", "archived"].includes(b.status);
+    case "recurring":
+      return b.recurrenceCount > 0;
+  }
+}
+
+/** Branches visible under the current filters and optional title search. */
+export function filterBranches(
+  branches: PsychologicalBranch[],
+  typeFilter: Set<PsychologicalBranch["type"]>,
+  statusFilter: StatusFilter,
+  query = "",
+): PsychologicalBranch[] {
+  const q = query.trim().toLowerCase();
+  return branches.filter((b) => {
+    if (typeFilter.size > 0 && !typeFilter.has(b.type)) return false;
+    if (q && !`${b.title} ${b.description ?? ""}`.toLowerCase().includes(q)) return false;
+    return matchesStatusFilter(b, statusFilter);
+  });
+}
+
+export type { CreateBranchInput, Loudness, ForkPeriodChoice };
