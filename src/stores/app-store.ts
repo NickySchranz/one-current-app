@@ -82,7 +82,7 @@ type AppState = {
   reducedMotion: boolean;
   theme: ThemeId;
   /** UI language: every app term, never the user's own words. */
-  language: "en" | "es";
+  language: "en" | "es" | "es-CO";
   reclaim?: ReclaimEvent;
   /** A branch was just created: its line draws itself onto the timeline. */
   born?: { key: number; branchId: string };
@@ -156,7 +156,7 @@ type AppState = {
   setStatusFilter(f: StatusFilter): void;
   setReducedMotion(v: boolean): void;
   setTheme(t: ThemeId): void;
-  setLanguage(l: "en" | "es"): void;
+  setLanguage(l: "en" | "es" | "es-CO"): void;
 
   exportData(): Promise<string>;
   importData(json: string): Promise<void>;
@@ -185,11 +185,11 @@ function defaultTheme(): ThemeId {
  * AsyncStorage is async on every platform, so these load during init(). */
 async function loadSettings(): Promise<{
   theme: ThemeId;
-  language: "en" | "es";
+  language: "en" | "es" | "es-CO";
   reducedMotion: boolean;
 }> {
   let theme = defaultTheme();
-  let language: "en" | "es" = "en";
+  let language: "en" | "es" | "es-CO" = "en";
   let reducedMotion = false;
   try {
     const [savedTheme, savedLanguage, reduceMotion] = await Promise.all([
@@ -198,7 +198,8 @@ async function loadSettings(): Promise<{
       AccessibilityInfo.isReduceMotionEnabled(),
     ]);
     if (savedTheme && isThemeId(savedTheme)) theme = savedTheme;
-    if (savedLanguage === "es" || savedLanguage === "en") language = savedLanguage;
+    if (savedLanguage === "es" || savedLanguage === "es-CO" || savedLanguage === "en")
+      language = savedLanguage;
     reducedMotion = reduceMotion;
   } catch {
     // storage unavailable; defaults apply

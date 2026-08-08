@@ -220,7 +220,12 @@ export function SettingsSections() {
           <Button
             selected={language === "es"}
             onPress={() => setLanguage("es")}
-            label="Español"
+            label="Español (España)"
+          />
+          <Button
+            selected={language === "es-CO"}
+            onPress={() => setLanguage("es-CO")}
+            label="Español (Colombia)"
           />
         </View>
         <Hint style={{ marginTop: 8, marginBottom: 0 }}>

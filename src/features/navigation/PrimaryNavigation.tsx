@@ -132,7 +132,7 @@ export function PrimaryNavigation({ variant }: { variant: "header" | "bottom" })
         backgroundColor: alpha(tk.bgRaised, 0.88),
         paddingTop: 4,
         paddingHorizontal: 4,
-        paddingBottom: 4 + insets.bottom,
+        paddingBottom: 12 + insets.bottom,
       }}
     >
       {nowTab}

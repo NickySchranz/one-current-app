@@ -1,7 +1,13 @@
 import { useAppStore } from "@/stores/app-store";
 import { es } from "./es";
+import { esCO } from "./es-co";
 
-export type Lang = "en" | "es";
+export type Lang = "en" | "es" | "es-CO";
+
+const DICTIONARIES: Partial<Record<Lang, Record<string, string>>> = {
+  es,
+  "es-CO": esCO,
+};
 
 /**
  * Translate one piece of app copy. Keys are the English source strings, so
@@ -14,7 +20,7 @@ export function translate(
   text: string,
   vars?: Record<string, string | number>,
 ): string {
-  let out = lang === "es" ? (es[text] ?? text) : text;
+  let out = DICTIONARIES[lang]?.[text] ?? text;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
       out = out.replaceAll(`{${k}}`, String(v));
