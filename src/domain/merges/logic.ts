@@ -1,5 +1,5 @@
 import { newId } from "../ids";
-import { isoDate, reduceLoudnessAfterMerge, statusAfterMerge } from "../branches/logic";
+import { isoDate, reduceLoudnessAfterMerge, statusAfterMerge, trackLoudness } from "../branches/logic";
 import type { PsychologicalBranch } from "../branches/types";
 import type { PreserveRelease } from "../branches/diff";
 import type { MergeConflict } from "../conflicts/types";
@@ -57,16 +57,20 @@ export function applyMergeToBranch(
   const status = statusAfterMerge(merge.resultStatus);
   // A hand-off to real work also ends the line here — the work lives elsewhere.
   const closes = status === "merged" || status === "converted-to-project";
-  return {
-    ...branch,
-    status,
-    loudness: reduceLoudnessAfterMerge(branch.loudness, merge.resultStatus),
-    lastDecisionOn: isoDate(now),
-    mergeIds: [...branch.mergeIds, merge.id],
-    mergeDate: closes ? isoDate(now) : branch.mergeDate,
-    storedQualities: dedupe([...branch.storedQualities, ...merge.reclaimedQualities]),
-    waitingContainerId: merge.waitingContainerId ?? branch.waitingContainerId,
-  };
+  return trackLoudness(
+    branch,
+    {
+      ...branch,
+      status,
+      loudness: reduceLoudnessAfterMerge(branch.loudness, merge.resultStatus),
+      lastDecisionOn: isoDate(now),
+      mergeIds: [...branch.mergeIds, merge.id],
+      mergeDate: closes ? isoDate(now) : branch.mergeDate,
+      storedQualities: dedupe([...branch.storedQualities, ...merge.reclaimedQualities]),
+      waitingContainerId: merge.waitingContainerId ?? branch.waitingContainerId,
+    },
+    now,
+  );
 }
 
 function dedupe(xs: string[]): string[] {

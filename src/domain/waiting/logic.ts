@@ -1,4 +1,5 @@
 import { newId } from "../ids";
+import { trackLoudness } from "../branches/logic";
 import type { PsychologicalBranch } from "../branches/types";
 import type { WaitingContainer } from "./types";
 
@@ -26,14 +27,18 @@ export function applyWaitingToBranch(
   container: WaitingContainer,
   now: Date = new Date(),
 ): PsychologicalBranch {
-  return {
-    ...branch,
-    status: "waiting-with-boundaries",
-    waitingContainerId: container.id,
-    loudness: Math.min(branch.loudness, 2) as PsychologicalBranch["loudness"],
-    lastDecisionOn: now.toISOString().slice(0, 10),
-    storedQualities: [...new Set([...branch.storedQualities, ...container.reclaimedNow])],
-  };
+  return trackLoudness(
+    branch,
+    {
+      ...branch,
+      status: "waiting-with-boundaries",
+      waitingContainerId: container.id,
+      loudness: Math.min(branch.loudness, 2) as PsychologicalBranch["loudness"],
+      lastDecisionOn: now.toISOString().slice(0, 10),
+      storedQualities: [...new Set([...branch.storedQualities, ...container.reclaimedNow])],
+    },
+    now,
+  );
 }
 
 export function isReviewDue(container: WaitingContainer, now: Date = new Date()): boolean {

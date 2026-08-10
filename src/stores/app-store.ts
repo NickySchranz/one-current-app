@@ -5,7 +5,12 @@ import type { ForkPeriodChoice, PsychologicalBranch, Loudness } from "@/domain/b
 import type { BranchMerge, MergeDraft } from "@/domain/merges/types";
 import type { IntegratedAction } from "@/domain/actions/types";
 import type { BranchCommit } from "@/domain/moments/types";
-import { createBranch, easeLoudness, type CreateBranchInput } from "@/domain/branches/logic";
+import {
+  createBranch,
+  easeLoudness,
+  trackLoudness,
+  type CreateBranchInput,
+} from "@/domain/branches/logic";
 import { advanceSkew, appNow, getSkewMs, setRate, setSkewMs } from "@/domain/time/clock";
 import { addMomentToBranch, createMoment, type CreateMomentInput } from "@/domain/moments/logic";
 import { detectRecurrence, recordRecurrence } from "@/domain/branches/recurrence";
@@ -380,7 +385,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({
       branches: s.branches.map((b) => {
         if (b.id !== id) return b;
-        next = { ...b, ...patch };
+        next = trackLoudness(b, { ...b, ...patch }, appNow());
         return next;
       }),
     }));
@@ -417,13 +422,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!branch) return;
     // What the line was holding until this decision — it returns for today.
     const freed = heldFeelings(branch);
-    const next: PsychologicalBranch = {
-      ...branch,
-      ...patch,
-      loudness: easeLoudness(branch.loudness),
-      lastDecisionOn: todayIso(),
-      lastActivatedAt: appNow().toISOString(),
-    };
+    const next: PsychologicalBranch = trackLoudness(
+      branch,
+      {
+        ...branch,
+        ...patch,
+        loudness: easeLoudness(branch.loudness),
+        lastDecisionOn: todayIso(),
+        lastActivatedAt: appNow().toISOString(),
+      },
+      appNow(),
+    );
     await repo.saveBranch(next);
     // "Nothing can be done" and a planned action are mutually exclusive:
     // leaving the line for today withdraws its open actions.
@@ -451,16 +460,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     const yesterday = new Date(appNow().getTime() - 24 * 60 * 60 * 1000)
       .toISOString()
       .slice(0, 10);
-    const next: PsychologicalBranch = {
-      ...recordRecurrence(branch),
-      status: "active",
-      mergeDate: undefined,
-      loudness: Math.max(2, branch.loudness) as Loudness,
-      // Reopening is a reactivation, not a decision: dated yesterday so the
-      // line holds its feelings again today without instantly drifting.
-      lastDecisionOn: yesterday,
-      leftOn: undefined,
-    };
+    const next: PsychologicalBranch = trackLoudness(
+      branch,
+      {
+        ...recordRecurrence(branch),
+        status: "active",
+        mergeDate: undefined,
+        loudness: Math.max(2, branch.loudness) as Loudness,
+        // Reopening is a reactivation, not a decision: dated yesterday so the
+        // line holds its feelings again today without instantly drifting.
+        lastDecisionOn: yesterday,
+        leftOn: undefined,
+      },
+      appNow(),
+    );
     await repo.saveBranch(next);
     set((s) => ({ branches: s.branches.map((b) => (b.id === branchId ? next : b)) }));
   },
@@ -560,14 +573,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!branch) return;
     const today = todayIso();
     const freed = heldFeelings(branch);
-    const next: PsychologicalBranch = {
-      ...branch,
-      status: "converted-to-project",
-      mergeDate: today,
-      loudness: 1,
-      lastDecisionOn: today,
-      leftOn: undefined,
-    };
+    const next: PsychologicalBranch = trackLoudness(
+      branch,
+      {
+        ...branch,
+        status: "converted-to-project",
+        mergeDate: today,
+        loudness: 1,
+        lastDecisionOn: today,
+        leftOn: undefined,
+      },
+      appNow(),
+    );
     // The work lives where your tasks live now: nothing left to do on it here.
     const openActions = get()
       .actions.filter(

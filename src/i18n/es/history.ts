@@ -181,4 +181,20 @@ export const history: Record<string, string> = {
   "Import failed.": "La importación falló.",
   About: "Acerca de",
   "What One Current is, and how it works": "Qué es One Current y cómo funciona",
+
+  // --- Share with a psychologist ---
+  "Share with a psychologist": "Compartir con un psicólogo",
+  "Choose which threads to share and since when. Only what you pick here leaves the app — as a file you hand over yourself.":
+    "Elige qué hilos compartir y desde cuándo. Solo lo que marques aquí sale de la app — como un archivo que tú mismo entregas.",
+  "Nothing to share yet — start a thread first.":
+    "Aún no hay nada que compartir — abre primero un hilo.",
+  "Which threads": "Qué hilos",
+  All: "Todos",
+  None: "Ninguno",
+  "Last week": "La última semana",
+  "Last month": "El último mes",
+  "Last 3 months": "Los últimos 3 meses",
+  "Since a date…": "Desde una fecha…",
+  "Create the file": "Crear el archivo",
+  "Share file contents": "Contenido del archivo compartido",
 };

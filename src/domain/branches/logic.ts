@@ -66,6 +66,7 @@ export function createBranch(input: CreateBranchInput, now: Date = new Date()): 
     forkDate,
     forkLabel,
     loudness: input.loudness ?? 3,
+    loudnessLog: [{ at: nowIso, loudness: input.loudness ?? 3 }],
     anxieties: input.anxieties,
     occupies: input.occupies,
     storedQualities: [],
@@ -101,6 +102,23 @@ export function branchEndDate(branch: PsychologicalBranch, now: Date = new Date(
 /** Any honest decision about a branch — acting, noting, or deliberately leaving it — loosens its loudness a little. */
 export function easeLoudness(loudness: Loudness): Loudness {
   return Math.max(1, loudness - 1) as Loudness;
+}
+
+/**
+ * Record on the branch's log that a mutation moved its loudness. Wrap every
+ * `next` branch built from `prev`: if the dial did not move, `next` passes
+ * through untouched.
+ */
+export function trackLoudness(
+  prev: PsychologicalBranch,
+  next: PsychologicalBranch,
+  now: Date = new Date(),
+): PsychologicalBranch {
+  if (next.loudness === prev.loudness) return next;
+  return {
+    ...next,
+    loudnessLog: [...(next.loudnessLog ?? []), { at: now.toISOString(), loudness: next.loudness }],
+  };
 }
 
 /**

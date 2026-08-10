@@ -40,6 +40,13 @@ export type Controllability =
 /** How loud a thread is, from 1 (quiet) to 5. Fractional values are fine — the slider moves in fine steps. */
 export type Loudness = number;
 
+/** One recorded change of a branch's loudness: what it became and when. */
+export type LoudnessLogEntry = {
+  /** ISO timestamp of the change. */
+  at: string;
+  loudness: Loudness;
+};
+
 export type PsychologicalBranch = {
   id: string;
   title: string;
@@ -67,6 +74,8 @@ export type PsychologicalBranch = {
   lastDecisionOn?: string;
   /** ISO date the loudness dial was last set by hand. Setting it re-anchors the daily drift: what you set is what is felt. */
   loudnessSetOn?: string;
+  /** Every change of the stored loudness, in order, starting with the creation value. Record only, shown nowhere yet. */
+  loudnessLog?: LoudnessLogEntry[];
   commits: BranchCommit[];
   mergeIds: string[];
   /** ISO date at which the branch merged back; set when status is merged/partly-integrated. */

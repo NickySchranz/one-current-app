@@ -15,6 +15,7 @@ import {
 } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
+import { ShareWithPsychologist } from "./ShareWithPsychologist";
 
 /** The little round split swatch (paper left, accent right) for a theme button. */
 function ThemeSwatch({ paper, accent }: { paper: string; accent: string }) {
@@ -360,6 +361,8 @@ export function SettingsSections() {
           <P style={{ marginTop: 8, marginBottom: 0 }}>{message}</P>
         )}
       </Card>
+
+      <ShareWithPsychologist />
     </>
   );
 }
