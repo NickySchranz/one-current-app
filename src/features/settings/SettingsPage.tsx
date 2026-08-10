@@ -247,7 +247,7 @@ export function SettingsSections() {
       <Card>
         <Hint>
           {t(
-            "See what a lived-in timeline looks like: nine example threads — drifting, resting, integrated — plus today's actions. You can delete them any time.",
+            "See what a lived-in timeline looks like: ten example threads — drifting, resting, integrated — plus today's actions. You can delete them any time.",
           )}
         </Hint>
         <Button

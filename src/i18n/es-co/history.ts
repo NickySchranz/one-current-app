@@ -153,8 +153,8 @@ export const history: Record<string, string> = {
   "Reduce motion (no line movement or pulsing)":
     "Reducir el movimiento (sin desplazamiento ni pulsos en las líneas)",
   Explore: "Explorar",
-  "See what a lived-in timeline looks like: nine example threads — drifting, resting, integrated — plus today's actions. You can delete them any time.":
-    "Mira cómo se ve una línea de tiempo vivida: nueve hilos de ejemplo — a la deriva, en reposo, integrados — más las acciones de hoy. Puedes borrarlos cuando quieras.",
+  "See what a lived-in timeline looks like: ten example threads — drifting, resting, integrated — plus today's actions. You can delete them any time.":
+    "Mira cómo se ve una línea de tiempo vivida: diez hilos de ejemplo — a la deriva, en reposo, integrados — más las acciones de hoy. Puedes borrarlos cuando quieras.",
   "Load example threads": "Cargar hilos de ejemplo",
   Testing: "Pruebas",
   "Let the app's clock run faster than real time and watch how threads grow louder when days pass without decisions. This only affects this session — reloading returns to real time.":
