@@ -649,6 +649,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await repo.saveBranches(data.branches);
     for (const m of data.merges) await repo.saveMerge(m);
     for (const a of data.actions) await repo.saveAction(a);
+    for (const w of data.waiting) await repo.saveWaiting(w);
     set((s) => ({
       branches: [...s.branches, ...data.branches],
       merges: [...s.merges, ...data.merges],
