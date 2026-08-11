@@ -21,7 +21,7 @@ export function MorePage() {
                 accessibilityRole="link"
                 style={{ color: tokens.accent, textDecorationLine: "underline" }}
                 onPress={() => {
-                  window.location.href = "about/index.html";
+                  window.open("https://nickyschranz.github.io/one-current/about/", "_blank");
                 }}
               >
                 {t("What One Current is, and how it works")}
