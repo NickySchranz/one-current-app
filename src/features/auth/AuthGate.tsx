@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ScrollView, View } from "react-native";
 import { useAppStore } from "@/stores/app-store";
+import { api, ApiHttpError, ApiOfflineError } from "@/api/client";
 import { Logo } from "@/features/navigation/Logo";
 import { useT } from "@/i18n/i18n";
 import { AppTextInput, Button, Card, H2, Hint, T } from "@/ui/primitives";
@@ -14,19 +15,23 @@ function looksLikeEmail(value: string): boolean {
 
 /**
  * The gate in front of the app: sign in, register, or ask for a password
- * reset. Dummy data for now — any valid-looking credentials are accepted
- * locally and no server is asked; a real backend replaces this later.
+ * reset. The API is asked first; when it cannot be reached the app falls
+ * back to a device-only session so it keeps working offline. A wrong
+ * password is a real error — never a fallback.
  */
 export function AuthGate() {
   const t = useT();
   const tk = useTheme();
   const signIn = useAppStore((s) => s.signIn);
+  const signInApi = useAppStore((s) => s.signInApi);
+  const registerApi = useAppStore((s) => s.registerApi);
 
   const [screen, setScreen] = useState<Screen>("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const [resetSent, setResetSent] = useState(false);
 
   const go = (next: Screen) => {
@@ -36,23 +41,62 @@ export function AuthGate() {
     setPassword("");
   };
 
-  function submitLogin() {
+  async function submitLogin() {
     if (!looksLikeEmail(email)) return setError(t("That does not look like an email address."));
     if (password.length < 4) return setError(t("The password needs at least 4 characters."));
-    signIn({ email: email.trim() });
+    setBusy(true);
+    setError("");
+    try {
+      await signInApi(email.trim(), password);
+    } catch (e) {
+      if (e instanceof ApiOfflineError) {
+        // The server is unreachable: the app still opens, on this device only.
+        signIn({ email: email.trim() });
+      } else if (e instanceof ApiHttpError && e.code === "rate_limited") {
+        setError(t("Too many attempts. Wait a moment and try again."));
+      } else {
+        setError(t("That email and password do not match."));
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function submitRegister() {
+  async function submitRegister() {
     if (name.trim() === "") return setError(t("What should we call you?"));
     if (!looksLikeEmail(email)) return setError(t("That does not look like an email address."));
     if (password.length < 4) return setError(t("The password needs at least 4 characters."));
-    signIn({ name: name.trim(), email: email.trim() });
+    setBusy(true);
+    setError("");
+    try {
+      await registerApi(email.trim(), password, name.trim());
+    } catch (e) {
+      if (e instanceof ApiOfflineError) {
+        signIn({ name: name.trim(), email: email.trim() });
+      } else if (e instanceof ApiHttpError && e.code === "email_taken") {
+        setError(t("An account with that email already exists."));
+      } else if (e instanceof ApiHttpError && e.code === "rate_limited") {
+        setError(t("Too many attempts. Wait a moment and try again."));
+      } else {
+        setError(t("The account could not be created."));
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function submitForgot() {
+  async function submitForgot() {
     if (!looksLikeEmail(email)) return setError(t("That does not look like an email address."));
     setError("");
-    setResetSent(true);
+    setBusy(true);
+    try {
+      await api.forgotPassword(email.trim());
+    } catch {
+      // Enumeration-safe on the server; offline shows the same calm answer.
+    } finally {
+      setBusy(false);
+      setResetSent(true);
+    }
   }
 
   const emailField = (
@@ -110,7 +154,13 @@ export function AuthGate() {
               {emailField}
               {passwordField}
               {error !== "" && <T style={{ color: tk.danger, fontSize: 13.6 }}>{error}</T>}
-              <Button variant="primary" large onPress={submitLogin} label={t("Sign in")} />
+              <Button
+                variant="primary"
+                large
+                disabled={busy}
+                onPress={() => void submitLogin()}
+                label={busy ? t("Signing in…") : t("Sign in")}
+              />
               <Button
                 variant="quiet"
                 onPress={() => go("forgot")}
@@ -140,7 +190,13 @@ export function AuthGate() {
               {emailField}
               {passwordField}
               {error !== "" && <T style={{ color: tk.danger, fontSize: 13.6 }}>{error}</T>}
-              <Button variant="primary" large onPress={submitRegister} label={t("Register")} />
+              <Button
+                variant="primary"
+                large
+                disabled={busy}
+                onPress={() => void submitRegister()}
+                label={busy ? t("One moment…") : t("Register")}
+              />
               <Button
                 variant="quiet"
                 onPress={() => go("login")}
@@ -176,7 +232,8 @@ export function AuthGate() {
                 <Button
                   variant="primary"
                   large
-                  onPress={submitForgot}
+                  disabled={busy}
+                  onPress={() => void submitForgot()}
                   label={t("Send the link")}
                 />
                 <Button variant="quiet" onPress={() => go("login")} label={t("Back to sign in")} />

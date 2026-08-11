@@ -138,7 +138,11 @@ await page.waitForTimeout(1800);
 check("session survives a reload", (await page.getByLabel("New thread").count()) > 0);
 check("gate stays open after reload", (await page.getByText("Welcome back").count()) === 0);
 
-const relevant = errors.filter((e) => !e.includes("useNativeDriver"));
+// With no API running, the gate's API-first attempt logs a connection
+// refusal before falling back to the device-only session — that is expected.
+const relevant = errors.filter(
+  (e) => !e.includes("useNativeDriver") && !e.includes("ERR_CONNECTION_REFUSED"),
+);
 check("no console errors", relevant.length === 0, relevant.join(" | "));
 
 await browser.close();

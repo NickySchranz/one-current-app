@@ -11,6 +11,10 @@ export const paywall: Record<string, string> = {
   "Creating a file for your psychologist comes with One Current Pro. Everything else about your data stays yours, on this device, either way.":
     "Crear un archivo para tu psicólogo viene con One Current Pro. Todo lo demás de tus datos sigue siendo tuyo, en este dispositivo, de cualquier manera.",
   "Upgrade — coming soon": "Mejorar — próximamente",
+  "Upgrade to Pro": "Mejorar a Pro",
+  "Upgrading…": "Mejorando…",
+  "The upgrade did not go through. Check your connection and try again.":
+    "La mejora no se completó. Revisa tu conexión y vuelve a intentarlo.",
   "Not now": "Ahora no",
   Close: "Cerrar",
   "Pro unlocked (testing)": "Pro desbloqueado (pruebas)",

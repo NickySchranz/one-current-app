@@ -19,6 +19,7 @@ import { completeAction, composeIntegratedAction } from "@/domain/actions/logic"
 import { heldFeelings } from "@/domain/feelings/logic";
 import { newId } from "@/domain/ids";
 import { repo } from "@/db/repository";
+import { api, loadTokens, ApiAuthError, type ApiUser } from "@/api/client";
 import { canCreateThread, isProTheme } from "@/domain/entitlements/logic";
 import { panWindow, weekWindow, type TimeWindow } from "@/visualization/zoom/time-scale";
 import { isThemeId, type ThemeId } from "@/visualization/theme";
@@ -92,6 +93,10 @@ type AppState = {
   theme: ThemeId;
   /** Pro entitlement. A local flag for now; a payment provider sets it later. */
   isPro: boolean;
+  /** Pro according to the server, or null when the server has not answered. */
+  serverPro: boolean | null;
+  /** Whether the API answered on the last contact; null before any attempt. */
+  apiOnline: boolean | null;
   /** Who is signed in, or null for the login gate. Dummy data for now. */
   authUser: AuthUser | null;
   /** UI language: every app term, never the user's own words. */
@@ -173,6 +178,12 @@ type AppState = {
   setPro(v: boolean): void;
   /** Store the session (login or register both land here). Dummy: no server is asked. */
   signIn(user: AuthUser): void;
+  /** Sign in against the API; throws ApiOfflineError / ApiAuthError / ApiHttpError. */
+  signInApi(email: string, password: string): Promise<void>;
+  /** Register against the API; throws like signInApi. */
+  registerApi(email: string, password: string, name?: string): Promise<void>;
+  /** Refresh plan/account facts from the server when tokens exist. Never throws. */
+  syncMe(): Promise<void>;
   signOut(): void;
   setLanguage(l: "en" | "es" | "es-CO"): void;
 
@@ -250,6 +261,26 @@ async function loadSettings(): Promise<{
   return { theme, language, reducedMotion, isPro, authUser };
 }
 
+/**
+ * Server plan facts arrived: derive the state patch, re-applying the stored
+ * theme choice when Pro turns on and stepping a Pro theme back when it turns
+ * off — the same rules loadSettings() and setPro() follow.
+ */
+async function planPatch(
+  serverPro: boolean | null,
+  s: { isPro: boolean; theme: ThemeId },
+): Promise<{ apiOnline: true; serverPro: boolean | null; theme: ThemeId }> {
+  const pro = serverPro ?? s.isPro;
+  let theme = s.theme;
+  if (pro) {
+    const saved = await AsyncStorage.getItem(THEME_KEY).catch(() => null);
+    if (saved && isThemeId(saved)) theme = saved;
+  } else if (isProTheme(s.theme)) {
+    theme = defaultTheme();
+  }
+  return { apiOnline: true, serverPro, theme };
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   ready: false,
   branches: [],
@@ -262,6 +293,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   reducedMotion: false,
   theme: defaultTheme(),
   isPro: false,
+  serverPro: null,
+  apiOnline: null,
   authUser: null,
   language: "en" as const,
   nowTick: appNow().getTime(),
@@ -285,6 +318,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       operation: draft
         ? { kind: "confirming-merge", branchIds: draft.branchIds }
         : { kind: "idle" },
+    });
+    // Only sessions that came through the API have tokens; refresh their
+    // server facts in the background. Local-only sessions stay offline.
+    void loadTokens().then((tokens) => {
+      if (tokens) void get().syncMe();
     });
   },
 
@@ -680,11 +718,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     set({ authUser: user });
   },
+  async signInApi(email, password) {
+    const user = await api.login(email, password);
+    get().signIn({ name: user.name, email: user.email });
+    set(await planPatch(user.plan === "pro", get()));
+  },
+  async registerApi(email, password, name) {
+    const user = await api.register(email, password, name);
+    get().signIn({ name: user.name, email: user.email });
+    set(await planPatch(user.plan === "pro", get()));
+  },
+  async syncMe() {
+    try {
+      const user: ApiUser = await api.me();
+      set(await planPatch(user.plan === "pro", get()));
+    } catch (e) {
+      if (e instanceof ApiAuthError) {
+        // The server answered but the session is dead: forget its facts.
+        set(await planPatch(null, get()));
+      } else {
+        // Offline keeps the last known facts until the server can speak again.
+        set({ apiOnline: false });
+      }
+    }
+  },
   signOut: () => {
     AsyncStorage.removeItem(AUTH_KEY).catch(() => {
       // storage may be unavailable; the session still ends now
     });
-    set({ authUser: null });
+    void api.logout();
+    set({ authUser: null, serverPro: null });
   },
   setPro: (isPro) => {
     AsyncStorage.setItem(PRO_KEY, isPro ? "1" : "0").catch(() => {
@@ -740,6 +803,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 }));
+
+/** Pro as enforced: the server's word when it has spoken, else the local testing flag. */
+export const selectEffectivePro = (s: { isPro: boolean; serverPro: boolean | null }): boolean =>
+  s.serverPro ?? s.isPro;
 
 export function matchesStatusFilter(
   b: PsychologicalBranch,

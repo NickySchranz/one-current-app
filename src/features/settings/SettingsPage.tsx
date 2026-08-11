@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Platform, Pressable, View } from "react-native";
-import { useAppStore } from "@/stores/app-store";
+import { selectEffectivePro, useAppStore } from "@/stores/app-store";
+import { api, ApiHttpError, ApiOfflineError, getApiUrl, hasTokens, setApiUrl } from "@/api/client";
 import { THEMES } from "@/visualization/theme";
 import { isProTheme, type PaywallReason } from "@/domain/entitlements/logic";
 import { PaywallPrompt } from "@/features/paywall/PaywallPrompt";
@@ -165,6 +166,9 @@ export function SettingsSections() {
   const resetTimeSkew = useAppStore((s) => s.resetTimeSkew);
   const isPro = useAppStore((s) => s.isPro);
   const setPro = useAppStore((s) => s.setPro);
+  const effectivePro = useAppStore(selectEffectivePro);
+  const apiOnline = useAppStore((s) => s.apiOnline);
+  const syncMe = useAppStore((s) => s.syncMe);
   const authUser = useAppStore((s) => s.authUser);
   const signOut = useAppStore((s) => s.signOut);
 
@@ -175,6 +179,54 @@ export function SettingsSections() {
   const [exportJson, setExportJson] = useState("");
   const [importText, setImportText] = useState("");
   const [importOpen, setImportOpen] = useState(false);
+  // Account & sync
+  const signedIn = hasTokens();
+  const [urlDraft, setUrlDraft] = useState("");
+  const [syncMsg, setSyncMsg] = useState("");
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [confirmingRestore, setConfirmingRestore] = useState(false);
+
+  useEffect(() => {
+    void getApiUrl().then(setUrlDraft);
+  }, []);
+
+  function syncError(e: unknown): string {
+    if (e instanceof ApiOfflineError) return t("The server could not be reached.");
+    if (e instanceof ApiHttpError && e.code === "pro_required")
+      return t("Cloud backup is part of Pro.");
+    if (e instanceof ApiHttpError && e.code === "no_backup")
+      return t("There is no backup on the server yet.");
+    return t("That did not work. Try again in a moment.");
+  }
+
+  async function uploadBackup() {
+    setSyncBusy(true);
+    setSyncMsg("");
+    try {
+      const json = await exportData();
+      await api.uploadBackup(json);
+      setSyncMsg(t("Backup uploaded."));
+    } catch (e) {
+      setSyncMsg(syncError(e));
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  async function restoreBackup() {
+    setSyncBusy(true);
+    setSyncMsg("");
+    try {
+      const doc = await api.downloadBackup();
+      await importData(JSON.stringify(doc));
+      setSyncMsg(t("Backup restored."));
+    } catch (e) {
+      setSyncMsg(syncError(e));
+    } finally {
+      setSyncBusy(false);
+      setConfirmingRestore(false);
+    }
+  }
 
   async function doExport() {
     const json = await exportData();
@@ -233,16 +285,98 @@ export function SettingsSections() {
           </T>
           <Button onPress={signOut} label={t("Sign out")} />
         </View>
+        {!signedIn && (
+          <Hint style={{ marginTop: 8, marginBottom: 0 }}>
+            {t("Offline — signed in on this device only.")}
+          </Hint>
+        )}
         <Hint style={{ marginTop: 8, marginBottom: 0 }}>
           {t("Signing out only closes the door — every thread stays on this device.")}
         </Hint>
+      </Card>
+
+      <H2>{t("Account & sync")}</H2>
+      <Card>
+        <Hint>
+          {t(
+            "Cloud backup keeps a copy of everything on your account so a new device can pick it up. Part of Pro.",
+          )}
+        </Hint>
+        {!signedIn ? (
+          <Hint style={{ marginBottom: 0 }}>
+            {t("Sign in while the server is reachable to use cloud backup.")}
+          </Hint>
+        ) : (
+          <>
+            <View style={rowStyles.filterRow}>
+              <Button
+                onPress={() => void uploadBackup()}
+                disabled={syncBusy || !effectivePro || apiOnline === false}
+                label={t("Upload backup")}
+              />
+              {!confirmingRestore ? (
+                <Button
+                  onPress={() => setConfirmingRestore(true)}
+                  disabled={syncBusy || !effectivePro || apiOnline === false}
+                  label={t("Restore backup")}
+                />
+              ) : (
+                <>
+                  <T style={{ flexShrink: 1 }}>
+                    {t("Bring the server copy onto this device? Matching threads are overwritten.")}
+                  </T>
+                  <Button
+                    variant="danger"
+                    onPress={() => void restoreBackup()}
+                    disabled={syncBusy}
+                    label={t("Yes, restore")}
+                  />
+                  <Button onPress={() => setConfirmingRestore(false)} label={t("Keep it")} />
+                </>
+              )}
+            </View>
+            {!effectivePro && (
+              <Hint style={{ marginTop: 8, marginBottom: 0 }}>
+                {t("Cloud backup is part of Pro.")}
+              </Hint>
+            )}
+            {apiOnline === false && (
+              <Hint style={{ marginTop: 8, marginBottom: 0 }}>
+                {t("The server could not be reached.")}
+              </Hint>
+            )}
+            {syncMsg !== "" && <P style={{ marginTop: 8, marginBottom: 0 }}>{syncMsg}</P>}
+          </>
+        )}
+        <View style={{ marginTop: 12, gap: 8 }}>
+          <Hint style={{ marginBottom: 0 }}>{t("Server address")}</Hint>
+          <View style={rowStyles.filterRow}>
+            <AppTextInput
+              value={urlDraft}
+              onChangeText={setUrlDraft}
+              placeholder="https://…"
+              accessibilityLabel={t("Server address")}
+              autoCapitalize="none"
+              style={{ flexGrow: 1, minWidth: 200 }}
+            />
+            <Button
+              onPress={() => {
+                void setApiUrl(urlDraft).then(() => {
+                  void syncMe();
+                  setSyncMsg(t("Server address saved."));
+                });
+              }}
+              label={t("Save")}
+            />
+          </View>
+        </View>
       </Card>
 
       <H2>{t("Appearance")}</H2>
       <Card>
         <View accessibilityLabel={t("Theme")} style={rowStyles.filterRow}>
           {THEMES.map((th) => {
-            const locked = isProTheme(th.id) && !isPro;
+            const locked = isProTheme(th.id) && !effectivePro;
             return (
               <ThemeButton
                 key={th.id}

@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Modal, Pressable, View } from "react-native";
-import { useAppStore } from "@/stores/app-store";
+import { selectEffectivePro, useAppStore } from "@/stores/app-store";
+import { api, hasTokens } from "@/api/client";
 import {
   FREE_OPEN_THREAD_LIMIT,
   canCreateThread,
@@ -13,7 +15,7 @@ import { alpha } from "@/ui/color";
 /** May another thread open right now? Shared by every create/reopen entry point. */
 export function useThreadGate(): boolean {
   const branches = useAppStore((s) => s.branches);
-  const isPro = useAppStore((s) => s.isPro);
+  const isPro = useAppStore(selectEffectivePro);
   const draftBranchId = useAppStore((s) => s.draftBranchId);
   return canCreateThread(branches, isPro, draftBranchId);
 }
@@ -35,8 +37,9 @@ const COPY: Record<PaywallReason, { title: string; body: string }> = {
 
 /**
  * The upgrade prompt: a small centered sheet over everything, shown when a
- * locked feature is touched. Payments are not wired yet, so the upgrade
- * button only announces itself; the testing unlock lives in Settings.
+ * locked feature is touched. Signed-in accounts go through the (stub)
+ * checkout; without a server session the button only announces itself and
+ * the testing unlock in Settings stands in.
  */
 export function PaywallPrompt({
   reason,
@@ -47,6 +50,32 @@ export function PaywallPrompt({
 }) {
   const t = useT();
   const tk = useTheme();
+  const syncMe = useAppStore((s) => s.syncMe);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const canUpgrade = hasTokens();
+
+  async function upgrade() {
+    setBusy(true);
+    setError("");
+    try {
+      const checkout = await api.checkout();
+      if (checkout.mode === "stub") {
+        // No Stripe keys on the server yet: the stub completes immediately.
+        await api.completeStubCheckout(checkout.sessionId);
+      } else if (typeof window !== "undefined") {
+        window.location.assign(checkout.url);
+        return;
+      }
+      await syncMe();
+      onClose();
+    } catch {
+      setError(t("The upgrade did not go through. Check your connection and try again."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!reason) return null;
   const copy = COPY[reason];
   return (
@@ -80,13 +109,23 @@ export function PaywallPrompt({
         >
           <H2 style={{ marginTop: 0 }}>{t(copy.title)}</H2>
           <Hint>{t(copy.body, { n: FREE_OPEN_THREAD_LIMIT })}</Hint>
+          {error !== "" && <Hint style={{ color: tk.danger }}>{error}</Hint>}
           <View style={rowStyles.filterRow}>
-            <Button
-              variant="primary"
-              disabled
-              label={t("Upgrade — coming soon")}
-              accessibilityLabel={t("Upgrade — coming soon")}
-            />
+            {canUpgrade ? (
+              <Button
+                variant="primary"
+                disabled={busy}
+                onPress={() => void upgrade()}
+                label={busy ? t("Upgrading…") : t("Upgrade to Pro")}
+              />
+            ) : (
+              <Button
+                variant="primary"
+                disabled
+                label={t("Upgrade — coming soon")}
+                accessibilityLabel={t("Upgrade — coming soon")}
+              />
+            )}
             <Button onPress={onClose} label={t("Not now")} />
           </View>
         </Pressable>

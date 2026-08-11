@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Platform, View } from "react-native";
-import { useAppStore } from "@/stores/app-store";
+import { selectEffectivePro, useAppStore } from "@/stores/app-store";
+import { api, ApiOfflineError, hasTokens } from "@/api/client";
 import { db } from "@/db/database";
 import { appNow } from "@/domain/time/clock";
 import { buildShareExport } from "@/domain/share/build-share-export";
@@ -30,7 +31,7 @@ export function ShareWithPsychologist() {
   const actions = useAppStore((s) => s.actions);
   const merges = useAppStore((s) => s.merges);
   const draftBranchId = useAppStore((s) => s.draftBranchId);
-  const isPro = useAppStore((s) => s.isPro);
+  const isPro = useAppStore(selectEffectivePro);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [since, setSince] = useState<SinceChoice>("month");
@@ -38,6 +39,10 @@ export function ShareWithPsychologist() {
   const [paywalled, setPaywalled] = useState(false);
   // Native fallback: no downloads there, so the file shows as copyable text.
   const [shareJson, setShareJson] = useState("");
+  // Upload-and-code path (needs a server session).
+  const [shareCode, setShareCode] = useState("");
+  const [shareCodeErr, setShareCodeErr] = useState("");
+  const [uploading, setUploading] = useState(false);
 
   const candidates = branches.filter((b) => b.id !== draftBranchId && b.title.trim() !== "");
 
@@ -83,6 +88,34 @@ export function ShareWithPsychologist() {
       return;
     }
     setShareJson(json);
+  }
+
+  async function uploadForCode() {
+    setUploading(true);
+    setShareCode("");
+    setShareCodeErr("");
+    try {
+      const waiting = await db.waiting.toArray();
+      const share = buildShareExport({
+        branches,
+        actions,
+        merges,
+        waiting,
+        selectedIds: [...selected],
+        from,
+        now: appNow(),
+      });
+      const res = await api.createShare(share);
+      setShareCode(res.code);
+    } catch (e) {
+      setShareCodeErr(
+        e instanceof ApiOfflineError
+          ? t("The server could not be reached.")
+          : t("The code could not be created. Try again in a moment."),
+      );
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
@@ -176,6 +209,13 @@ export function ShareWithPsychologist() {
                 disabled={selected.size === 0 || !fromValid}
                 label={t("Create the file")}
               />
+              {hasTokens() && (
+                <Button
+                  onPress={isPro ? () => void uploadForCode() : () => setPaywalled(true)}
+                  disabled={selected.size === 0 || !fromValid || uploading}
+                  label={uploading ? t("Uploading…") : t("Upload and get a code")}
+                />
+              )}
               {selected.size > 0 && (
                 <T style={{ flexShrink: 1 }}>
                   {selected.size === 1
@@ -184,6 +224,19 @@ export function ShareWithPsychologist() {
                 </T>
               )}
             </View>
+            {shareCode !== "" && (
+              <View style={{ marginTop: 10, gap: 4 }}>
+                <T style={{ fontSize: 21, fontWeight: "700", letterSpacing: 2 }}>
+                  {shareCode}
+                </T>
+                <Hint style={{ marginBottom: 0 }}>
+                  {t("Give this code to your psychologist. It works once and expires in 14 days.")}
+                </Hint>
+              </View>
+            )}
+            {shareCodeErr !== "" && (
+              <T style={{ marginTop: 8, color: tk.danger, fontSize: 13.6 }}>{shareCodeErr}</T>
+            )}
             {shareJson !== "" && Platform.OS !== "web" && (
               <AppTextInput
                 multiline

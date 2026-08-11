@@ -42,9 +42,11 @@ async function drive(url, tag) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  // The login gate: seed a session so the checks land straight in the app.
+  // The login gate: seed a session so the checks land straight in the app,
+  // and the testing Pro unlock so the creature-theme sweep is not paywalled.
 await page.addInitScript(() => {
   localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+  localStorage.setItem("one-current-pro", "1");
 });
 await page.goto(url, { waitUntil: "networkidle" });
   await page.waitForTimeout(1800);
