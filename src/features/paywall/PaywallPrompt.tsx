@@ -1,0 +1,96 @@
+import { Modal, Pressable, View } from "react-native";
+import { useAppStore } from "@/stores/app-store";
+import {
+  FREE_OPEN_THREAD_LIMIT,
+  canCreateThread,
+  type PaywallReason,
+} from "@/domain/entitlements/logic";
+import { useT } from "@/i18n/i18n";
+import { Button, H2, Hint, rowStyles } from "@/ui/primitives";
+import { useTheme } from "@/ui/theme";
+import { alpha } from "@/ui/color";
+
+/** May another thread open right now? Shared by every create/reopen entry point. */
+export function useThreadGate(): boolean {
+  const branches = useAppStore((s) => s.branches);
+  const isPro = useAppStore((s) => s.isPro);
+  const draftBranchId = useAppStore((s) => s.draftBranchId);
+  return canCreateThread(branches, isPro, draftBranchId);
+}
+
+const COPY: Record<PaywallReason, { title: string; body: string }> = {
+  themes: {
+    title: "This look is part of Pro",
+    body: "The five plain looks are always free. The creature themes — where every open thread becomes a small companion — come with One Current Pro.",
+  },
+  "thread-limit": {
+    title: "Ten threads is the free current",
+    body: "The free plan holds {n} open threads at a time. Integrate or close one to make room — or let One Current Pro carry as many as your days do.",
+  },
+  share: {
+    title: "Sharing is part of Pro",
+    body: "Creating a file for your psychologist comes with One Current Pro. Everything else about your data stays yours, on this device, either way.",
+  },
+};
+
+/**
+ * The upgrade prompt: a small centered sheet over everything, shown when a
+ * locked feature is touched. Payments are not wired yet, so the upgrade
+ * button only announces itself; the testing unlock lives in Settings.
+ */
+export function PaywallPrompt({
+  reason,
+  onClose,
+}: {
+  reason: PaywallReason | null;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const tk = useTheme();
+  if (!reason) return null;
+  const copy = COPY[reason];
+  return (
+    <Modal transparent visible animationType="fade" onRequestClose={onClose}>
+      <Pressable
+        accessibilityLabel={t("Close")}
+        onPress={onClose}
+        style={{
+          flex: 1,
+          backgroundColor: alpha(tk.bg, 0.35),
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 24,
+        }}
+      >
+        {/* Stop backdrop presses from passing through the card. */}
+        <Pressable
+          accessibilityViewIsModal
+          onPress={() => undefined}
+          style={{
+            width: "100%",
+            maxWidth: 420,
+            backgroundColor: tk.bgRaised,
+            borderWidth: 1,
+            borderColor: alpha(tk.lineAxis, 0.55),
+            borderRadius: tk.radiusLg,
+            paddingVertical: 16,
+            paddingHorizontal: 17.5,
+            cursor: "auto",
+          }}
+        >
+          <H2 style={{ marginTop: 0 }}>{t(copy.title)}</H2>
+          <Hint>{t(copy.body, { n: FREE_OPEN_THREAD_LIMIT })}</Hint>
+          <View style={rowStyles.filterRow}>
+            <Button
+              variant="primary"
+              disabled
+              label={t("Upgrade — coming soon")}
+              accessibilityLabel={t("Upgrade — coming soon")}
+            />
+            <Button onPress={onClose} label={t("Not now")} />
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}

@@ -4,6 +4,8 @@ import { timeline } from "./timeline";
 import { quick } from "./quick";
 import { inspection } from "./inspection";
 import { history } from "./history";
+import { paywall } from "./paywall";
+import { auth } from "./auth";
 
 /**
  * Spanish app copy, keyed by the English source strings.
@@ -16,4 +18,6 @@ export const es: Record<string, string> = {
   ...quick,
   ...inspection,
   ...history,
+  ...paywall,
+  ...auth,
 };

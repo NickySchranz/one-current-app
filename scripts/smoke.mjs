@@ -40,7 +40,11 @@ async function shot(width, height, name, actions) {
       errors.push(`[${name}][${m.type()}] ${m.text()}`);
   });
   page.on("pageerror", (e) => errors.push(`[${name}][pageerror] ${e.message}`));
-  await page.goto("http://localhost:4173/", { waitUntil: "networkidle" });
+  // The login gate: seed a session so the checks land straight in the app.
+await page.addInitScript(() => {
+  localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+});
+await page.goto("http://localhost:4173/", { waitUntil: "networkidle" });
   await page.waitForTimeout(1800);
   if (actions) await actions(page);
   await page.screenshot({ path: `/tmp/smoke-${name}.png` });

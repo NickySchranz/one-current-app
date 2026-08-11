@@ -19,6 +19,7 @@ import { completeAction, composeIntegratedAction } from "@/domain/actions/logic"
 import { heldFeelings } from "@/domain/feelings/logic";
 import { newId } from "@/domain/ids";
 import { repo } from "@/db/repository";
+import { canCreateThread, isProTheme } from "@/domain/entitlements/logic";
 import { panWindow, weekWindow, type TimeWindow } from "@/visualization/zoom/time-scale";
 import { isThemeId, type ThemeId } from "@/visualization/theme";
 
@@ -70,6 +71,9 @@ export function operationDepth(op: TimelineOperation): "none" | "quick" | "focus
 
 export type StatusFilter = "all" | "active" | "merged" | "recurring";
 
+/** The signed-in account. Dummy for now: held locally, no server behind it. */
+export type AuthUser = { name?: string; email: string };
+
 /** A decision just released these feelings back to the main line (drives the timeline animation). */
 export type ReclaimEvent = { key: number; branchId: string; feelings: string[] };
 
@@ -86,6 +90,10 @@ type AppState = {
   statusFilter: StatusFilter;
   reducedMotion: boolean;
   theme: ThemeId;
+  /** Pro entitlement. A local flag for now; a payment provider sets it later. */
+  isPro: boolean;
+  /** Who is signed in, or null for the login gate. Dummy data for now. */
+  authUser: AuthUser | null;
   /** UI language: every app term, never the user's own words. */
   language: "en" | "es" | "es-CO";
   reclaim?: ReclaimEvent;
@@ -161,6 +169,11 @@ type AppState = {
   setStatusFilter(f: StatusFilter): void;
   setReducedMotion(v: boolean): void;
   setTheme(t: ThemeId): void;
+  /** Flip the Pro entitlement (testing unlock for now). Turning it off steps an active Pro theme back to the default. */
+  setPro(v: boolean): void;
+  /** Store the session (login or register both land here). Dummy: no server is asked. */
+  signIn(user: AuthUser): void;
+  signOut(): void;
   setLanguage(l: "en" | "es" | "es-CO"): void;
 
   exportData(): Promise<string>;
@@ -181,6 +194,20 @@ function nowView(current: View): View {
 
 const LANGUAGE_KEY = "one-current-language";
 const THEME_KEY = "one-current-theme";
+const PRO_KEY = "one-current-pro";
+const AUTH_KEY = "one-current-auth";
+
+function parseAuthUser(raw: string | null): AuthUser | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (v && typeof v === "object" && typeof (v as AuthUser).email === "string")
+      return v as AuthUser;
+  } catch {
+    // a broken session simply signs out
+  }
+  return null;
+}
 
 function defaultTheme(): ThemeId {
   return Appearance.getColorScheme() === "dark" ? "duskwood" : "riverbed";
@@ -192,24 +219,35 @@ async function loadSettings(): Promise<{
   theme: ThemeId;
   language: "en" | "es" | "es-CO";
   reducedMotion: boolean;
+  isPro: boolean;
+  authUser: AuthUser | null;
 }> {
   let theme = defaultTheme();
   let language: "en" | "es" | "es-CO" = "en";
   let reducedMotion = false;
+  let isPro = false;
+  let authUser: AuthUser | null = null;
   try {
-    const [savedTheme, savedLanguage, reduceMotion] = await Promise.all([
+    const [savedTheme, savedLanguage, savedPro, savedAuth, reduceMotion] = await Promise.all([
       AsyncStorage.getItem(THEME_KEY),
       AsyncStorage.getItem(LANGUAGE_KEY),
+      AsyncStorage.getItem(PRO_KEY),
+      AsyncStorage.getItem(AUTH_KEY),
       AccessibilityInfo.isReduceMotionEnabled(),
     ]);
-    if (savedTheme && isThemeId(savedTheme)) theme = savedTheme;
+    isPro = savedPro === "1";
+    authUser = parseAuthUser(savedAuth);
+    // A saved Pro theme without Pro falls back for now; the stored choice
+    // stays put, so unlocking again restores it on the next launch.
+    if (savedTheme && isThemeId(savedTheme) && (isPro || !isProTheme(savedTheme)))
+      theme = savedTheme;
     if (savedLanguage === "es" || savedLanguage === "es-CO" || savedLanguage === "en")
       language = savedLanguage;
     reducedMotion = reduceMotion;
   } catch {
     // storage unavailable; defaults apply
   }
-  return { theme, language, reducedMotion };
+  return { theme, language, reducedMotion, isPro, authUser };
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -223,6 +261,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   statusFilter: "all",
   reducedMotion: false,
   theme: defaultTheme(),
+  isPro: false,
+  authUser: null,
   language: "en" as const,
   nowTick: appNow().getTime(),
   timeSkewMs: 0,
@@ -359,6 +399,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async createBranchNow(input) {
     const draftId = get().draftBranchId;
+    // Backstop only: every entry point checks this before opening the form.
+    if (!canCreateThread(get().branches, get().isPro, draftId))
+      throw new Error("Free plan holds ten open threads at a time.");
     const branch = createBranch(input, appNow());
     // The optimistic line becomes the real one: same id, so the line the user
     // has been watching (and its colour) simply stays — and its id remains in
@@ -630,6 +673,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       // storage may be unavailable; the choice still applies now
     });
     set({ language });
+  },
+  signIn: (user) => {
+    AsyncStorage.setItem(AUTH_KEY, JSON.stringify(user)).catch(() => {
+      // storage may be unavailable; the session still applies now
+    });
+    set({ authUser: user });
+  },
+  signOut: () => {
+    AsyncStorage.removeItem(AUTH_KEY).catch(() => {
+      // storage may be unavailable; the session still ends now
+    });
+    set({ authUser: null });
+  },
+  setPro: (isPro) => {
+    AsyncStorage.setItem(PRO_KEY, isPro ? "1" : "0").catch(() => {
+      // storage may be unavailable; the choice still applies now
+    });
+    set((s) => ({
+      isPro,
+      // Losing Pro steps an active Pro theme back to the default — in memory
+      // only, so the stored choice returns when Pro does.
+      theme: !isPro && isProTheme(s.theme) ? defaultTheme() : s.theme,
+    }));
   },
 
   exportData: () => repo.exportAll(),

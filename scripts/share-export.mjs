@@ -38,6 +38,7 @@ page.on("console", (m) => {
 // Capture the blob download: page.on("download") is flaky with blob anchors in
 // the headless shell, so the anchor's click fetches its own href instead.
 await page.addInitScript(() => {
+  localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
   const original = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function () {
     if (this.download) {
@@ -69,6 +70,9 @@ await page.waitForTimeout(900);
 // Loading examples navigates back to Now — return to More for the share section.
 await page.getByRole("button", { name: "More" }).first().click();
 await page.waitForTimeout(600);
+// Sharing is a Pro feature now: flip the testing unlock first.
+await page.getByRole("checkbox", { name: "Pro unlocked (testing)" }).click();
+await page.waitForTimeout(300);
 const allBranches = await page.evaluate(() =>
   JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]").map((b) => ({
     id: b.id,

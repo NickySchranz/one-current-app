@@ -41,7 +41,11 @@ async function newPage(opts = {}) {
   return page;
 }
 async function loadExamples(page) {
-  await page.goto("http://localhost:4173/", { waitUntil: "networkidle" });
+  // The login gate: seed a session so the checks land straight in the app.
+await page.addInitScript(() => {
+  localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+});
+await page.goto("http://localhost:4173/", { waitUntil: "networkidle" });
   await page.waitForTimeout(1500);
   await page.getByRole("button", { name: "More" }).first().click();
   await page.waitForTimeout(500);

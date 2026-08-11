@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Pressable,
   View,
@@ -7,6 +8,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppStore, type View as AppView } from "@/stores/app-store";
+import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
 import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
@@ -42,6 +44,8 @@ export function PrimaryNavigation({ variant }: { variant: "header" | "bottom" })
   const t = useT();
   const tk = useTheme();
   const insets = useSafeAreaInsets();
+  const canOpenThread = useThreadGate();
+  const [paywalled, setPaywalled] = useState(false);
 
   const tab = (
     id: string,
@@ -141,7 +145,9 @@ export function PrimaryNavigation({ variant }: { variant: "header" | "bottom" })
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={t("New thread")}
-        onPress={() => setOperation({ kind: "creating-branch" })}
+        onPress={() =>
+          canOpenThread ? setOperation({ kind: "creating-branch" }) : setPaywalled(true)
+        }
         style={({ pressed }) => ({
           width: 50,
           height: 50,
@@ -158,6 +164,10 @@ export function PrimaryNavigation({ variant }: { variant: "header" | "bottom" })
       </Pressable>
       {historyTab}
       {moreTab}
+      <PaywallPrompt
+        reason={paywalled ? "thread-limit" : null}
+        onClose={() => setPaywalled(false)}
+      />
     </View>
   );
 }

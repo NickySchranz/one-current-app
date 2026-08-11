@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Platform, Pressable, View } from "react-native";
 import { useAppStore } from "@/stores/app-store";
 import { THEMES } from "@/visualization/theme";
+import { isProTheme, type PaywallReason } from "@/domain/entitlements/logic";
+import { PaywallPrompt } from "@/features/paywall/PaywallPrompt";
 import { useT } from "@/i18n/i18n";
 import {
   AppTextInput,
@@ -46,12 +48,17 @@ function ThemeButton({
   paper,
   accent,
   selected,
+  locked = false,
+  lockedLabel,
   onPress,
 }: {
   label: string;
   paper: string;
   accent: string;
   selected: boolean;
+  /** A Pro theme without Pro: still visible, but pressing it asks to upgrade. */
+  locked?: boolean;
+  lockedLabel?: string;
   onPress: () => void;
 }) {
   const t = useTheme();
@@ -59,6 +66,7 @@ function ThemeButton({
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected }}
+      accessibilityLabel={locked && lockedLabel ? `${label} — ${lockedLabel}` : label}
       onPress={onPress}
       style={(s) => [
         {
@@ -81,6 +89,22 @@ function ThemeButton({
     >
       <ThemeSwatch paper={paper} accent={accent} />
       <T style={{ fontSize: 13.6, color: selected ? t.ink : t.inkSoft }}>{label}</T>
+      {locked && (
+        <T
+          style={{
+            fontSize: 10.5,
+            lineHeight: 14,
+            color: t.inkSoft,
+            borderWidth: 1,
+            borderColor: alpha(t.lineAxis, 0.55),
+            borderRadius: 999,
+            paddingHorizontal: 6,
+            overflow: "hidden",
+          }}
+        >
+          {lockedLabel}
+        </T>
+      )}
     </Pressable>
   );
 }
@@ -139,7 +163,12 @@ export function SettingsSections() {
   const timeRate = useAppStore((s) => s.timeRate);
   const setTimeRate = useAppStore((s) => s.setTimeRate);
   const resetTimeSkew = useAppStore((s) => s.resetTimeSkew);
+  const isPro = useAppStore((s) => s.isPro);
+  const setPro = useAppStore((s) => s.setPro);
+  const authUser = useAppStore((s) => s.authUser);
+  const signOut = useAppStore((s) => s.signOut);
 
+  const [paywall, setPaywall] = useState<PaywallReason | null>(null);
   const [message, setMessage] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   // Native fallbacks for the file-based export/import that the web build uses.
@@ -191,19 +220,42 @@ export function SettingsSections() {
 
   return (
     <>
+      <H2>{t("Account")}</H2>
+      <Card>
+        <View style={rowStyles.filterRow}>
+          <T style={{ flexShrink: 1 }}>
+            {authUser?.name
+              ? t("Signed in as {name} ({email})", {
+                  name: authUser.name,
+                  email: authUser.email,
+                })
+              : t("Signed in as {email}", { email: authUser?.email ?? "" })}
+          </T>
+          <Button onPress={signOut} label={t("Sign out")} />
+        </View>
+        <Hint style={{ marginTop: 8, marginBottom: 0 }}>
+          {t("Signing out only closes the door — every thread stays on this device.")}
+        </Hint>
+      </Card>
+
       <H2>{t("Appearance")}</H2>
       <Card>
         <View accessibilityLabel={t("Theme")} style={rowStyles.filterRow}>
-          {THEMES.map((th) => (
-            <ThemeButton
-              key={th.id}
-              label={t(th.name)}
-              paper={th.paper}
-              accent={th.accent}
-              selected={theme === th.id}
-              onPress={() => setTheme(th.id)}
-            />
-          ))}
+          {THEMES.map((th) => {
+            const locked = isProTheme(th.id) && !isPro;
+            return (
+              <ThemeButton
+                key={th.id}
+                label={t(th.name)}
+                paper={th.paper}
+                accent={th.accent}
+                selected={theme === th.id}
+                locked={locked}
+                lockedLabel={t("Pro")}
+                onPress={() => (locked ? setPaywall("themes") : setTheme(th.id))}
+              />
+            );
+          })}
         </View>
         <Hint style={{ marginTop: 8, marginBottom: 0 }}>
           {t(THEMES.find((th) => th.id === theme)?.hint ?? "")}
@@ -287,6 +339,14 @@ export function SettingsSections() {
             <Button onPress={resetTimeSkew} label={t("Back to real time")} />
           </View>
         )}
+        {/* Payments are not wired yet: this stands in for a real purchase. */}
+        <View style={{ marginTop: 12 }}>
+          <CheckboxRow
+            label={t("Pro unlocked (testing)")}
+            checked={isPro}
+            onChange={setPro}
+          />
+        </View>
       </Card>
 
       <H2>{t("Privacy")}</H2>
@@ -363,6 +423,8 @@ export function SettingsSections() {
       </Card>
 
       <ShareWithPsychologist />
+
+      <PaywallPrompt reason={paywall} onClose={() => setPaywall(null)} />
     </>
   );
 }

@@ -42,7 +42,11 @@ async function drive(url, tag) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto(url, { waitUntil: "networkidle" });
+  // The login gate: seed a session so the checks land straight in the app.
+await page.addInitScript(() => {
+  localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+});
+await page.goto(url, { waitUntil: "networkidle" });
   await page.waitForTimeout(1800);
 
   // load the example threads from More

@@ -4,8 +4,11 @@ import { useAppStore } from "@/stores/app-store";
 import { db } from "@/db/database";
 import { appNow } from "@/domain/time/clock";
 import { buildShareExport } from "@/domain/share/build-share-export";
+import { PaywallPrompt } from "@/features/paywall/PaywallPrompt";
 import { useT } from "@/i18n/i18n";
 import { AppTextInput, Button, Card, Chip, H2, Hint, T, rowStyles } from "@/ui/primitives";
+import { useTheme } from "@/ui/theme";
+import { alpha } from "@/ui/color";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -22,14 +25,17 @@ type SinceChoice = "week" | "month" | "3months" | "custom";
  */
 export function ShareWithPsychologist() {
   const t = useT();
+  const tk = useTheme();
   const branches = useAppStore((s) => s.branches);
   const actions = useAppStore((s) => s.actions);
   const merges = useAppStore((s) => s.merges);
   const draftBranchId = useAppStore((s) => s.draftBranchId);
+  const isPro = useAppStore((s) => s.isPro);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [since, setSince] = useState<SinceChoice>("month");
   const [customDate, setCustomDate] = useState("");
+  const [paywalled, setPaywalled] = useState(false);
   // Native fallback: no downloads there, so the file shows as copyable text.
   const [shareJson, setShareJson] = useState("");
 
@@ -81,7 +87,25 @@ export function ShareWithPsychologist() {
 
   return (
     <>
-      <H2>{t("Share with a psychologist")}</H2>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <H2>{t("Share with a psychologist")}</H2>
+        {!isPro && (
+          <T
+            style={{
+              fontSize: 10.5,
+              lineHeight: 14,
+              color: tk.inkSoft,
+              borderWidth: 1,
+              borderColor: alpha(tk.lineAxis, 0.55),
+              borderRadius: 999,
+              paddingHorizontal: 6,
+              overflow: "hidden",
+            }}
+          >
+            {t("Pro")}
+          </T>
+        )}
+      </View>
       <Card>
         <Hint>
           {t(
@@ -148,7 +172,7 @@ export function ShareWithPsychologist() {
             <View style={[rowStyles.filterRow, { marginTop: 10 }]}>
               <Button
                 variant="primary"
-                onPress={createFile}
+                onPress={isPro ? createFile : () => setPaywalled(true)}
                 disabled={selected.size === 0 || !fromValid}
                 label={t("Create the file")}
               />
@@ -173,6 +197,10 @@ export function ShareWithPsychologist() {
           </>
         )}
       </Card>
+      <PaywallPrompt
+        reason={paywalled ? "share" : null}
+        onClose={() => setPaywalled(false)}
+      />
     </>
   );
 }

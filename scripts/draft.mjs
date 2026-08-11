@@ -34,6 +34,10 @@ const errors = [];
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 page.on("pageerror", (e) => errors.push(e.message));
+// The login gate: seed a session so the checks land straight in the app.
+await page.addInitScript(() => {
+  localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+});
 await page.goto("http://localhost:4175/", { waitUntil: "networkidle" });
 await page.waitForTimeout(1500);
 

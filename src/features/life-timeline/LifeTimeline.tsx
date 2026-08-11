@@ -28,6 +28,7 @@ import { effectiveLoudness, isClosed, mostActivated } from "@/domain/branches/lo
 import { decidedToday } from "@/domain/feelings/logic";
 import type { PsychologicalBranch, Loudness } from "@/domain/branches/types";
 import { BranchLine } from "./BranchLine";
+import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
 import { TimelineHelp } from "@/features/timeline-help/TimelineHelp";
 import { WholenessIndicator } from "./WholenessIndicator";
 import { branchColor } from "@/visualization/branch-lines/style";
@@ -109,6 +110,8 @@ export function LifeTimeline() {
   const operation = useAppStore((s) => s.operation);
   const reclaim = useAppStore((s) => s.reclaim);
   const clearReclaim = useAppStore((s) => s.clearReclaim);
+  const canOpenThread = useThreadGate();
+  const [paywalled, setPaywalled] = useState(false);
   const born = useAppStore((s) => s.born);
   const clearBorn = useAppStore((s) => s.clearBorn);
   const reducedMotion = useAppStore((s) => s.reducedMotion);
@@ -740,7 +743,9 @@ export function LifeTimeline() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("New thread")}
-          onPress={() => setOperation({ kind: "creating-branch" })}
+          onPress={() =>
+            canOpenThread ? setOperation({ kind: "creating-branch" }) : setPaywalled(true)
+          }
           style={({ pressed, hovered }: PressableStateCallbackType & {
             hovered?: boolean;
           }) => [
@@ -764,6 +769,11 @@ export function LifeTimeline() {
           <T style={{ color: tk.accentInk, fontSize: 24, lineHeight: 28 }}>+</T>
         </Pressable>
         )}
+
+        <PaywallPrompt
+          reason={paywalled ? "thread-limit" : null}
+          onClose={() => setPaywalled(false)}
+        />
 
         <TimelineHelp />
         {/* how split the present is: strands fan out per undecided line and

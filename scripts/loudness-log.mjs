@@ -24,6 +24,10 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
 const errors = [];
 page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+// The login gate: seed a session so the checks land straight in the app.
+await page.addInitScript(() => {
+  localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+});
 await page.goto("http://localhost:4178/");
 await page.waitForTimeout(1800);
 

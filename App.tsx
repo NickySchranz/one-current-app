@@ -10,12 +10,14 @@ import { OperationTray } from "@/features/timeline-shell/OperationTray";
 import { HistoryView } from "@/features/history/HistoryView";
 import { MergeReview } from "@/features/history/MergeReview";
 import { MorePage } from "@/features/more/MorePage";
+import { AuthGate } from "@/features/auth/AuthGate";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
 import { T } from "@/ui/primitives";
 
 function AppShell() {
   const ready = useAppStore((s) => s.ready);
+  const authUser = useAppStore((s) => s.authUser);
   const view = useAppStore((s) => s.view);
   const init = useAppStore((s) => s.init);
   const refreshNow = useAppStore((s) => s.refreshNow);
@@ -44,6 +46,15 @@ function AppShell() {
 
   if (!ready) {
     return <View accessibilityState={{ busy: true }} style={{ flex: 1, backgroundColor: tk.bg }} />;
+  }
+
+  if (!authUser) {
+    return (
+      <View style={{ flex: 1, backgroundColor: tk.bg }}>
+        <StatusBar style={tk.mode === "dark" ? "light" : "dark"} />
+        <AuthGate />
+      </View>
+    );
   }
 
   return (
