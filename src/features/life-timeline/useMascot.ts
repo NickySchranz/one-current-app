@@ -286,9 +286,12 @@ export function useMascot(
     const id = inspectedId.current;
     if (!id) return;
 
-    // If the inspected branch is now closed, leave immediately
+    // If the inspected branch is now closed, escape — but NOT when the user
+    // has explicitly focused it (panel open = patrolEnabled false). In that
+    // case stay put until the user dismisses the panel.
     const branch = branchesRef.current.find(b => b.id === id);
     if (branch && isClosed(branch)) {
+      if (!patrolEnabledRef.current) return; // user is intentionally here
       inspectedId.current = null;
       setInspectedIdState(null);
       clearTimer(); cancelRaf();
