@@ -4,6 +4,7 @@
  * Selecting a thread pans the timeline to its merge date and keeps it focused.
  */
 
+import { useMemo } from "react";
 import { Pressable, ScrollView, View, type PressableStateCallbackType } from "react-native";
 import { useAppStore } from "@/stores/app-store";
 import { isClosed } from "@/domain/branches/logic";
@@ -46,10 +47,15 @@ export function IntegratedThreadsPanel({ selectedBranchId }: Props) {
   const language = useAppStore((s) => s.language);
   const locale = language === "es" || language === "es-CO" ? language : undefined;
 
-  const merged = useAppStore((s) =>
-    s.branches
-      .filter((b) => isClosed(b) && b.mergeDate)
-      .sort((a, b) => (b.mergeDate! > a.mergeDate! ? 1 : -1))
+  // Select raw branches (stable reference) then derive in useMemo —
+  // avoid creating new arrays inside the Zustand selector which causes ∞ re-renders.
+  const allBranches = useAppStore((s) => s.branches);
+  const merged = useMemo(
+    () =>
+      allBranches
+        .filter((b) => isClosed(b) && b.mergeDate)
+        .sort((a, b) => (b.mergeDate! > a.mergeDate! ? 1 : -1)),
+    [allBranches],
   );
 
   if (merged.length === 0) {

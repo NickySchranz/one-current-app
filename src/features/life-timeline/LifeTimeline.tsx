@@ -517,13 +517,16 @@ export function LifeTimeline() {
 
   // When the user selects a merged thread from the integrated list, pan the
   // timeline so its merge date is centred in an 8-day window.
+  // Use a primitive derived value as dependency so setWindow doesn't re-trigger.
+  const viewingIntegratedId =
+    operation.kind === "viewing-integrated" ? (operation.branchId ?? null) : null;
   useEffect(() => {
-    if (operation.kind !== "viewing-integrated" || !operation.branchId) return;
-    const branch = allBranches.find((b) => b.id === operation.branchId);
+    if (!viewingIntegratedId) return;
+    const branch = allBranches.find((b) => b.id === viewingIntegratedId);
     const mergeDate = branch?.mergeDate;
     if (!mergeDate) return;
     setWindow({ start: addDays(mergeDate, -4), end: addDays(mergeDate, 4) });
-  }, [operation]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [viewingIntegratedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The slow current on the main line, and the merge preview's leaning dashes.
   const mainFlowProps = useDashFlow(!reducedMotion, 15, 0, tk.mainFlowDuration);
