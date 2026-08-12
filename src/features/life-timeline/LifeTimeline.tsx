@@ -455,6 +455,7 @@ export function LifeTimeline() {
     layout.nowX,
     (branchId) => setOperation({ kind: "quick-touch", branchId }),
     mascotTypePref,
+    operation.kind === "idle", // patrol only when no panel is open
   );
 
   // Keep reaction ref current so effects below can call it

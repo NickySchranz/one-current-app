@@ -135,6 +135,9 @@ export function useMascot(
   nowX: number,
   onSelectBranch: (id: string) => void,
   mascotType: MascotType,
+  /** When false (panel open / thread focused) Pip stays put and queues the
+   *  next patrol for when it returns to true. */
+  patrolEnabled: boolean,
 ): MascotState {
   // Stable refs for latest values
   const branchesRef = useRef(branches);
@@ -145,6 +148,10 @@ export function useMascot(
   nowXRef.current = nowX;
   const onSelectRef = useRef(onSelectBranch);
   onSelectRef.current = onSelectBranch;
+
+  const patrolEnabledRef = useRef(patrolEnabled);
+  patrolEnabledRef.current = patrolEnabled;
+  const pendingPatrol = useRef(false); // set when patrol is blocked mid-cycle
 
   const lastVisited = useRef(new Map<string, number>());
   const phase = useRef<'idle'|'jumping'|'landing'|'inspecting'|'talking'|'reacting'>('idle');
@@ -314,7 +321,12 @@ export function useMascot(
           phase.current = 'idle';
           setFrame('IDLE_A');
           lastVisited.current.set(branchId, Date.now());
-          timerRef.current = setTimeout(() => jumpRef.current(), 2500 + Math.random() * 2000);
+          if (patrolEnabledRef.current) {
+            timerRef.current = setTimeout(() => jumpRef.current(), 2500 + Math.random() * 2000);
+          } else {
+            // Panel is open — stay put and let the patrol resume effect handle it
+            pendingPatrol.current = true;
+          }
         }, 350);
       }
     };
@@ -498,6 +510,15 @@ export function useMascot(
       timerRef.current = setTimeout(() => jumpRef.current(), 3000);
     }
   }, [branches, geometries, fadeBubble]);
+
+  // Resume patrol when the panel closes (patrolEnabled flips true)
+  useEffect(() => {
+    if (!patrolEnabled) return;
+    if (pendingPatrol.current && phase.current === 'idle') {
+      pendingPatrol.current = false;
+      timerRef.current = setTimeout(() => jumpRef.current(), 1200);
+    }
+  }, [patrolEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => { clearTimer(); cancelRaf(); }, []);
 
