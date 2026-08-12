@@ -722,7 +722,8 @@ export function LifeTimeline() {
                 if (!branch) return null;
                 // Pending = about to jump there (highlight before moving).
                 // Inspected = currently sitting on it.
-                const mascotActive = showMascot && mascot.visible && mascot.pos.x > -900;
+                const mascotActive = showMascot && mascot.visible && mascot.pos.x > -900 &&
+                  operation.kind !== "viewing-integrated";
                 const mascotFocusId = mascot.pendingBranchId ?? mascot.inspectedBranchId;
                 // User-focused thread always stays at full opacity regardless of mascot position
                 const isUserFocused = branch.id === focusedBranchId;
@@ -845,7 +846,8 @@ export function LifeTimeline() {
               </G>
 
               {/* Mascot: 8-bit hero that jumps between branches and nudges the user */}
-              {showMascot && mascot.visible && mascot.pos.x > -900 && (
+              {showMascot && mascot.visible && mascot.pos.x > -900 &&
+               operation.kind !== "viewing-integrated" && (
                 <Mascot
                   x={mascot.pos.x}
                   y={mascot.pos.y}
