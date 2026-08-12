@@ -340,11 +340,10 @@ export function useMascot(
       return;
     }
 
-    // Stationary — follow significant branch movement (loudness lane shift).
-    // High threshold so horizontal panning doesn't jerk Pip across the screen.
+    // Stationary — snap to follow the branch (handles panning + loudness shifts).
+    // Pip naturally scrolls off-screen when the user pans away from today.
     const cur = posRef.current;
-    if (Math.abs(cur.y - ty) >= 4) {
-      // Lane changed (loudness dial) — snap Y only
+    if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
       posRef.current = { x: tx, y: ty };
       setPos({ x: tx, y: ty });
     }
