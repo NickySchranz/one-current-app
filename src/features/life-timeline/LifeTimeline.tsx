@@ -459,18 +459,21 @@ export function LifeTimeline() {
     layout.nowX,
     (branchId) => setOperation({ kind: "quick-touch", branchId }),
     mascotTypePref,
-    // Patrol when idle OR when browsing integrated list without a thread selected
-    operation.kind === "idle" || (operation.kind === "viewing-integrated" && !operation.branchId),
+    // Mascot patrols freely even while an integrated thread is in focus —
+    // he stays on today's active threads, the past integration just stays highlighted
+    operation.kind === "idle" || operation.kind === "viewing-integrated",
   );
 
   // Keep reaction ref current so effects below can call it
   mascotReactionRef.current = mascot.showReaction;
 
-  // When user taps a branch (focusedBranchId changes), run mascot to it
+  // When user taps an active branch, run mascot to it.
+  // Skip integrated/historical threads — they live in the past; mascot stays on today.
   const prevFocusedId = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!showMascot || !mascot.visible) return;
-    if (focusedBranchId && focusedBranchId !== prevFocusedId.current) {
+    if (operation.kind !== "viewing-integrated" &&
+        focusedBranchId && focusedBranchId !== prevFocusedId.current) {
       mascot.focusBranch(focusedBranchId);
     }
     prevFocusedId.current = focusedBranchId;
@@ -722,7 +725,13 @@ export function LifeTimeline() {
                 // Inspected = currently sitting on it.
                 const mascotActive = showMascot && mascot.visible && mascot.pos.x > -900;
                 const mascotFocusId = mascot.pendingBranchId ?? mascot.inspectedBranchId;
-                const lineOpacity = mascotActive && mascotFocusId !== null && branch.id !== mascotFocusId ? 0.38 : 1;
+                // User-focused thread always stays at full opacity regardless of mascot position
+                const isUserFocused = branch.id === focusedBranchId;
+                const lineOpacity = isUserFocused
+                  ? 1
+                  : mascotActive && mascotFocusId !== null && branch.id !== mascotFocusId
+                    ? 0.38
+                    : 1;
                 const mascotHighlight = mascotActive && branch.id === mascot.pendingBranchId;
                 return (
                   <G key={g.branchId} opacity={lineOpacity}>
