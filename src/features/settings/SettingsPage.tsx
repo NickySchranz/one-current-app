@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Platform, Pressable, View } from "react-native";
+import { Alert, Platform, Pressable, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { selectEffectivePro, useAppStore } from "@/stores/app-store";
 import { api, ApiHttpError, ApiOfflineError, getApiUrl, hasTokens, setApiUrl } from "@/api/client";
 import { THEMES } from "@/visualization/theme";
@@ -156,6 +157,8 @@ export function SettingsSections() {
   const setLanguage = useAppStore((s) => s.setLanguage);
   const reducedMotion = useAppStore((s) => s.reducedMotion);
   const setReducedMotion = useAppStore((s) => s.setReducedMotion);
+  const mascotType = useAppStore((s) => s.mascotType);
+  const setMascotType = useAppStore((s) => s.setMascotType);
   const exportData = useAppStore((s) => s.exportData);
   const importData = useAppStore((s) => s.importData);
   const deleteEverything = useAppStore((s) => s.deleteEverything);
@@ -394,6 +397,45 @@ export function SettingsSections() {
         <Hint style={{ marginTop: 8, marginBottom: 0 }}>
           {t(THEMES.find((th) => th.id === theme)?.hint ?? "")}
         </Hint>
+      </Card>
+
+      <H2>{t("Companion")}</H2>
+      <Card>
+        <View accessibilityLabel={t("Companion character")} style={rowStyles.filterRow}>
+          {(["chronicler", "wisp", "wanderer"] as const).map((type) => (
+            <Button
+              key={type}
+              selected={mascotType === type}
+              onPress={() => setMascotType(type)}
+              label={type === "chronicler" ? "📖 Chronicler" : type === "wisp" ? "✨ Wisp" : "🗺 Wanderer"}
+            />
+          ))}
+        </View>
+        <Hint style={{ marginTop: 8, marginBottom: 0 }}>
+          {mascotType === "chronicler"
+            ? t("A scholarly adventurer who notes everything and wields a quill.")
+            : mascotType === "wisp"
+              ? t("A glowing spirit that floats between your threads, trailing light.")
+              : t("A rugged explorer with a staff, always ready for the next path.")}
+        </Hint>
+        <View style={{ marginTop: 12 }}>
+          <Button
+            style={{ alignSelf: "flex-start" }}
+            onPress={() => {
+              void AsyncStorage.removeItem("one-current-tutorial-v1").then(() => {
+                if (Platform.OS === "web") {
+                  window.location.reload();
+                } else {
+                  Alert.alert(
+                    t("Tour restarted"),
+                    t("Navigate to Now to see the tour again."),
+                  );
+                }
+              });
+            }}
+            label={t("Restart tour")}
+          />
+        </View>
       </Card>
 
       <H2>{t("Language")}</H2>

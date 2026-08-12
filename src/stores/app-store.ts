@@ -23,6 +23,7 @@ import { api, loadTokens, ApiAuthError, type ApiUser } from "@/api/client";
 import { canCreateThread, isProTheme } from "@/domain/entitlements/logic";
 import { panWindow, weekWindow, type TimeWindow } from "@/visualization/zoom/time-scale";
 import { isThemeId, type ThemeId } from "@/visualization/theme";
+import type { MascotType } from "@/features/life-timeline/mascot-frames";
 
 /**
  * Three destinations. Now is where I work — it IS the timeline. History is
@@ -91,6 +92,7 @@ type AppState = {
   statusFilter: StatusFilter;
   reducedMotion: boolean;
   theme: ThemeId;
+  mascotType: MascotType;
   /** Pro entitlement. A local flag for now; a payment provider sets it later. */
   isPro: boolean;
   /** Pro according to the server, or null when the server has not answered. */
@@ -174,6 +176,7 @@ type AppState = {
   setStatusFilter(f: StatusFilter): void;
   setReducedMotion(v: boolean): void;
   setTheme(t: ThemeId): void;
+  setMascotType(t: MascotType): void;
   /** Flip the Pro entitlement (testing unlock for now). Turning it off steps an active Pro theme back to the default. */
   setPro(v: boolean): void;
   /** Store the session (login or register both land here). Dummy: no server is asked. */
@@ -207,6 +210,8 @@ const LANGUAGE_KEY = "one-current-language";
 const THEME_KEY = "one-current-theme";
 const PRO_KEY = "one-current-pro";
 const AUTH_KEY = "one-current-auth";
+const MASCOT_KEY = "one-current-mascot";
+const MASCOT_TYPES: MascotType[] = ["chronicler", "wisp", "wanderer"];
 
 function parseAuthUser(raw: string | null): AuthUser | null {
   if (!raw) return null;
@@ -232,33 +237,39 @@ async function loadSettings(): Promise<{
   reducedMotion: boolean;
   isPro: boolean;
   authUser: AuthUser | null;
+  mascotType: MascotType;
 }> {
   let theme = defaultTheme();
   let language: "en" | "es" | "es-CO" = "en";
   let reducedMotion = false;
   let isPro = false;
   let authUser: AuthUser | null = null;
+  let mascotType: MascotType = MASCOT_TYPES[Math.floor(Math.random() * MASCOT_TYPES.length)];
   try {
-    const [savedTheme, savedLanguage, savedPro, savedAuth, reduceMotion] = await Promise.all([
+    const [savedTheme, savedLanguage, savedPro, savedAuth, reduceMotion, savedMascot] = await Promise.all([
       AsyncStorage.getItem(THEME_KEY),
       AsyncStorage.getItem(LANGUAGE_KEY),
       AsyncStorage.getItem(PRO_KEY),
       AsyncStorage.getItem(AUTH_KEY),
       AccessibilityInfo.isReduceMotionEnabled(),
+      AsyncStorage.getItem(MASCOT_KEY),
     ]);
     isPro = savedPro === "1";
     authUser = parseAuthUser(savedAuth);
-    // A saved Pro theme without Pro falls back for now; the stored choice
-    // stays put, so unlocking again restores it on the next launch.
     if (savedTheme && isThemeId(savedTheme) && (isPro || !isProTheme(savedTheme)))
       theme = savedTheme;
     if (savedLanguage === "es" || savedLanguage === "es-CO" || savedLanguage === "en")
       language = savedLanguage;
     reducedMotion = reduceMotion;
+    if (savedMascot && MASCOT_TYPES.includes(savedMascot as MascotType))
+      mascotType = savedMascot as MascotType;
+    else
+      // Persist the random default so it stays consistent until changed
+      AsyncStorage.setItem(MASCOT_KEY, mascotType).catch(() => {});
   } catch {
     // storage unavailable; defaults apply
   }
-  return { theme, language, reducedMotion, isPro, authUser };
+  return { theme, language, reducedMotion, isPro, authUser, mascotType };
 }
 
 /**
@@ -292,6 +303,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   statusFilter: "all",
   reducedMotion: false,
   theme: defaultTheme(),
+  mascotType: "chronicler" as MascotType,
   isPro: false,
   serverPro: null,
   apiOnline: null,
@@ -701,10 +713,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   setStatusFilter: (statusFilter) => set({ statusFilter }),
   setReducedMotion: (reducedMotion) => set({ reducedMotion }),
   setTheme: (theme) => {
-    AsyncStorage.setItem(THEME_KEY, theme).catch(() => {
-      // storage may be unavailable; the choice still applies now
-    });
+    AsyncStorage.setItem(THEME_KEY, theme).catch(() => {});
     set({ theme });
+  },
+  setMascotType: (mascotType) => {
+    AsyncStorage.setItem(MASCOT_KEY, mascotType).catch(() => {});
+    set({ mascotType });
   },
   setLanguage: (language) => {
     AsyncStorage.setItem(LANGUAGE_KEY, language).catch(() => {

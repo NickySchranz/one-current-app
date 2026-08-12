@@ -14,6 +14,8 @@ import { AuthGate } from "@/features/auth/AuthGate";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
 import { T } from "@/ui/primitives";
+import { useTutorial } from "@/features/tutorial/useTutorial";
+import { TutorialOverlay } from "@/features/tutorial/TutorialOverlay";
 
 function AppShell() {
   const ready = useAppStore((s) => s.ready);
@@ -22,10 +24,12 @@ function AppShell() {
   const init = useAppStore((s) => s.init);
   const refreshNow = useAppStore((s) => s.refreshNow);
   const timeRate = useAppStore((s) => s.timeRate);
+  const mascotType = useAppStore((s) => s.mascotType);
   const tk = useTheme();
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
   const compactNav = winW <= 760;
+  const tutorial = useTutorial();
 
   useEffect(() => {
     void init();
@@ -99,6 +103,16 @@ function AppShell() {
         {view.kind === "more" && <MorePage />}
       </View>
       {compactNav && <PrimaryNavigation variant="bottom" />}
+      {ready && authUser && tutorial.active && tutorial.currentStep && (
+        <TutorialOverlay
+          step={tutorial.currentStep}
+          stepIndex={tutorial.stepIndex}
+          totalSteps={tutorial.totalSteps}
+          mascotType={mascotType}
+          onNext={tutorial.next}
+          onSkip={tutorial.skip}
+        />
+      )}
     </View>
   );
 }

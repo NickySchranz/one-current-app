@@ -38,6 +38,8 @@ import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
 import { AnimatedPath, MergePreviewTarget, NowGlow, ReclaimFly, useDashFlow } from "./timeline-fx";
+import { Mascot } from "./Mascot";
+import { useMascot, randomFrom, REACTION_MERGE, REACTION_MERGE_DEEP, REACTION_BORN, REACTION_ACTION, REACTION_NOTE } from "./useMascot";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -115,6 +117,8 @@ export function LifeTimeline() {
   const born = useAppStore((s) => s.born);
   const clearBorn = useAppStore((s) => s.clearBorn);
   const reducedMotion = useAppStore((s) => s.reducedMotion);
+  const mascotTypePref = useAppStore((s) => s.mascotType);
+  const draftBranchId = useAppStore((s) => s.draftBranchId);
   const dialLoudness = useAppStore((s) => s.dialLoudness);
   const actions = useAppStore((s) => s.actions);
   const language = useAppStore((s) => s.language);
@@ -135,6 +139,10 @@ export function LifeTimeline() {
     const timer = setTimeout(clearReclaim, reducedMotion ? 0 : 2200);
     return () => clearTimeout(timer);
   }, [reclaim, clearReclaim, reducedMotion]);
+
+  // Mascot reactions (wired after mascot is declared below — use ref so the
+  // effects can safely reference the function without re-running).
+  const mascotReactionRef = useRef<((text: string) => void) | null>(null);
 
   // A just-created line draws itself in, then settles like the others.
   useEffect(() => {
@@ -439,6 +447,68 @@ export function LifeTimeline() {
   // How split the present is: open lines pull apart, decisions gather them.
   const activeLines = visible.filter((b) => !isClosed(b));
 
+  // Mascot: visible always unless reduced motion (hides when no open branches).
+  const showMascot = !reducedMotion;
+  const mascot = useMascot(
+    visible,
+    layout.geometries,
+    layout.nowX,
+    (branchId) => setOperation({ kind: "quick-touch", branchId }),
+    mascotTypePref,
+  );
+
+  // Keep reaction ref current so effects below can call it
+  mascotReactionRef.current = mascot.showReaction;
+
+  // When user taps a branch (focusedBranchId changes), run mascot to it
+  const prevFocusedId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!showMascot || !mascot.visible) return;
+    if (focusedBranchId && focusedBranchId !== prevFocusedId.current) {
+      mascot.focusBranch(focusedBranchId);
+    }
+    prevFocusedId.current = focusedBranchId;
+  }, [focusedBranchId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When the "creating-branch" form opens, run mascot to the optimistic draft line.
+  // If creation is cancelled (draftBranchId clears without born), mascot resumes patrol.
+  const prevDraftId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showMascot || !mascot.visible) return;
+    if (draftBranchId && draftBranchId !== prevDraftId.current) {
+      mascot.focusBranch(draftBranchId);
+    }
+    prevDraftId.current = draftBranchId;
+  }, [draftBranchId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fire mascot reaction on merge (reclaim event)
+  const reclaimKey = reclaim?.key;
+  useEffect(() => {
+    if (!reclaimKey || !showMascot) return;
+    const pool = (reclaim?.feelings?.length ?? 0) >= 3 ? REACTION_MERGE_DEEP : REACTION_MERGE;
+    setTimeout(() => mascotReactionRef.current?.(randomFrom(pool)), 600);
+  }, [reclaimKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fire mascot reaction on new branch (born event)
+  const bornKey = born?.key;
+  useEffect(() => {
+    if (!bornKey || !showMascot) return;
+    setTimeout(() => mascotReactionRef.current?.(randomFrom(REACTION_BORN)), 800);
+  }, [bornKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fire mascot reaction when an action/note operation closes
+  const prevOpKind = useRef(operation.kind);
+  useEffect(() => {
+    const prev = prevOpKind.current;
+    prevOpKind.current = operation.kind;
+    if (operation.kind !== "idle" || !showMascot) return;
+    if (prev === "quick-act") {
+      setTimeout(() => mascotReactionRef.current?.(randomFrom(REACTION_ACTION)), 400);
+    } else if (prev === "quick-note") {
+      setTimeout(() => mascotReactionRef.current?.(randomFrom(REACTION_NOTE)), 400);
+    }
+  }, [operation.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // The slow current on the main line, and the merge preview's leaning dashes.
   const mainFlowProps = useDashFlow(!reducedMotion, 15, 0, tk.mainFlowDuration);
   const mergeFlowProps = useDashFlow(
@@ -626,12 +696,16 @@ export function LifeTimeline() {
               )}
 
               {/* branch lines */}
-              {layout.geometries.map((g, i) => {
+              {layout.geometries.map((g) => {
                 const branch = byId.get(g.branchId);
                 if (!branch) return null;
+                // When the mascot has landed on a branch, fade all the others.
+                const mascotLit = showMascot && mascot.visible && mascot.pos.x > -900 && mascot.inspectedBranchId !== null;
+                const lineOpacity = mascotLit && branch.id !== mascot.inspectedBranchId ? 0.38 : 1;
                 return (
+                  <G key={g.branchId} opacity={lineOpacity}>
                   <BranchLine
-                    key={g.branchId}
+                    key={undefined}
                     branch={branch}
                     geometry={g}
                     theme={theme}
@@ -671,6 +745,7 @@ export function LifeTimeline() {
                       if (mergeId) setView({ kind: "merge-review", mergeId });
                     })}
                   />
+                  </G>
                 );
               })}
 
@@ -734,6 +809,22 @@ export function LifeTimeline() {
                   {t("Now")}
                 </SvgText>
               </G>
+
+              {/* Mascot: 8-bit hero that jumps between branches and nudges the user */}
+              {showMascot && mascot.visible && mascot.pos.x > -900 && (
+                <Mascot
+                  x={mascot.pos.x}
+                  y={mascot.pos.y}
+                  frame={mascot.frame}
+                  flip={mascot.flip}
+                  mascotType={mascot.mascotType}
+                  bubbleOpacity={mascot.bubbleOpacity}
+                  bubbleText={mascot.bubbleText}
+                  showTapHint={mascot.frame === 'IDLE_A' || mascot.frame === 'IDLE_B'}
+                  theme={tk}
+                  onPress={mascot.onPress}
+                />
+              )}
             </Svg>
           </View>
         </ScrollView>

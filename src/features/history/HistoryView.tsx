@@ -19,6 +19,7 @@ import {
 } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
+import { HistoryMascot, wellnessLevel } from "@/features/life-timeline/HistoryMascot";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -72,6 +73,7 @@ export function HistoryView() {
   // 0 = today; step back as far as you like.
   const [dayOffset, setDayOffset] = useState(0);
   const [filter, setFilter] = useState<HistoryFilter>("all");
+  const mascotType = useAppStore((s) => s.mascotType);
   const show = (f: HistoryFilter) => filter === "all" || filter === f;
   const locale = language === "es" ? "es" : undefined;
 
@@ -214,6 +216,22 @@ export function HistoryView() {
             </Hint>
           ))}
         </Card>
+
+        {/* Mascot: large, right-aligned, cycling sayings */}
+        <View style={{ flexDirection: "row", alignItems: "flex-start", marginVertical: 4 }}>
+          <View style={{ flex: 1 }} />
+          <HistoryMascot
+            wellness={wellnessLevel(
+              dayClosed.length,
+              dayActions.length,
+              dayMoments.length,
+              branches.filter(b => b.loudness >= 4 && b.mergeDate !== day && !['merged','archived'].includes(b.status)).length,
+              branches.filter(b => !['merged','archived'].includes(b.status)).length,
+            )}
+            mascotType={mascotType}
+            theme={tokens}
+          />
+        </View>
 
         <View accessibilityLabel={t("What to review")} style={rowStyles.tagRow}>
           {FILTERS.map((f) => (
