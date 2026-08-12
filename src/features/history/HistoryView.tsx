@@ -126,17 +126,8 @@ export function HistoryView() {
     <ScrollView>
       <Panel>
         {/* The day itself is the page header: swipe or step through the days here. */}
-        <View {...pan.panHandlers}>
-          <View
-            accessibilityLabel={t("Recent days")}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-              marginTop: 6.4,
-              marginBottom: 3.2,
-            }}
-          >
+        <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6.4, marginBottom: 3.2 }}>
+          <View {...pan.panHandlers} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <Button
               variant="quiet"
               accessibilityLabel={t("Previous day")}
@@ -156,6 +147,18 @@ export function HistoryView() {
               label="›"
             />
           </View>
+          {/* Mascot + cycling bubble — top-right of the day header */}
+          <HistoryMascot
+            wellness={wellnessLevel(
+              dayClosed.length,
+              dayActions.length,
+              dayMoments.length,
+              branches.filter(b => b.loudness >= 4 && b.mergeDate !== day && !['merged','archived'].includes(b.status)).length,
+              branches.filter(b => !['merged','archived'].includes(b.status)).length,
+            )}
+            mascotType={mascotType}
+            theme={tokens}
+          />
         </View>
 
         <Card sunken style={{ gap: 6.4 }}>
@@ -216,22 +219,6 @@ export function HistoryView() {
             </Hint>
           ))}
         </Card>
-
-        {/* Mascot: large, right-aligned, cycling sayings */}
-        <View style={{ flexDirection: "row", alignItems: "flex-start", marginVertical: 4 }}>
-          <View style={{ flex: 1 }} />
-          <HistoryMascot
-            wellness={wellnessLevel(
-              dayClosed.length,
-              dayActions.length,
-              dayMoments.length,
-              branches.filter(b => b.loudness >= 4 && b.mergeDate !== day && !['merged','archived'].includes(b.status)).length,
-              branches.filter(b => !['merged','archived'].includes(b.status)).length,
-            )}
-            mascotType={mascotType}
-            theme={tokens}
-          />
-        </View>
 
         <View accessibilityLabel={t("What to review")} style={rowStyles.tagRow}>
           {FILTERS.map((f) => (
