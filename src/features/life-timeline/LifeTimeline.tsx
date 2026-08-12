@@ -699,9 +699,12 @@ export function LifeTimeline() {
               {layout.geometries.map((g) => {
                 const branch = byId.get(g.branchId);
                 if (!branch) return null;
-                // When the mascot has landed on a branch, fade all the others.
-                const mascotLit = showMascot && mascot.visible && mascot.pos.x > -900 && mascot.inspectedBranchId !== null;
-                const lineOpacity = mascotLit && branch.id !== mascot.inspectedBranchId ? 0.38 : 1;
+                // Pending = about to jump there (highlight before moving).
+                // Inspected = currently sitting on it.
+                const mascotActive = showMascot && mascot.visible && mascot.pos.x > -900;
+                const mascotFocusId = mascot.pendingBranchId ?? mascot.inspectedBranchId;
+                const lineOpacity = mascotActive && mascotFocusId !== null && branch.id !== mascotFocusId ? 0.38 : 1;
+                const mascotHighlight = mascotActive && branch.id === mascot.pendingBranchId;
                 return (
                   <G key={g.branchId} opacity={lineOpacity}>
                   <BranchLine
@@ -730,7 +733,7 @@ export function LifeTimeline() {
                     }
                     focused={false}
                     emphasizedId={top?.id}
-                    highlighted={branch.id === focusedBranchId}
+                    highlighted={branch.id === focusedBranchId || mascotHighlight}
                     dimmed={!!focusedBranchId && branch.id !== focusedBranchId}
                     born={!reducedMotion && born?.branchId === branch.id}
                     reducedMotion={reducedMotion}

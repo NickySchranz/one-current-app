@@ -27,9 +27,10 @@ export type MascotState = {
   bubbleText: string;
   mascotType: MascotType;
   inspectedBranchId: string | null;
+  /** Branch Pip is about to run to — highlighted immediately before he moves. */
+  pendingBranchId: string | null;
   onPress: () => void;
   showReaction: (text: string) => void;
-  /** Run to a specific branch immediately (called when user taps a branch). */
   focusBranch: (branchId: string) => void;
   visible: boolean;
 };
@@ -160,6 +161,7 @@ export function useMascot(
   const [bubbleOpacity, setBubbleOpacity] = useState(0);
   const [bubbleText, setBubbleText] = useState('');
   const [inspectedIdState, setInspectedIdState] = useState<string | null>(null);
+  const [pendingIdState, setPendingIdState] = useState<string | null>(null);
 
   const clearTimer = () => {
     if (timerRef.current !== null) { clearTimeout(timerRef.current); timerRef.current = null; }
@@ -356,13 +358,22 @@ export function useMascot(
     const toX = destGeo.endX + 10;
     const toY = destGeo.endY - PX * 10;
 
-    const cur = posRef.current;
-    // 3 zigzag waypoints, 38px wide offset — jagged and frantic
-    const wps = makeZigWaypoints(cur.x, cur.y, toX, toY, 3, 38);
-    phase.current = 'jumping';
-    setFrame('RUN_A');
     const targetId = best.id;
-    runWaypoints(wps, () => onLanded(targetId), 0.16);
+    // Highlight the destination branch immediately, then pause briefly before
+    // Pip starts running so the user sees which timeline he's heading to.
+    setPendingIdState(targetId);
+    setInspectedIdState(targetId);
+
+    timerRef.current = setTimeout(() => {
+      const cur = posRef.current;
+      const wps = makeZigWaypoints(cur.x, cur.y, toX, toY, 3, 38);
+      phase.current = 'jumping';
+      setFrame('RUN_A');
+      runWaypoints(wps, () => {
+        setPendingIdState(null);
+        onLanded(targetId);
+      }, 0.16);
+    }, 500); // 500 ms highlight before he moves
   }, [onLanded, runWaypoints]); // eslint-disable-line react-hooks/exhaustive-deps
 
   jumpRef.current = jumpToNext;
@@ -501,6 +512,7 @@ export function useMascot(
     bubbleOpacity, bubbleText,
     mascotType,
     inspectedBranchId: inspectedIdState,
+    pendingBranchId: pendingIdState,
     onPress, showReaction, focusBranch, visible,
   };
 }
