@@ -50,6 +50,8 @@ export type TimelineOperation =
   | { kind: "quick-note"; branchId: string }
   /** Every decided, still-open action read together in one panel. */
   | { kind: "viewing-actions" }
+  /** Browse past integrated threads; selecting one focuses it on the timeline. */
+  | { kind: "viewing-integrated"; branchId?: string }
   /** Looking deeper into one branch. Focused: the timeline waits behind it. */
   | { kind: "understanding"; branchId: string }
   /** The final, explicit merge confirmation. Focused. */

@@ -29,6 +29,7 @@ import { ActionsPanel } from "@/features/branch-quick-actions/ActionsPanel";
 import { SupportPanel } from "@/features/branch-quick-actions/SupportPanel";
 import { BranchView } from "@/features/branch-inspection/BranchView";
 import { MergeWizard } from "@/features/branch-merge/MergeWizard";
+import { IntegratedThreadsPanel } from "@/features/integrated-threads/IntegratedThreadsPanel";
 import { useT } from "@/i18n/i18n";
 import { useTheme, type ThemeTokens } from "@/ui/theme";
 import { alpha } from "@/ui/color";
@@ -48,6 +49,8 @@ function trayLabel(op: TimelineOperation): string {
       return "What is true now";
     case "quick-note":
       return "A note";
+    case "viewing-integrated":
+      return "Integrated threads";
     case "viewing-actions":
       return "Actions";
     case "understanding":
@@ -75,6 +78,8 @@ function operationBody(op: TimelineOperation) {
       return <QuickMerge key={op.branchId} branchId={op.branchId} />;
     case "quick-note":
       return <QuickNote key={op.branchId} branchId={op.branchId} />;
+    case "viewing-integrated":
+      return <IntegratedThreadsPanel selectedBranchId={op.branchId} />;
     case "viewing-actions":
       return <ActionsPanel />;
     case "understanding":

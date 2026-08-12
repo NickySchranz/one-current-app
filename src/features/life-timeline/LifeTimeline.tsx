@@ -22,7 +22,7 @@ import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from "react-native-
 import { filterBranches, useAppStore } from "@/stores/app-store";
 import { useLayoutStore } from "@/stores/layout-store";
 import { buildTimelineLayout } from "@/visualization/main-line/layout";
-import { generateTicks, dateToX } from "@/visualization/zoom/time-scale";
+import { generateTicks, dateToX, addDays } from "@/visualization/zoom/time-scale";
 import { describeTimeline } from "@/visualization/a11y/describe";
 import { effectiveLoudness, isClosed, mostActivated } from "@/domain/branches/logic";
 import { decidedToday } from "@/domain/feelings/logic";
@@ -107,6 +107,8 @@ export function LifeTimeline() {
   const setView = useAppStore((s) => s.setView);
   const setOperation = useAppStore((s) => s.setOperation);
   const panBy = useAppStore((s) => s.panBy);
+  const setWindow = useAppStore((s) => s.setWindow);
+  const allBranches = useAppStore((s) => s.branches);
   const returnToNow = useAppStore((s) => s.returnToNow);
   const theme = useAppStore((s) => s.theme);
   const operation = useAppStore((s) => s.operation);
@@ -127,11 +129,13 @@ export function LifeTimeline() {
 
   // The line the current operation concerns stays lit; everything else steps back.
   const focusedBranchId =
-    "branchId" in operation
+    operation.kind === "viewing-integrated" && operation.branchId
       ? operation.branchId
-      : operation.kind === "confirming-merge" && operation.branchIds.length === 1
-        ? operation.branchIds[0]
-        : undefined;
+      : "branchId" in operation
+        ? operation.branchId
+        : operation.kind === "confirming-merge" && operation.branchIds.length === 1
+          ? operation.branchIds[0]
+          : undefined;
 
   // A decision just released feelings: let them drift home, then forget the event.
   useEffect(() => {
@@ -455,7 +459,8 @@ export function LifeTimeline() {
     layout.nowX,
     (branchId) => setOperation({ kind: "quick-touch", branchId }),
     mascotTypePref,
-    operation.kind === "idle", // patrol only when no panel is open
+    // Patrol when idle OR when browsing integrated list without a thread selected
+    operation.kind === "idle" || (operation.kind === "viewing-integrated" && !operation.branchId),
   );
 
   // Keep reaction ref current so effects below can call it
@@ -509,6 +514,16 @@ export function LifeTimeline() {
       setTimeout(() => mascotReactionRef.current?.(randomFrom(REACTION_NOTE)), 400);
     }
   }, [operation.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When the user selects a merged thread from the integrated list, pan the
+  // timeline so its merge date is centred in an 8-day window.
+  useEffect(() => {
+    if (operation.kind !== "viewing-integrated" || !operation.branchId) return;
+    const branch = allBranches.find((b) => b.id === operation.branchId);
+    const mergeDate = branch?.mergeDate;
+    if (!mergeDate) return;
+    setWindow({ start: addDays(mergeDate, -4), end: addDays(mergeDate, 4) });
+  }, [operation]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The slow current on the main line, and the merge preview's leaning dashes.
   const mainFlowProps = useDashFlow(!reducedMotion, 15, 0, tk.mainFlowDuration);
@@ -789,9 +804,13 @@ export function LifeTimeline() {
               {/* No accessibilityRole="button" here: react-native-svg web turns
                   the G into an HTML <button> inside <svg>, which never paints. */}
               <G
-                onPress={guarded(returnToNow)}
+                onPress={guarded(() =>
+                  operation.kind === "viewing-integrated"
+                    ? returnToNow()
+                    : setOperation({ kind: "viewing-integrated" })
+                )}
                 accessible
-                accessibilityLabel={t("Now. Select to return the view to the present.")}
+                accessibilityLabel={t("Now. Select to see integrated threads.")}
               >
                 <NowGlow
                   cx={layout.nowX - 2}
