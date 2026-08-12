@@ -29,71 +29,112 @@ export type MascotState = {
   bubbleText: string;
   mascotType: MascotType;
   inspectedBranchId: string | null;
-  /** Branch Pip is about to run to — highlighted immediately before he moves. */
   pendingBranchId: string | null;
   onPress: () => void;
   showReaction: (text: string) => void;
   focusBranch: (branchId: string) => void;
+  /** Localised phrase pools — use for reactions dispatched from outside the hook. */
+  phrases: Phrases;
   visible: boolean;
 };
 
-// ─── Reaction text libraries ─────────────────────────────────────────────────
+// ─── Phrase libraries (English + Spanish) ────────────────────────────────────
 
-export const REACTION_MERGE = [
-  "HANDLED. One less thing, boss!",
-  "That's done. I got you.",
-  "CLEARED! You're lighter now.",
-  "Merged it. Nailed it.",
-  "That thread is FREE!",
-  "Done and dusted, boss.",
-  "Let it go! Yes!",
-];
+type Phrases = {
+  merge: string[];
+  mergeDeep: string[];
+  born: string[];
+  action: string[];
+  note: string[];
+  greet: string[];
+  focus: string[];
+  action_loud: string;
+  action_ready: string;
+  action_waiting: string;
+  action_support: string;
+  action_identity: string;
+  action_projection: string;
+  action_empty: string;
+  action_default: string;
+};
 
-export const REACTION_BORN = [
-  "New thread? On it, boss.",
-  "Got it logged. I'm watching this.",
-  "Named it — that's step one done.",
-  "I see this. Won't lose it.",
-  "Got your back on this one.",
-];
+const EN: Phrases = {
+  merge:      ["HANDLED. One less thing, boss!", "That's done. I got you.", "CLEARED! You're lighter now.", "Merged it. Nailed it.", "That thread is FREE!", "Done and dusted, boss.", "Let it go! Yes!"],
+  mergeDeep:  ["HUGE ONE. You really did that!", "BOSS MODE. That was a big one.", "That was heavy and you handled it!", "BIG WIN. I felt that one too."],
+  born:       ["New thread? On it, boss.", "Got it logged. I'm watching this.", "Named it — that's step one done.", "I see this. Won't lose it.", "Got your back on this one."],
+  action:     ["PLAN LOCKED. Let's go!", "Decided. Your future self thanks you!", "That's a real move. Love it.", "Done! Moving forward together.", "Action taken. That's how we roll."],
+  note:       ["Got it. Witnessed, boss.", "Recorded — nothing gets lost on my watch.", "I heard that. Logged.", "Got it, boss. Keep going."],
+  greet:      ["I got it, boss! Working on these with you.", "Don't worry — I'm keeping an eye on everything.", "Hey boss! Your threads are in good hands.", "On the job! I got these timelines."],
+  focus:      ["On it, boss!", "Right, I see this one.", "Got you!", "Let's look at this."],
+  action_loud:       "This one's LOUD, boss. Handle it?",
+  action_ready:      "Boss, this one's ready to close!",
+  action_waiting:    "Still waiting on this one…",
+  action_support:    "This might need some backup.",
+  action_identity:   "Deep stuff. Worth a sit-down.",
+  action_projection: "Future worry — let's look together.",
+  action_empty:      "Nothing here yet — add a note?",
+  action_default:    "How's this one going, boss?",
+};
 
-export const REACTION_ACTION = [
-  "PLAN LOCKED. Let's go!",
-  "Decided. Your future self thanks you!",
-  "That's a real move. Love it.",
-  "Done! Moving forward together.",
-  "Action taken. That's how we roll.",
-];
+// Spanish — culturally warm, uses "jefe/a" (boss) which is casual and affectionate
+// in Latin American Spanish. Phrases are direct, expressive and celebratory.
+const ES: Phrases = {
+  merge:      ["¡Listo, jefe! ¡Una menos que cargar!", "¡Cerrado! Eso ya no pesa.", "¡HECHO! Ya respiras mejor.", "Integrado. Bien jugado.", "¡Ese hilo es libre! ¡Dale!", "¡Terminado! Sin vueltas.", "¡Soltado! ¡Sí, así!"],
+  mergeDeep:  ["¡ESE ERA GRANDE, JEFE! ¡Lo lograste!", "¡NIVEL CAPI! Ese era pesado de verdad.", "Era un hilo de peso y lo manejaste. ¡Brutal!", "¡GOLAZO! Lo sentí yo también."],
+  born:       ["¿Nuevo hilo? En eso estoy, jefe.", "Anotado. Le tengo el ojo encima.", "Nombrado — eso ya es el primer paso.", "Lo veo. No lo pierdo de vista.", "Te cubro en este."],
+  action:     ["¡PLAN LISTO! ¡Vamos!", "Decidido. Tu yo del futuro te lo agradece.", "Eso es movimiento real. Me gusta.", "¡Listo! Avanzando juntos.", "Acción tomada. Así se hace, jefe."],
+  note:       ["Anotado. Testigo de ello.", "Registrado — nada se pierde aquí.", "Te escucho. Guardado.", "Listo, jefe. Sigue adelante."],
+  greet:      ["¡Yo me encargo, jefe! Trabajando contigo en esto.", "No te preocupes — tengo el ojo en todo.", "¡Oye, jefe! Tus hilos están en buenas manos.", "¡En ello! Me ocupo de estos hilos."],
+  focus:      ["¡Aquí estoy, jefe!", "Claro, a ver este.", "¡Te tengo!", "Veamos esto juntos."],
+  action_loud:       "¡Este hilo está FUERTE, jefe! ¿Lo resolvemos?",
+  action_ready:      "¡Jefe, este ya está listo para cerrar!",
+  action_waiting:    "Todavía esperando por este…",
+  action_support:    "Este puede necesitar un apoyo extra.",
+  action_identity:   "Cosa profunda. Vale la pena sentarse con ella.",
+  action_projection: "Preocupación futura — mirémosla juntos.",
+  action_empty:      "Nada aquí aún. ¿Le añades una nota?",
+  action_default:    "¿Cómo va este, jefe?",
+};
 
-export const REACTION_NOTE = [
-  "Got it. Witnessed, boss.",
-  "Recorded — nothing gets lost on my watch.",
-  "I heard that. Logged.",
-  "Got it, boss. Keep going.",
-];
+// Colombia variant: slightly warmer slang ("parce" = friend/buddy)
+const ES_CO: Phrases = {
+  ...ES,
+  merge:      ["¡Listo, parce! ¡Una menos!", "¡Cerrado! Eso ya no pesa, parcero.", "¡HECHO! Ya respiras mejor.", "Integrado. Bien jugado.", "¡Ese hilo quedó libre! ¡Uy!", "¡Terminado, parcero!", "¡Soltado! ¡Sí señor!"],
+  mergeDeep:  ["¡ESE ERA GRANDÍSIMO, PARCE! ¡Lo lograste!", "¡MODO CRACK! Ese era muy pesado.", "Era un hilo tenaz y lo manejaste. ¡Qué chimba!", "¡GOLAZO, PARCE! Lo sentí yo también."],
+  born:       ["¿Nuevo hilo? En eso estoy, parce.", "Anotado. Le tengo el ojo encima.", "Nombrado — eso ya es el primer paso.", "Lo veo. No lo pierdo de vista.", "Te cubro en este, parcero."],
+  greet:      ["¡Yo me encargo, parce! Trabajando contigo.", "No te preocupes — tengo el ojo en todo.", "¡Oye, parce! Tus hilos están en buenas manos.", "¡En ello! Me ocupo de estos hilos."],
+  focus:      ["¡Aquí estoy, parce!", "Claro, a ver este.", "¡Te tengo, parcero!", "Veamos esto juntos."],
+  action_loud:       "¡Este hilo está TENAZ, parce! ¿Lo resolvemos?",
+  action_default:    "¿Cómo va este, parce?",
+};
 
-export const REACTION_MERGE_DEEP = [
-  "HUGE ONE. You really did that!",
-  "BOSS MODE. That was a big one.",
-  "That was heavy and you handled it!",
-  "BIG WIN. I felt that one too.",
-];
+function getLang(language: string): Phrases {
+  if (language === "es-CO") return ES_CO;
+  if (language === "es") return ES;
+  return EN;
+}
+
+export const REACTION_MERGE      = EN.merge;
+export const REACTION_MERGE_DEEP = EN.mergeDeep;
+export const REACTION_BORN       = EN.born;
+export const REACTION_ACTION     = EN.action;
+export const REACTION_NOTE       = EN.note;
 
 export function randomFrom(arr: string[]): string {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// ─── Action text (for branch inspection) ─────────────────────────────────────
+// ─── Action text (localised) ──────────────────────────────────────────────────
 
-function actionText(b: PsychologicalBranch): string {
-  if (b.loudness >= 4) return "This one's LOUD, boss. Handle it?";
-  if (b.status === "ready-to-merge") return "Boss, this one's ready to close!";
-  if (b.status === "waiting-with-boundaries") return "Still waiting on this one…";
-  if (b.status === "needs-support") return "This might need some backup.";
-  if (b.type === "identity") return "Deep stuff. Worth a sit-down.";
-  if (b.type === "projection") return "Future worry — let's look together.";
-  if (b.commits.length === 0) return "Nothing here yet — add a note?";
-  return "How's this one going, boss?";
+function actionText(b: PsychologicalBranch, lang: Phrases): string {
+  if (b.loudness >= 4) return lang.action_loud;
+  if (b.status === "ready-to-merge") return lang.action_ready;
+  if (b.status === "waiting-with-boundaries") return lang.action_waiting;
+  if (b.status === "needs-support") return lang.action_support;
+  if (b.type === "identity") return lang.action_identity;
+  if (b.type === "projection") return lang.action_projection;
+  if (b.commits.length === 0) return lang.action_empty;
+  return lang.action_default;
 }
 
 // ─── Scoring ──────────────────────────────────────────────────────────────────
@@ -140,14 +181,11 @@ export function useMascot(
   nowX: number,
   onSelectBranch: (id: string) => void,
   mascotType: MascotType,
-  /** When false (panel open / thread focused) Pip stays put and queues the
-   *  next patrol for when it returns to true. */
   patrolEnabled: boolean,
-  /** When true the user is browsing past integrated threads. Pip freezes
-   *  in place — no geometry snapping, no jumps, no patrol. He lives in
-   *  today and shouldn't follow the view into the past. */
   viewingIntegrated: boolean,
+  language: string,
 ): MascotState {
+  const lang = getLang(language);
   // Stable refs for latest values
   const branchesRef = useRef(branches);
   branchesRef.current = branches;
@@ -353,7 +391,7 @@ export function useMascot(
   const startTalking = useCallback((branchId: string) => {
     const b = branchesRef.current.find(br => br.id === branchId);
     if (b) {
-      setBubbleText(actionText(b));
+      setBubbleText(actionText(b, lang));
       fadeBubble(1, 220);
     }
     phase.current = 'talking';
@@ -513,17 +551,23 @@ export function useMascot(
       reroutingRef.current = false;
       setFrame('INSPECT_A');
       phase.current = 'inspecting';
-      const focusTexts = [
-        "On it, boss!", "Right, I see this one.", "Got you!", "Let's look at this.",
-      ];
-      setBubbleText(randomFrom(focusTexts));
+      setBubbleText(randomFrom(lang.focus));
       fadeBubble(1, 150);
       timerRef.current = setTimeout(() => {
         fadeBubble(0, 200);
-        timerRef.current = setTimeout(() => { phase.current = 'idle'; setFrame('IDLE_A'); }, 350);
+        timerRef.current = setTimeout(() => {
+          phase.current = 'idle';
+          setFrame('IDLE_A');
+          // Resume patrol after user focus — don't stay frozen on the branch
+          if (patrolEnabledRef.current && !viewingIntegratedRef.current) {
+            timerRef.current = setTimeout(() => jumpRef.current(), 2000 + Math.random() * 1500);
+          } else {
+            pendingPatrol.current = true;
+          }
+        }, 350);
       }, 1800);
-    }, 0.20); // slightly faster for the responsive focus-tap
-  }, [fadeBubble, runWaypoints]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, 0.20);
+  }, [fadeBubble, runWaypoints, lang]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Bootstrap ──
   const hasGreeted = useRef(false);
@@ -556,14 +600,8 @@ export function useMascot(
     // Greet on first appearance
     if (!hasGreeted.current) {
       hasGreeted.current = true;
-      const greetings = [
-        "I got it, boss! Working on these with you.",
-        "Don't worry — I'm keeping an eye on everything.",
-        "Hey boss! Your threads are in good hands.",
-        "On the job! I got these timelines.",
-      ];
       timerRef.current = setTimeout(() => {
-        setBubbleText(randomFrom(greetings));
+        setBubbleText(randomFrom(lang.greet));
         fadeBubble(1, 250);
         timerRef.current = setTimeout(() => {
           fadeBubble(0, 300);
@@ -598,6 +636,6 @@ export function useMascot(
     mascotType,
     inspectedBranchId: inspectedIdState,
     pendingBranchId: pendingIdState,
-    onPress, showReaction, focusBranch, visible,
+    onPress, showReaction, focusBranch, phrases: lang, visible,
   };
 }

@@ -39,7 +39,7 @@ import { alpha } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
 import { AnimatedPath, MergePreviewTarget, NowGlow, ReclaimFly, useDashFlow } from "./timeline-fx";
 import { Mascot } from "./Mascot";
-import { useMascot, randomFrom, REACTION_MERGE, REACTION_MERGE_DEEP, REACTION_BORN, REACTION_ACTION, REACTION_NOTE } from "./useMascot";
+import { useMascot, randomFrom } from "./useMascot";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -459,8 +459,9 @@ export function LifeTimeline() {
     layout.nowX,
     (branchId) => setOperation({ kind: "quick-touch", branchId }),
     mascotTypePref,
-    operation.kind === "idle",                 // patrol only when no panel is open
-    operation.kind === "viewing-integrated",   // freeze Pip in today while browsing past
+    operation.kind === "idle",
+    operation.kind === "viewing-integrated",
+    language,
   );
 
   // Keep reaction ref current so effects below can call it
@@ -495,7 +496,7 @@ export function LifeTimeline() {
   const reclaimKey = reclaim?.key;
   useEffect(() => {
     if (!reclaimKey || !showMascot) return;
-    const pool = (reclaim?.feelings?.length ?? 0) >= 3 ? REACTION_MERGE_DEEP : REACTION_MERGE;
+    const pool = (reclaim?.feelings?.length ?? 0) >= 3 ? mascot.phrases.mergeDeep : mascot.phrases.merge;
     setTimeout(() => mascotReactionRef.current?.(randomFrom(pool)), 600);
   }, [reclaimKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -503,7 +504,7 @@ export function LifeTimeline() {
   const bornKey = born?.key;
   useEffect(() => {
     if (!bornKey || !showMascot) return;
-    setTimeout(() => mascotReactionRef.current?.(randomFrom(REACTION_BORN)), 800);
+    setTimeout(() => mascotReactionRef.current?.(randomFrom(mascot.phrases.born)), 800);
   }, [bornKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fire mascot reaction when an action/note operation closes
@@ -513,9 +514,9 @@ export function LifeTimeline() {
     prevOpKind.current = operation.kind;
     if (operation.kind !== "idle" || !showMascot) return;
     if (prev === "quick-act") {
-      setTimeout(() => mascotReactionRef.current?.(randomFrom(REACTION_ACTION)), 400);
+      setTimeout(() => mascotReactionRef.current?.(randomFrom(mascot.phrases.action)), 400);
     } else if (prev === "quick-note") {
-      setTimeout(() => mascotReactionRef.current?.(randomFrom(REACTION_NOTE)), 400);
+      setTimeout(() => mascotReactionRef.current?.(randomFrom(mascot.phrases.note)), 400);
     }
   }, [operation.kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
