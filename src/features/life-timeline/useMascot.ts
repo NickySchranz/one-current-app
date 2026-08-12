@@ -11,6 +11,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import type { BranchGeometry } from "@/visualization/branch-lines/paths";
 import { isClosed } from "@/domain/branches/logic";
+import { restingToday } from "@/visualization/branch-lines/style";
+import { decidedToday } from "@/domain/feelings/logic";
 import type { FrameName, MascotType } from "./mascot-frames";
 
 const PX = 2.2; // must match PX in mascot-frames.ts
@@ -105,6 +107,9 @@ function scoreBranch(
   if (isClosed(b)) return -Infinity;
   if (!g.inWindow) return -Infinity;
   if (nowX > 0 && g.endX > nowX + 20) return -Infinity;
+  // Skip branches already handled today — Pip only patrols undecided threads
+  const now = new Date();
+  if (decidedToday(b, now) || restingToday(b, now)) return -Infinity;
 
   const msSince = Date.now() - (lastVisited.get(b.id) ?? 0);
   let score = b.loudness * 2;
