@@ -159,6 +159,10 @@ export function useMascot(
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rafRef = useRef<number | null>(null);
   const initialised = useRef(false);
+  // Live jump destination — updated when geometries change during a jump
+  const jumpDestRef = useRef<{ x: number; y: number; branchId: string } | null>(null);
+  // Guard against re-entrant mid-jump re-routes
+  const reroutingRef = useRef(false);
   // Mutable position ref so waypoint runner can read current pos without setState callback
   const posRef = useRef<MascotPos>({ x: -999, y: -999 });
   // Rendering state
@@ -276,11 +280,11 @@ export function useMascot(
     return wps;
   };
 
-  // Track geometry changes AND escape from closed branches
+  // Track geometry changes, escape closed branches, and re-route mid-jump if the
+  // timeline is panned so the destination drifts significantly.
   useEffect(() => {
     const id = inspectedId.current;
     if (!id) return;
-    if (phase.current === 'jumping') return;
 
     // If the inspected branch is now closed, leave immediately
     const branch = branchesRef.current.find(b => b.id === id);
@@ -296,6 +300,32 @@ export function useMascot(
     if (!geo) return;
     const tx = geo.endX + 10;
     const ty = geo.endY - PX * 10;
+
+    if (phase.current === 'jumping') {
+      // Update the live destination ref so the landing callback uses fresh coords
+      if (jumpDestRef.current?.branchId === id) {
+        jumpDestRef.current = { x: tx, y: ty, branchId: id };
+      }
+      // If the destination has drifted far (user panned), cancel and re-route
+      // directly without zigzag so the mascot cleanly tracks the branch.
+      const dest = jumpDestRef.current;
+      if (!reroutingRef.current && dest && (Math.abs(dest.x - tx) > 25 || Math.abs(dest.y - ty) > 25)) {
+        reroutingRef.current = true;
+        cancelRaf();
+        jumpDestRef.current = { x: tx, y: ty, branchId: id };
+        const wps = [{ x: tx, y: ty }]; // straight line to new destination
+        runWaypoints(wps, () => {
+          reroutingRef.current = false;
+          posRef.current = { x: tx, y: ty };
+          setPos({ x: tx, y: ty });
+          setPendingIdState(null);
+          onLanded(id);
+        }, 0.28);
+      }
+      return;
+    }
+
+    // Stationary — snap to correct position
     const cur = posRef.current;
     if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
       posRef.current = { x: tx, y: ty };
@@ -371,6 +401,8 @@ export function useMascot(
     const toY = destGeo.endY - PX * 10;
 
     const targetId = best.id;
+    jumpDestRef.current = { x: toX, y: toY, branchId: targetId };
+
     // Highlight the destination branch immediately, then pause briefly before
     // Pip starts running so the user sees which timeline he's heading to.
     setPendingIdState(targetId);
@@ -382,6 +414,14 @@ export function useMascot(
       phase.current = 'jumping';
       setFrame('RUN_A');
       runWaypoints(wps, () => {
+        // Use live geometry in case timeline was panned during the run
+        const liveGeo = geometriesRef.current.find(g => g.branchId === targetId);
+        const fx = liveGeo ? liveGeo.endX + 10 : (jumpDestRef.current?.x ?? toX);
+        const fy = liveGeo ? liveGeo.endY - PX * 10 : (jumpDestRef.current?.y ?? toY);
+        posRef.current = { x: fx, y: fy };
+        setPos({ x: fx, y: fy });
+        jumpDestRef.current = null;
+        reroutingRef.current = false;
         setPendingIdState(null);
         onLanded(targetId);
       }, 0.16);
@@ -436,8 +476,10 @@ export function useMascot(
     }
 
     clearTimer(); cancelRaf();
+    reroutingRef.current = false;
     inspectedId.current = branchId;
     setInspectedIdState(branchId);
+    jumpDestRef.current = { x: toX, y: toY, branchId };
 
     const cur = posRef.current;
     // 2 waypoints for a snappier focus-run, slightly faster
@@ -445,8 +487,14 @@ export function useMascot(
     phase.current = 'jumping';
     setFrame('RUN_A');
     runWaypoints(wps, () => {
-      posRef.current = { x: toX, y: toY };
-      setPos({ x: toX, y: toY });
+      // Use live geometry in case timeline was panned
+      const liveGeo = geometriesRef.current.find(g => g.branchId === branchId);
+      const fx = liveGeo ? liveGeo.endX + 10 : (jumpDestRef.current?.x ?? toX);
+      const fy = liveGeo ? liveGeo.endY - PX * 10 : (jumpDestRef.current?.y ?? toY);
+      posRef.current = { x: fx, y: fy };
+      setPos({ x: fx, y: fy });
+      jumpDestRef.current = null;
+      reroutingRef.current = false;
       setFrame('INSPECT_A');
       phase.current = 'inspecting';
       const focusTexts = [
