@@ -466,14 +466,16 @@ export function LifeTimeline() {
   // Keep reaction ref current so effects below can call it
   mascotReactionRef.current = mascot.showReaction;
 
-  // When user taps an active branch, run mascot to it.
-  // Skip integrated/historical threads — they live in the past; mascot stays on today.
+  // When user taps an active (open) branch, run mascot to it.
+  // Never run mascot to closed/merged branches — Pip lives in today.
   const prevFocusedId = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!showMascot || !mascot.visible) return;
-    if (operation.kind !== "viewing-integrated" &&
-        focusedBranchId && focusedBranchId !== prevFocusedId.current) {
-      mascot.focusBranch(focusedBranchId);
+    if (focusedBranchId && focusedBranchId !== prevFocusedId.current) {
+      const b = allBranches.find((br) => br.id === focusedBranchId);
+      if (b && !isClosed(b)) {
+        mascot.focusBranch(focusedBranchId);
+      }
     }
     prevFocusedId.current = focusedBranchId;
   }, [focusedBranchId]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -299,12 +299,11 @@ export function useMascot(
     const id = inspectedId.current;
     if (!id) return;
 
-    // If the inspected branch is now closed, escape — but NOT when the user
-    // has explicitly focused it (panel open = patrolEnabled false). In that
-    // case stay put until the user dismisses the panel.
+    // Never track position of closed/merged branches — they live in the past.
+    // If Pip ended up on one (e.g. it was merged while he sat on it), escape.
     const branch = branchesRef.current.find(b => b.id === id);
     if (branch && isClosed(branch)) {
-      if (!patrolEnabledRef.current) return; // user is intentionally here
+      if (!patrolEnabledRef.current) return; // panel open — stay put till closed
       inspectedId.current = null;
       setInspectedIdState(null);
       clearTimer(); cancelRaf();
@@ -341,9 +340,11 @@ export function useMascot(
       return;
     }
 
-    // Stationary — snap to correct position
+    // Stationary — follow significant branch movement (loudness lane shift).
+    // High threshold so horizontal panning doesn't jerk Pip across the screen.
     const cur = posRef.current;
-    if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
+    if (Math.abs(cur.y - ty) >= 4) {
+      // Lane changed (loudness dial) — snap Y only
       posRef.current = { x: tx, y: ty };
       setPos({ x: tx, y: ty });
     }
