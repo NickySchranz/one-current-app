@@ -143,6 +143,10 @@ export function useMascot(
   /** When false (panel open / thread focused) Pip stays put and queues the
    *  next patrol for when it returns to true. */
   patrolEnabled: boolean,
+  /** When true the user is browsing past integrated threads. Pip freezes
+   *  in place — no geometry snapping, no jumps, no patrol. He lives in
+   *  today and shouldn't follow the view into the past. */
+  viewingIntegrated: boolean,
 ): MascotState {
   // Stable refs for latest values
   const branchesRef = useRef(branches);
@@ -157,6 +161,8 @@ export function useMascot(
   const patrolEnabledRef = useRef(patrolEnabled);
   patrolEnabledRef.current = patrolEnabled;
   const pendingPatrol = useRef(false); // set when patrol is blocked mid-cycle
+  const viewingIntegratedRef = useRef(viewingIntegrated);
+  viewingIntegratedRef.current = viewingIntegrated;
 
   const lastVisited = useRef(new Map<string, number>());
   const phase = useRef<'idle'|'jumping'|'landing'|'inspecting'|'talking'|'reacting'>('idle');
@@ -287,7 +293,9 @@ export function useMascot(
 
   // Track geometry changes, escape closed branches, and re-route mid-jump if the
   // timeline is panned so the destination drifts significantly.
+  // When the user is browsing past integrations, Pip freezes — he lives in today.
   useEffect(() => {
+    if (viewingIntegratedRef.current) return;
     const id = inspectedId.current;
     if (!id) return;
 
@@ -359,10 +367,10 @@ export function useMascot(
           phase.current = 'idle';
           setFrame('IDLE_A');
           lastVisited.current.set(branchId, Date.now());
-          if (patrolEnabledRef.current) {
+          if (patrolEnabledRef.current && !viewingIntegratedRef.current) {
             timerRef.current = setTimeout(() => jumpRef.current(), 2500 + Math.random() * 2000);
           } else {
-            // Panel is open — stay put and let the patrol resume effect handle it
+            // Panel open or user is viewing past — stay put, resume when back to today
             pendingPatrol.current = true;
           }
         }, 350);

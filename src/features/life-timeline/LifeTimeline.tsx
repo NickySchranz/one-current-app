@@ -459,9 +459,8 @@ export function LifeTimeline() {
     layout.nowX,
     (branchId) => setOperation({ kind: "quick-touch", branchId }),
     mascotTypePref,
-    // Mascot patrols freely even while an integrated thread is in focus —
-    // he stays on today's active threads, the past integration just stays highlighted
-    operation.kind === "idle" || operation.kind === "viewing-integrated",
+    operation.kind === "idle",                 // patrol only when no panel is open
+    operation.kind === "viewing-integrated",   // freeze Pip in today while browsing past
   );
 
   // Keep reaction ref current so effects below can call it
