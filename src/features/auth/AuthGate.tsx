@@ -37,6 +37,8 @@ export function AuthGate() {
   // Verification: the emailed code, plus resend feedback.
   const [code, setCode] = useState("");
   const [resent, setResent] = useState(false);
+  // When the server has no email provider it hands the code back directly.
+  const [devCode, setDevCode] = useState("");
   // Password reset: the emailed code and the replacement password.
   const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -51,6 +53,7 @@ export function AuthGate() {
     setNewPassword("");
     setCode("");
     setResent(false);
+    setDevCode("");
     setPassword("");
   };
 
@@ -84,8 +87,9 @@ export function AuthGate() {
     setBusy(true);
     setError("");
     try {
-      await registerApi(email.trim(), password, name.trim());
+      const dev = await registerApi(email.trim(), password, name.trim());
       go("verify");
+      if (dev) setDevCode(dev);
     } catch (e) {
       if (e instanceof ApiOfflineError) {
         signIn({ name: name.trim(), email: email.trim() });
@@ -106,7 +110,8 @@ export function AuthGate() {
     setError("");
     setBusy(true);
     try {
-      await api.forgotPassword(email.trim());
+      const res = await api.forgotPassword(email.trim());
+      if (res.devCode) setDevCode(res.devCode);
     } catch {
       // Enumeration-safe on the server; offline shows the same calm answer.
     } finally {
@@ -139,7 +144,8 @@ export function AuthGate() {
     setError("");
     setResent(false);
     try {
-      await api.resendVerification(email.trim());
+      const res = await api.resendVerification(email.trim());
+      if (res.devCode) setDevCode(res.devCode);
     } catch {
       // Enumeration-safe on the server; offline shows the same calm answer.
     } finally {
@@ -284,6 +290,13 @@ export function AuthGate() {
                   email: email.trim(),
                 })}
               </Hint>
+              {devCode !== "" && (
+                <Hint style={{ marginBottom: 0 }}>
+                  {t("Email delivery is not set up yet — use this code: {code}", {
+                    code: devCode,
+                  })}
+                </Hint>
+              )}
               <AppTextInput
                 value={code}
                 onChangeText={setCode}
@@ -326,6 +339,13 @@ export function AuthGate() {
                     email: email.trim(),
                   })}
                 </Hint>
+                {devCode !== "" && (
+                  <Hint style={{ marginBottom: 0 }}>
+                    {t("Email delivery is not set up yet — use this code: {code}", {
+                      code: devCode,
+                    })}
+                  </Hint>
+                )}
                 <AppTextInput
                   value={resetToken}
                   onChangeText={setResetToken}

@@ -198,9 +198,10 @@ export const api = {
   login: async (email: string, password: string) =>
     storeSession(await call<AuthResponse>("POST", "/auth/login", { email, password })),
 
-  /** Creates the account but no session — /auth/verify unlocks it with the emailed code. */
+  /** Creates the account but no session — /auth/verify unlocks it with the emailed code.
+   * When the server has no email provider, the code arrives here as devCode. */
   register: (email: string, password: string, name?: string) =>
-    call<{ needsVerification: true; email: string }>("POST", "/auth/register", {
+    call<{ needsVerification: true; email: string; devCode?: string }>("POST", "/auth/register", {
       email,
       password,
       name,
@@ -210,9 +211,10 @@ export const api = {
     storeSession(await call<AuthResponse>("POST", "/auth/verify", { email, code })),
 
   resendVerification: (email: string) =>
-    call<{ ok: true }>("POST", "/auth/resend-verification", { email }),
+    call<{ ok: true; devCode?: string }>("POST", "/auth/resend-verification", { email }),
 
-  forgotPassword: (email: string) => call<{ ok: true }>("POST", "/auth/forgot", { email }),
+  forgotPassword: (email: string) =>
+    call<{ ok: true; devCode?: string }>("POST", "/auth/forgot", { email }),
 
   resetPassword: (token: string, newPassword: string) =>
     call<{ ok: true }>("POST", "/auth/reset", { token, newPassword }),

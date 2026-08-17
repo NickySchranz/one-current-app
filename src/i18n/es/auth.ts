@@ -33,6 +33,8 @@ export const auth: Record<string, string> = {
   "That code is not valid — request a new one and try again.":
     "Ese código no es válido — pide uno nuevo y vuelve a intentarlo.",
   "Paste the code from the email first.": "Primero pega el código del correo.",
+  "Email delivery is not set up yet — use this code: {code}":
+    "El envío de correos aún no está configurado — usa este código: {code}",
   "That does not look like an email address.": "Eso no parece una dirección de correo.",
   "The password needs at least 4 characters.": "La contraseña necesita al menos 4 caracteres.",
   "What should we call you?": "¿Cómo te llamamos?",
