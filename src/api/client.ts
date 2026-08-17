@@ -8,7 +8,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const TOKENS_KEY = "one-current-tokens";
 const API_URL_KEY = "one-current-api-url";
-const DEFAULT_URL = "http://localhost:4000";
+const DEFAULT_URL = __DEV__
+  ? "http://localhost:4000"
+  : "https://one-current-api.nikischranz.workers.dev";
 const TIMEOUT_MS = 6000;
 
 export type Session = { access: string; refresh: string };
@@ -172,6 +174,19 @@ async function call<T>(method: string, path: string, body?: unknown, opts: CallO
   return (await res.json()) as T;
 }
 
+/** Metadata about an uploaded share — the raw code is never returned again. */
+export type ShareMeta = {
+  id: string;
+  fromEmail: string;
+  fromName?: string;
+  threadCount: number;
+  from: string;
+  to: string;
+  createdAt: string;
+  expiresAt: string;
+  redeemed: boolean;
+};
+
 type AuthResponse = { user: ApiUser; accessToken: string; refreshToken: string };
 
 async function storeSession(res: AuthResponse): Promise<ApiUser> {
@@ -237,4 +252,10 @@ export const api = {
       { document, practitionerEmail: practitionerEmail || undefined },
       { auth: true },
     ),
+
+  listMyShares: () =>
+    call<{ shares: ShareMeta[] }>("GET", "/shares/mine", undefined, { auth: true }),
+
+  deleteShare: (id: string) =>
+    call<{ ok: true }>("DELETE", `/shares/${id}`, undefined, { auth: true }),
 };

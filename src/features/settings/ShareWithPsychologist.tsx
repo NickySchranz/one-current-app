@@ -6,8 +6,10 @@ import { db } from "@/db/database";
 import { appNow } from "@/domain/time/clock";
 import { buildShareExport } from "@/domain/share/build-share-export";
 import { PaywallPrompt } from "@/features/paywall/PaywallPrompt";
+import { MyShares } from "@/features/settings/MyShares";
+import { ThreadPicker } from "@/features/settings/ThreadPicker";
 import { useT } from "@/i18n/i18n";
-import { AppTextInput, Button, Card, Chip, H2, Hint, T, rowStyles } from "@/ui/primitives";
+import { AppTextInput, Button, Card, H2, Hint, T, rowStyles } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
 
@@ -36,6 +38,8 @@ export function ShareWithPsychologist() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [since, setSince] = useState<SinceChoice>("month");
   const [customDate, setCustomDate] = useState("");
+  const [practitionerEmail, setPractitionerEmail] = useState("");
+  const [emailErr, setEmailErr] = useState("");
   const [paywalled, setPaywalled] = useState(false);
   // Native fallback: no downloads there, so the file shows as copyable text.
   const [shareJson, setShareJson] = useState("");
@@ -55,14 +59,6 @@ export function ShareWithPsychologist() {
           ? isoDaysAgo(90)
           : customDate;
   const fromValid = /^\d{4}-\d{2}-\d{2}$/.test(from) && !Number.isNaN(Date.parse(from));
-
-  const toggle = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
 
   async function createFile() {
     // Waiting containers live only in the database, not in store state.
@@ -91,6 +87,12 @@ export function ShareWithPsychologist() {
   }
 
   async function uploadForCode() {
+    const email = practitionerEmail.trim();
+    if (email !== "" && !/^\S+@\S+\.\S+$/.test(email)) {
+      setEmailErr(t("That doesn't look like an email address."));
+      return;
+    }
+    setEmailErr("");
     setUploading(true);
     setShareCode("");
     setShareCodeErr("");
@@ -105,7 +107,7 @@ export function ShareWithPsychologist() {
         from,
         now: appNow(),
       });
-      const res = await api.createShare(share);
+      const res = await api.createShare(share, email || undefined);
       setShareCode(res.code);
     } catch (e) {
       setShareCodeErr(
@@ -151,23 +153,7 @@ export function ShareWithPsychologist() {
           </Hint>
         ) : (
           <>
-            <View accessibilityLabel={t("Which threads")} style={rowStyles.tagRow}>
-              {candidates.map((b) => (
-                <Chip
-                  key={b.id}
-                  label={b.title}
-                  pressed={selected.has(b.id)}
-                  onPress={() => toggle(b.id)}
-                />
-              ))}
-            </View>
-            <View style={[rowStyles.filterRow, { marginTop: 6 }]}>
-              <Button
-                onPress={() => setSelected(new Set(candidates.map((b) => b.id)))}
-                label={t("All")}
-              />
-              <Button onPress={() => setSelected(new Set())} label={t("None")} />
-            </View>
+            <ThreadPicker branches={candidates} selected={selected} onChange={setSelected} />
             <View
               accessibilityLabel={t("Since when?")}
               style={[rowStyles.filterRow, { marginTop: 10 }]}
@@ -202,6 +188,30 @@ export function ShareWithPsychologist() {
                 style={{ marginTop: 8, maxWidth: 200 }}
               />
             )}
+            {hasTokens() && (
+              <View style={{ marginTop: 10, gap: 4 }}>
+                <AppTextInput
+                  value={practitionerEmail}
+                  onChangeText={(v) => {
+                    setPractitionerEmail(v);
+                    if (emailErr) setEmailErr("");
+                  }}
+                  placeholder="name@example.com"
+                  accessibilityLabel={t("Your psychologist's email (optional)")}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  style={{ maxWidth: 320 }}
+                />
+                <Hint style={{ marginBottom: 0 }}>
+                  {t(
+                    "Optional: with their email, the share appears directly in their inbox — and only they can redeem the code.",
+                  )}
+                </Hint>
+                {emailErr !== "" && (
+                  <T style={{ color: tk.danger, fontSize: 13.6 }}>{emailErr}</T>
+                )}
+              </View>
+            )}
             <View style={[rowStyles.filterRow, { marginTop: 10 }]}>
               <Button
                 variant="primary"
@@ -215,13 +225,6 @@ export function ShareWithPsychologist() {
                   disabled={selected.size === 0 || !fromValid || uploading}
                   label={uploading ? t("Uploading…") : t("Upload and get a code")}
                 />
-              )}
-              {selected.size > 0 && (
-                <T style={{ flexShrink: 1 }}>
-                  {selected.size === 1
-                    ? t("1 thread")
-                    : t("{n} threads", { n: selected.size })}
-                </T>
               )}
             </View>
             {shareCode !== "" && (
@@ -250,6 +253,7 @@ export function ShareWithPsychologist() {
           </>
         )}
       </Card>
+      <MyShares refreshKey={shareCode} />
       <PaywallPrompt
         reason={paywalled ? "share" : null}
         onClose={() => setPaywalled(false)}

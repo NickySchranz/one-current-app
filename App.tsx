@@ -1,8 +1,10 @@
 import { useEffect } from "react";
-import { AppState, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, AppState, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useAppStore } from "@/stores/app-store";
+import { hasTokens } from "@/api/client";
+import { useT } from "@/i18n/i18n";
 import { PrimaryNavigation } from "@/features/navigation/PrimaryNavigation";
 import { Logo } from "@/features/navigation/Logo";
 import { LifeTimeline } from "@/features/life-timeline/LifeTimeline";
@@ -25,6 +27,8 @@ function AppShell() {
   const refreshNow = useAppStore((s) => s.refreshNow);
   const timeRate = useAppStore((s) => s.timeRate);
   const mascotType = useAppStore((s) => s.mascotType);
+  const apiOnline = useAppStore((s) => s.apiOnline);
+  const t = useT();
   const tk = useTheme();
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
@@ -49,7 +53,19 @@ function AppShell() {
   }, [refreshNow, timeRate]);
 
   if (!ready) {
-    return <View accessibilityState={{ busy: true }} style={{ flex: 1, backgroundColor: tk.bg }} />;
+    return (
+      <View
+        accessibilityState={{ busy: true }}
+        style={{
+          flex: 1,
+          backgroundColor: tk.bg,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <ActivityIndicator color={tk.accent} />
+      </View>
+    );
   }
 
   if (!authUser) {
@@ -89,6 +105,22 @@ function AppShell() {
         >
           One Current
         </T>
+        {apiOnline === false && hasTokens() && (
+          <T
+            style={{
+              fontSize: 11.5,
+              color: tk.inkSoft,
+              borderWidth: 1,
+              borderColor: alpha(tk.lineAxis, 0.55),
+              borderRadius: 999,
+              paddingHorizontal: 8,
+              paddingVertical: 2,
+              overflow: "hidden",
+            }}
+          >
+            {t("Offline")}
+          </T>
+        )}
         {!compactNav && <PrimaryNavigation variant="header" />}
       </View>
       <View style={{ flex: 1, minHeight: 0 }}>

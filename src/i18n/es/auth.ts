@@ -34,6 +34,7 @@ export const auth: Record<string, string> = {
   "The account could not be created.": "No se pudo crear la cuenta.",
   "Signing in…": "Iniciando sesión…",
   "One moment…": "Un momento…",
+  Offline: "Sin conexión",
   "Offline — signed in on this device only.": "Sin conexión — sesión solo en este dispositivo.",
   "Account & sync": "Cuenta y sincronización",
   "Cloud backup keeps a copy of everything on your account so a new device can pick it up. Part of Pro.":

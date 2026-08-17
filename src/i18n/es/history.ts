@@ -197,4 +197,26 @@ export const history: Record<string, string> = {
   "Since a date…": "Desde una fecha…",
   "Create the file": "Crear el archivo",
   "Share file contents": "Contenido del archivo compartido",
+  "Find a thread…": "Buscar un hilo…",
+  Open: "Abiertos",
+  Closed: "Cerrados",
+  "No threads match your search.": "Ningún hilo coincide con tu búsqueda.",
+  "{n} of {total} threads selected": "{n} de {total} hilos seleccionados",
+  Clear: "Limpiar",
+  "Your psychologist's email (optional)": "El correo de tu psicólogo (opcional)",
+  "Optional: with their email, the share appears directly in their inbox — and only they can redeem the code.":
+    "Opcional: con su correo, lo compartido aparece directamente en su bandeja — y solo esa persona puede canjear el código.",
+  "That doesn't look like an email address.": "Eso no parece una dirección de correo.",
+  "Your uploaded shares": "Tus archivos subidos",
+  "No uploaded shares. Codes you create appear here.":
+    "No hay archivos subidos. Los códigos que crees aparecen aquí.",
+  "Try again": "Intentar de nuevo",
+  "Expires {date}": "Caduca el {date}",
+  Expired: "Caducado",
+  Redeemed: "Canjeado",
+  Revoke: "Revocar",
+  "Revoking…": "Revocando…",
+  "Yes, revoke": "Sí, revocar",
+  "Revoke this share? The code stops working immediately.":
+    "¿Revocar este archivo? El código deja de funcionar de inmediato.",
 };
