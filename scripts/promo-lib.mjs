@@ -212,8 +212,8 @@ export async function openPage(browser, { url, viewport, seedAuth = true, cursor
 }
 
 /* Patient app, example data loaded, back on Now. */
-export async function openAppWithExampleData(browser, viewport) {
-  const page = await openPage(browser, { url: "http://localhost:4188/one-current-app/", viewport });
+export async function openAppWithExampleData(browser, viewport, opts = {}) {
+  const page = await openPage(browser, { url: "http://localhost:4188/one-current-app/", viewport, ...opts });
   await page.getByRole("button", { name: "More" }).first().click();
   await page.waitForTimeout(600);
   await page.getByRole("button", { name: "Load example threads" }).click();

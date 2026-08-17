@@ -1,71 +1,20 @@
 /* Capture the landing-page screenshots from the current app builds.
    Writes straight into one_current/public/about/img/ — rerun after UI changes,
    then redeploy the landing (push one_current main). */
-import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
-import { extname, join } from "node:path";
-import { chromium } from "playwright-core";
+import { launchBrowser, openAppWithExampleData, openPage, serveDist, strokePoint } from "./promo-lib.mjs";
 
 const IMG = "/home/nicky/one_current/public/about/img";
-const MIME = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".css": "text/css",
-  ".json": "application/json",
-  ".ico": "image/x-icon",
-};
-function serveDist(dist, port) {
-  const server = createServer(async (req, res) => {
-    const path = req.url === "/" ? "/index.html" : req.url.split("?")[0];
-    try {
-      const body = await readFile(join(dist, path));
-      res.writeHead(200, { "content-type": MIME[extname(path)] ?? "application/octet-stream" });
-      res.end(body);
-    } catch {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-  return new Promise((r) => server.listen(port, () => r(server)));
-}
-const appServer = await serveDist(new URL("../dist", import.meta.url).pathname, 4188);
-const psychoServer = await serveDist("/home/nicky/one-current-psycho/dist", 4189);
 
-const browser = await chromium.launch({
-  executablePath: `${process.env.HOME}/.cache/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell`,
-  args: ["--no-sandbox"],
-});
+const appServer = await serveDist(new URL("../dist", import.meta.url).pathname, 4188, "/one-current-app");
+const psychoServer = await serveDist("/home/nicky/one-current-psycho/dist", 4189, "/one-current-psycho");
+const browser = await launchBrowser();
 
 const shot = async (page, name) => {
   await page.screenshot({ path: `${IMG}/${name}.png` });
   console.log(`shot: ${name}`);
 };
 
-async function appPage(viewport) {
-  const page = await browser.newPage({ viewport, deviceScaleFactor: 2 });
-  await page.addInitScript(() => {
-    localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
-    localStorage.setItem("one-current-pro", "1");
-  });
-  await page.goto("http://localhost:4188/", { waitUntil: "networkidle" });
-  await page.waitForTimeout(1800);
-  await page.getByRole("button", { name: "More" }).first().click();
-  await page.waitForTimeout(600);
-  await page.getByRole("button", { name: "Load example threads" }).click();
-  await page.waitForTimeout(900);
-  await page.getByRole("button", { name: /Now$/ }).first().click();
-  await page.waitForTimeout(2500);
-  return page;
-}
-
-// A point on a thread's curved stroke (the transparent hit path).
-const strokePoint = (page, along) =>
-  page.evaluate((at) => {
-    const el = document.querySelector('path[stroke="transparent"]');
-    const p = el.getPointAtLength(el.getTotalLength() * at);
-    const m = el.getScreenCTM();
-    return { x: m.a * p.x + m.c * p.y + m.e, y: m.b * p.x + m.d * p.y + m.f };
-  }, along);
+const appPage = (viewport) => openAppWithExampleData(browser, viewport, { cursor: false });
 
 // ---- phone shots (390x780 @2x) ----
 const phone = await appPage({ width: 390, height: 780 });
@@ -132,13 +81,28 @@ await shot(desk, "timeline-desktop");
 await desk.close();
 
 // ---- the practice app (1360x850 @2x) ----
-const psycho = await browser.newPage({ viewport: { width: 1360, height: 850 }, deviceScaleFactor: 2 });
-await psycho.goto("http://localhost:4189/");
-await psycho.waitForTimeout(1800);
-await psycho.getByLabel("Email").fill("demo@onecurrent.app");
-await psycho.getByLabel("Password", { exact: true }).fill("demo1234");
-await psycho.getByRole("button", { name: "Sign in" }).click();
-await psycho.waitForTimeout(800);
+const psycho = await openPage(browser, {
+  url: "http://localhost:4189/one-current-psycho/",
+  viewport: { width: 1360, height: 850 },
+  seedAuth: false,
+  cursor: false,
+});
+const psychoLogin = async (email, password) => {
+  await psycho.getByLabel("Email").fill(email);
+  await psycho.getByLabel("Password", { exact: true }).fill(password);
+  await psycho.getByRole("button", { name: "Sign in" }).click();
+  await psycho.waitForTimeout(3000);
+  return (await psycho.getByRole("button", { name: "+ Add" }).count()) > 0;
+};
+if (!(await psychoLogin("demo@onecurrent.app", "demo1234"))) {
+  const out = psycho.getByRole("button", { name: "Sign out" });
+  if (await out.count()) {
+    await out.click();
+    await psycho.waitForTimeout(1000);
+  }
+  if (!(await psychoLogin("johannapoveda.28@gmail.com", "test")))
+    throw new Error("no practitioner session for screenshots");
+}
 await psycho.getByRole("button", { name: "Load example clients" }).click();
 await psycho.waitForTimeout(800);
 await psycho.getByRole("button", { name: "Open Maya R." }).click();
@@ -155,3 +119,4 @@ await browser.close();
 appServer.close();
 psychoServer.close();
 console.log("done");
+process.exit(0);
