@@ -29,9 +29,11 @@ const MIME = {
   ".ico": "image/x-icon",
 };
 
-export function serveDist(dist, port) {
+export function serveDist(dist, port, stripPrefix = "") {
   const server = createServer(async (req, res) => {
-    const path = req.url === "/" ? "/index.html" : req.url.split("?")[0];
+    let path = req.url.split("?")[0];
+    if (stripPrefix && path.startsWith(stripPrefix)) path = path.slice(stripPrefix.length);
+    if (path === "" || path === "/") path = "/index.html";
     try {
       const body = await readFile(join(dist, path));
       res.writeHead(200, { "content-type": MIME[extname(path)] ?? "application/octet-stream" });
@@ -195,6 +197,9 @@ export async function openPage(browser, { url, viewport, seedAuth = true, cursor
   const page = await browser.newPage({ viewport, deviceScaleFactor: 2 });
   await page.addInitScript(CLOCK_PATCH);
   if (cursor) await page.addInitScript(CURSOR_PATCH);
+  await page.addInitScript(() => {
+    localStorage.setItem("one-current-tutorial-v1", "done");
+  });
   if (seedAuth) {
     await page.addInitScript(() => {
       localStorage.setItem("one-current-auth", JSON.stringify({ email: "promo@onecurrent.app" }));
@@ -208,7 +213,7 @@ export async function openPage(browser, { url, viewport, seedAuth = true, cursor
 
 /* Patient app, example data loaded, back on Now. */
 export async function openAppWithExampleData(browser, viewport) {
-  const page = await openPage(browser, { url: "http://localhost:4188/", viewport });
+  const page = await openPage(browser, { url: "http://localhost:4188/one-current-app/", viewport });
   await page.getByRole("button", { name: "More" }).first().click();
   await page.waitForTimeout(600);
   await page.getByRole("button", { name: "Load example threads" }).click();
@@ -275,20 +280,18 @@ export class Recorder {
   /* Pump frames while a Playwright action (click, fill…) settles. Actions
      wait on rAF-based stability checks, which only progress when we tick. */
   async during(promise, { min = 0, max = 600 } = {}) {
-    let done = false;
-    const tracked = promise.then(
-      (v) => ((done = true), v),
-      (e) => {
-        done = true;
-        throw e;
-      },
+    let done = false, err = null, val;
+    Promise.resolve(promise).then(
+      (v) => ((done = true), (val = v)),
+      (e) => ((done = true), (err = e)),
     );
     let captured = 0;
     while ((!done && captured < max) || captured < min) {
       await this.capture(1);
       captured++;
     }
-    return tracked;
+    if (err) throw err;
+    return val;
   }
 
   /* Glide the visible cursor to a point over `ms` of footage. */
@@ -304,16 +307,23 @@ export class Recorder {
     this.cursorAt = { x, y };
   }
 
-  /* Glide to an element (by locator) and click it, capturing throughout. */
+  /* Glide to an element (by locator) and click it, capturing throughout.
+     Scrolls it into view first (on camera) if it's outside the viewport. */
   async glideClick(locator, ms = 500) {
-    const box = await locator.boundingBox();
+    const vp = this.page.viewportSize();
+    let box = await locator.boundingBox();
+    if (!box || box.y < 0 || box.y + box.height > vp.height || box.x < 0 || box.x + box.width > vp.width) {
+      await this.during(locator.scrollIntoViewIfNeeded(), { min: 4, max: 90 });
+      await this.capture(3);
+      box = await locator.boundingBox();
+    }
     if (!box) throw new Error(`no box for ${locator}`);
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
     await this.glideTo(x, y, ms);
-    await this.page.mouse.down();
-    await this.capture(2);
-    await this.page.mouse.up();
+    // let Playwright retarget the exact click point — animated trays can
+    // shift between measuring and pressing (the cursor dot follows anyway)
+    await this.during(locator.click({ timeout: 8000 }), { min: 2, max: 120 });
     await this.capture(1);
   }
 
