@@ -7,7 +7,7 @@ import { useT } from "@/i18n/i18n";
 import { AppTextInput, Button, Card, H2, Hint, T } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
 
-type Screen = "login" | "register" | "forgot";
+type Screen = "login" | "register" | "forgot" | "verify";
 
 function looksLikeEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
@@ -25,6 +25,7 @@ export function AuthGate() {
   const signIn = useAppStore((s) => s.signIn);
   const signInApi = useAppStore((s) => s.signInApi);
   const registerApi = useAppStore((s) => s.registerApi);
+  const verifyEmailApi = useAppStore((s) => s.verifyEmailApi);
 
   const [screen, setScreen] = useState<Screen>("login");
   const [name, setName] = useState("");
@@ -33,11 +34,23 @@ export function AuthGate() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  // Verification: the emailed code, plus resend feedback.
+  const [code, setCode] = useState("");
+  const [resent, setResent] = useState(false);
+  // Password reset: the emailed code and the replacement password.
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [resetDone, setResetDone] = useState(false);
 
   const go = (next: Screen) => {
     setScreen(next);
     setError("");
     setResetSent(false);
+    setResetDone(false);
+    setResetToken("");
+    setNewPassword("");
+    setCode("");
+    setResent(false);
     setPassword("");
   };
 
@@ -52,6 +65,8 @@ export function AuthGate() {
       if (e instanceof ApiOfflineError) {
         // The server is unreachable: the app still opens, on this device only.
         signIn({ email: email.trim() });
+      } else if (e instanceof ApiHttpError && e.code === "email_unverified") {
+        go("verify");
       } else if (e instanceof ApiHttpError && e.code === "rate_limited") {
         setError(t("Too many attempts. Wait a moment and try again."));
       } else {
@@ -70,6 +85,7 @@ export function AuthGate() {
     setError("");
     try {
       await registerApi(email.trim(), password, name.trim());
+      go("verify");
     } catch (e) {
       if (e instanceof ApiOfflineError) {
         signIn({ name: name.trim(), email: email.trim() });
@@ -96,6 +112,59 @@ export function AuthGate() {
     } finally {
       setBusy(false);
       setResetSent(true);
+    }
+  }
+
+  async function submitVerify() {
+    if (code.trim() === "") return setError(t("Paste the code from the email first."));
+    setBusy(true);
+    setError("");
+    try {
+      await verifyEmailApi(email.trim(), code.trim());
+      // authUser is set now — the gate unmounts by itself.
+    } catch (e) {
+      if (e instanceof ApiOfflineError) {
+        setError(t("The server could not be reached."));
+      } else if (e instanceof ApiHttpError && e.code === "rate_limited") {
+        setError(t("Too many attempts. Wait a moment and try again."));
+      } else {
+        setError(t("That code is not valid — request a new one and try again."));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendCode() {
+    setError("");
+    setResent(false);
+    try {
+      await api.resendVerification(email.trim());
+    } catch {
+      // Enumeration-safe on the server; offline shows the same calm answer.
+    } finally {
+      setResent(true);
+    }
+  }
+
+  async function submitReset() {
+    if (resetToken.trim() === "") return setError(t("Paste the code from the email first."));
+    if (newPassword.length < 4) return setError(t("The password needs at least 4 characters."));
+    setBusy(true);
+    setError("");
+    try {
+      await api.resetPassword(resetToken.trim(), newPassword);
+      setResetDone(true);
+    } catch (e) {
+      if (e instanceof ApiOfflineError) {
+        setError(t("The server could not be reached."));
+      } else if (e instanceof ApiHttpError && e.code === "rate_limited") {
+        setError(t("Too many attempts. Wait a moment and try again."));
+      } else {
+        setError(t("That reset code is not valid any more — request a new one."));
+      }
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -206,26 +275,87 @@ export function AuthGate() {
           </Card>
         )}
 
+        {screen === "verify" && (
+          <Card>
+            <H2 style={{ marginTop: 0 }}>{t("Check your email")}</H2>
+            <View style={{ gap: 10 }}>
+              <Hint style={{ marginBottom: 0 }}>
+                {t("We sent a code to {email}. Paste it here to finish signing up.", {
+                  email: email.trim(),
+                })}
+              </Hint>
+              <AppTextInput
+                value={code}
+                onChangeText={setCode}
+                placeholder={t("Verification code")}
+                accessibilityLabel={t("Verification code")}
+                autoCapitalize="characters"
+                autoComplete="one-time-code"
+              />
+              {error !== "" && <T style={{ color: tk.danger, fontSize: 13.6 }}>{error}</T>}
+              {resent && <Hint style={{ marginBottom: 0 }}>{t("A new code is on its way.")}</Hint>}
+              <Button
+                variant="primary"
+                large
+                disabled={busy}
+                onPress={() => void submitVerify()}
+                label={busy ? t("One moment…") : t("Verify")}
+              />
+              <Button variant="quiet" onPress={() => void resendCode()} label={t("Resend the code")} />
+              <Button variant="quiet" onPress={() => go("login")} label={t("Back to sign in")} />
+            </View>
+          </Card>
+        )}
+
         {screen === "forgot" && (
           <Card>
             <H2 style={{ marginTop: 0 }}>{t("Forgot your password?")}</H2>
-            {resetSent ? (
+            {resetDone ? (
               <>
-                <Hint>
-                  {t("If an account exists for {email}, a reset link is on its way.", {
-                    email: email.trim(),
-                  })}
-                </Hint>
+                <Hint>{t("Your password is updated — sign in with it now.")}</Hint>
                 <Button
                   style={{ alignSelf: "flex-start" }}
                   onPress={() => go("login")}
                   label={t("Back to sign in")}
                 />
               </>
+            ) : resetSent ? (
+              <View style={{ gap: 10 }}>
+                <Hint style={{ marginBottom: 0 }}>
+                  {t("If an account exists for {email}, a code is on its way. Paste it here with a new password.", {
+                    email: email.trim(),
+                  })}
+                </Hint>
+                <AppTextInput
+                  value={resetToken}
+                  onChangeText={setResetToken}
+                  placeholder={t("Code from the email")}
+                  accessibilityLabel={t("Code from the email")}
+                  autoCapitalize="none"
+                  autoComplete="one-time-code"
+                />
+                <AppTextInput
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  placeholder={t("New password")}
+                  accessibilityLabel={t("New password")}
+                  secureTextEntry
+                  autoCapitalize="none"
+                />
+                {error !== "" && <T style={{ color: tk.danger, fontSize: 13.6 }}>{error}</T>}
+                <Button
+                  variant="primary"
+                  large
+                  disabled={busy}
+                  onPress={() => void submitReset()}
+                  label={busy ? t("One moment…") : t("Set the new password")}
+                />
+                <Button variant="quiet" onPress={() => go("login")} label={t("Back to sign in")} />
+              </View>
             ) : (
               <View style={{ gap: 10 }}>
                 <Hint style={{ marginBottom: 0 }}>
-                  {t("Tell us your email and we will send a link to set a new password.")}
+                  {t("Tell us your email and we will send a code to set a new password.")}
                 </Hint>
                 {emailField}
                 {error !== "" && <T style={{ color: tk.danger, fontSize: 13.6 }}>{error}</T>}
@@ -234,7 +364,7 @@ export function AuthGate() {
                   large
                   disabled={busy}
                   onPress={() => void submitForgot()}
-                  label={t("Send the link")}
+                  label={t("Send the code")}
                 />
                 <Button variant="quiet" onPress={() => go("login")} label={t("Back to sign in")} />
               </View>

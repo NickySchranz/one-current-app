@@ -198,10 +198,24 @@ export const api = {
   login: async (email: string, password: string) =>
     storeSession(await call<AuthResponse>("POST", "/auth/login", { email, password })),
 
-  register: async (email: string, password: string, name?: string) =>
-    storeSession(await call<AuthResponse>("POST", "/auth/register", { email, password, name })),
+  /** Creates the account but no session — /auth/verify unlocks it with the emailed code. */
+  register: (email: string, password: string, name?: string) =>
+    call<{ needsVerification: true; email: string }>("POST", "/auth/register", {
+      email,
+      password,
+      name,
+    }),
+
+  verifyEmail: async (email: string, code: string) =>
+    storeSession(await call<AuthResponse>("POST", "/auth/verify", { email, code })),
+
+  resendVerification: (email: string) =>
+    call<{ ok: true }>("POST", "/auth/resend-verification", { email }),
 
   forgotPassword: (email: string) => call<{ ok: true }>("POST", "/auth/forgot", { email }),
+
+  resetPassword: (token: string, newPassword: string) =>
+    call<{ ok: true }>("POST", "/auth/reset", { token, newPassword }),
 
   /** Fire-and-forget server logout; local tokens are cleared regardless. */
   logout: async () => {

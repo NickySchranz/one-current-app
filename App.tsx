@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ActivityIndicator, AppState, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, AppState, Platform, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useAppStore } from "@/stores/app-store";
@@ -38,6 +38,32 @@ function AppShell() {
   useEffect(() => {
     void init();
   }, [init]);
+
+  // Returning from Stripe Checkout on web: ?billing=success means the plan
+  // may have flipped to Pro — ask the server, once more after a beat in case
+  // the webhook is still in flight. Either way the query param is cleaned up.
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const billing = params.get("billing");
+    if (!billing) return;
+    params.delete("billing");
+    const rest = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash,
+    );
+    if (billing !== "success") return;
+    void (async () => {
+      const { syncMe } = useAppStore.getState();
+      await syncMe();
+      if (useAppStore.getState().serverPro !== true) {
+        await new Promise((r) => setTimeout(r, 2000));
+        await syncMe();
+      }
+    })();
+  }, []);
 
   // The timeline lives: Now keeps moving while the app stays open.
   // When the Testing clock runs fast, tick fast enough to watch it flow.

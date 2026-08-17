@@ -10,12 +10,29 @@ export const auth: Record<string, string> = {
   "Your name": "Tu nombre",
   Register: "Registrarse",
   "I already have an account": "Ya tengo una cuenta",
-  "Tell us your email and we will send a link to set a new password.":
-    "Dinos tu correo y te enviaremos un enlace para poner una contraseña nueva.",
-  "Send the link": "Enviar el enlace",
+  "Tell us your email and we will send a code to set a new password.":
+    "Dinos tu correo y te enviaremos un código para poner una contraseña nueva.",
+  "Send the code": "Enviar el código",
   "Back to sign in": "Volver a iniciar sesión",
-  "If an account exists for {email}, a reset link is on its way.":
-    "Si existe una cuenta para {email}, el enlace ya está en camino.",
+  "If an account exists for {email}, a code is on its way. Paste it here with a new password.":
+    "Si existe una cuenta para {email}, el código ya está en camino. Pégalo aquí con una contraseña nueva.",
+  "Code from the email": "Código del correo",
+  "New password": "Contraseña nueva",
+  "Set the new password": "Guardar la contraseña nueva",
+  "Your password is updated — sign in with it now.":
+    "Tu contraseña está actualizada — inicia sesión con ella ahora.",
+  "That reset code is not valid any more — request a new one.":
+    "Ese código ya no es válido — pide uno nuevo.",
+  "Check your email": "Revisa tu correo",
+  "We sent a code to {email}. Paste it here to finish signing up.":
+    "Enviamos un código a {email}. Pégalo aquí para terminar el registro.",
+  "Verification code": "Código de verificación",
+  Verify: "Verificar",
+  "Resend the code": "Reenviar el código",
+  "A new code is on its way.": "Un código nuevo está en camino.",
+  "That code is not valid — request a new one and try again.":
+    "Ese código no es válido — pide uno nuevo y vuelve a intentarlo.",
+  "Paste the code from the email first.": "Primero pega el código del correo.",
   "That does not look like an email address.": "Eso no parece una dirección de correo.",
   "The password needs at least 4 characters.": "La contraseña necesita al menos 4 caracteres.",
   "What should we call you?": "¿Cómo te llamamos?",

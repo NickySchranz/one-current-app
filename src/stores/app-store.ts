@@ -185,8 +185,10 @@ type AppState = {
   signIn(user: AuthUser): void;
   /** Sign in against the API; throws ApiOfflineError / ApiAuthError / ApiHttpError. */
   signInApi(email: string, password: string): Promise<void>;
-  /** Register against the API; throws like signInApi. */
+  /** Register against the API; no session yet — verifyEmailApi finishes it. Throws like signInApi. */
   registerApi(email: string, password: string, name?: string): Promise<void>;
+  /** Trade the emailed code for a real session; throws like signInApi. */
+  verifyEmailApi(email: string, code: string): Promise<void>;
   /** Refresh plan/account facts from the server when tokens exist. Never throws. */
   syncMe(): Promise<void>;
   signOut(): void;
@@ -740,7 +742,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     set(await planPatch(user.plan === "pro", get()));
   },
   async registerApi(email, password, name) {
-    const user = await api.register(email, password, name);
+    // The account exists now but stays locked until the emailed code is entered.
+    await api.register(email, password, name);
+  },
+  async verifyEmailApi(email, code) {
+    const user = await api.verifyEmail(email, code);
     get().signIn({ name: user.name, email: user.email });
     set(await planPatch(user.plan === "pro", get()));
   },
