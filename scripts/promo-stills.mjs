@@ -143,6 +143,22 @@ const stills = {
     await page.close();
   },
 
+  async history() {
+    const page = await phonePage();
+    await page.getByRole("button", { name: "History" }).first().click();
+    await page.waitForTimeout(1800);
+    await shot(page, "still-history");
+    await page.close();
+  },
+
+  async actions() {
+    const page = await phonePage();
+    await page.getByRole("button", { name: /Actions$/ }).first().click();
+    await page.waitForTimeout(1500);
+    await shot(page, "still-actions");
+    await page.close();
+  },
+
   async practice() {
     const page = await openPage(browser, {
       url: "http://localhost:4189/one-current-psycho/",
