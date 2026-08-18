@@ -193,8 +193,8 @@ const CURSOR_PATCH = `window.addEventListener("DOMContentLoaded", () => {
 });`;
 
 /* Open an app page with auth + pro seeded, clock + cursor patches installed. */
-export async function openPage(browser, { url, viewport, seedAuth = true, cursor = true }) {
-  const page = await browser.newPage({ viewport, deviceScaleFactor: 2 });
+export async function openPage(browser, { url, viewport, seedAuth = true, cursor = true, dsf = 2 }) {
+  const page = await browser.newPage({ viewport, deviceScaleFactor: dsf });
   await page.addInitScript(CLOCK_PATCH);
   if (cursor) await page.addInitScript(CURSOR_PATCH);
   await page.addInitScript(() => {
