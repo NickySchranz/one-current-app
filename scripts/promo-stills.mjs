@@ -131,6 +131,18 @@ const stills = {
       ["Gravemist", "gravemist"],
     ];
     const page = await phonePage();
+    // fast-forward ~6 days so every thread is undecided and loud —
+    // creatures render vivid and thick instead of the calm decided state
+    await page.getByRole("button", { name: "More" }).first().click();
+    await page.waitForTimeout(500);
+    await page.getByRole("button", { name: "A day per second" }).click();
+    await page.waitForTimeout(6000);
+    await page.getByRole("button", { name: "Back to real time" }).click();
+    await page.waitForTimeout(400);
+    // no mascot during theme shots: Pip's inspection focuses one thread and
+    // dims all the others — reduce motion hides him and keeps full opacity
+    await page.getByRole("checkbox", { name: "Reduce motion (no line movement or pulsing)" }).click();
+    await page.waitForTimeout(400);
     for (const [label, file] of THEMES) {
       await page.getByRole("button", { name: "More" }).first().click();
       await page.waitForTimeout(400);
