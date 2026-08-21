@@ -1024,21 +1024,22 @@ export function LifeTimeline() {
           return (
             <View
               style={{
-                // Rests on the date strip (the one band threads never enter)
-                // and hugs the left, well clear of the + button on the right.
+                // Rests on the date strip (the one band threads never enter),
+                // on the right — stopping short of the + button's corner.
                 position: "absolute",
-                left: 0,
+                right: showFab ? 92 : 8,
                 bottom: 0,
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 6,
                 backgroundColor: alpha(tk.bgRaised, 0.97),
                 borderTopWidth: 1,
+                borderLeftWidth: 1,
                 borderRightWidth: 1,
                 borderColor: alpha(tk.lineAxis, 0.9),
+                borderTopLeftRadius: tk.radiusLg,
                 borderTopRightRadius: tk.radiusLg,
-                paddingLeft: 14,
-                paddingRight: 6,
+                paddingHorizontal: 8,
                 paddingVertical: 4,
               }}
             >
