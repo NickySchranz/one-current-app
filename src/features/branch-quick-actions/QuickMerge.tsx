@@ -13,6 +13,7 @@ import {
   T,
   rowStyles,
   useInTray,
+  Tag,
 } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
@@ -21,7 +22,7 @@ type PressState = PressableStateCallbackType & { hovered?: boolean };
 
 type Props = { branchId: string };
 
-type OutcomeId = "resolved" | "own-task" | "moved-past";
+type OutcomeId = "resolved" | "own-task" | "moved-past" | "burned";
 
 const OUTCOMES: { id: OutcomeId; label: string; hint: string }[] = [
   { id: "resolved", label: "It is resolved", hint: "It can end here and come back with you." },
@@ -35,6 +36,11 @@ const OUTCOMES: { id: OutcomeId; label: string; hint: string }[] = [
     label: "I have moved past it",
     hint: "It ends here. Nothing needs to come with you.",
   },
+  {
+    id: "burned",
+    label: "Burn it away",
+    hint: "Some worries don't get folded in. They get let go of — completely.",
+  },
 ];
 
 /** Bringing back is an ending: resolved, handed off as real work, or moved past. */
@@ -45,11 +51,16 @@ export function QuickMerge({ branchId }: Props) {
   const addMoment = useAppStore((s) => s.addMoment);
   const handOffBranch = useAppStore((s) => s.handOffBranch);
   const setOperation = useAppStore((s) => s.setOperation);
+  const burnBranch = useAppStore((s) => s.burnBranch);
   const t = useT();
   const theme = useTheme();
   const inTray = useInTray();
 
   const [converting, setConverting] = useState(false);
+  const [burning, setBurning] = useState(false);
+  const [burnItems, setBurnItems] = useState<string[]>([]);
+  const [burnInput, setBurnInput] = useState("");
+  const [farewell, setFarewell] = useState("");
   const [workName, setWorkName] = useState(branch?.title ?? "");
   const [workHome, setWorkHome] = useState("");
   const [firstTask, setFirstTask] = useState("");
@@ -65,6 +76,8 @@ export function QuickMerge({ branchId }: Props) {
         await startMerge([branchId]);
       } else if (id === "own-task") {
         setConverting(true);
+      } else if (id === "burned") {
+        setBurning(true);
       } else {
         // Moved past it: the line rejoins Now carrying nothing.
         await completeMerge({
@@ -101,6 +114,99 @@ export function QuickMerge({ branchId }: Props) {
     } finally {
       setBusy(false);
     }
+  }
+
+  const burnSuggestions = [
+    ...(branch.occupies ?? []),
+    ...(branch.anxieties ?? []),
+  ].filter((x, i, arr) => arr.indexOf(x) === i && !burnItems.includes(x));
+
+  const addBurnItem = (raw: string) => {
+    const item = raw.trim();
+    if (!item || burnItems.includes(item)) return;
+    setBurnItems([...burnItems, item]);
+    setBurnInput("");
+  };
+
+  async function burn() {
+    if (busy || burnItems.length === 0) return;
+    setBusy(true);
+    try {
+      await burnBranch(branchId, burnItems, farewell.trim() || t("Burned away."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (burning) {
+    return (
+      <Panel inTray={inTray}>
+        <T style={{ fontSize: 16.8, fontWeight: "600" }}>{branch.title}</T>
+        <Prompt>{t("Write down what burns with it. The fire keeps nothing.")}</Prompt>
+        <Field label={t("What burns with it")}>
+          {burnSuggestions.length > 0 && (
+            <View style={[rowStyles.tagRow, { marginBottom: 6 }]}>
+              {burnSuggestions.map((sug) => (
+                <Pressable
+                  key={sug}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("Burn {item}", { item: sug })}
+                  onPress={() => addBurnItem(sug)}
+                >
+                  <Tag label={sug} quality />
+                </Pressable>
+              ))}
+            </View>
+          )}
+          <AppTextInput
+            value={burnInput}
+            onChangeText={setBurnInput}
+            placeholder={t("a fear, a story, a should…")}
+            onSubmitEditing={() => addBurnItem(burnInput)}
+            blurOnSubmit={false}
+          />
+          {burnInput.trim().length > 0 && (
+            <Button
+              variant="quiet"
+              label={t("Add to the fire")}
+              onPress={() => addBurnItem(burnInput)}
+            />
+          )}
+          {burnItems.length > 0 && (
+            <View style={[rowStyles.tagRow, { marginTop: 6 }]}>
+              {burnItems.map((item) => (
+                <Pressable
+                  key={item}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("Take {item} back out", { item })}
+                  onPress={() => setBurnItems(burnItems.filter((x) => x !== item))}
+                >
+                  <View style={{ opacity: 0.9 }}>
+                    <Tag label={`✕ ${item}`} quality />
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </Field>
+        <Field label={t("A last word to it (optional)")}>
+          <AppTextInput
+            value={farewell}
+            onChangeText={setFarewell}
+            placeholder={t("you kept me safe once. not anymore.")}
+          />
+        </Field>
+        <View style={rowStyles.stageNav}>
+          <Button variant="quiet" label={t("Back")} onPress={() => setBurning(false)} />
+          <Button
+            variant="primary"
+            label={t("Strike the match")}
+            disabled={burnItems.length === 0 || busy}
+            onPress={() => void burn()}
+          />
+        </View>
+      </Panel>
+    );
   }
 
   if (converting) {

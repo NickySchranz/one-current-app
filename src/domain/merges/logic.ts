@@ -15,6 +15,7 @@ export type CreateMergeInput = {
   contributionKind?: MergeContributionKind;
   contribution?: string;
   released: string[];
+  burned?: string[];
   action?: IntegratedAction;
   waitingContainerId?: string;
   resultStatus: MergeResultStatus;
@@ -42,6 +43,7 @@ export function createMerge(input: CreateMergeInput, now: Date = new Date()): Br
     contributionKind: input.contributionKind,
     contribution: input.contribution,
     released: input.released,
+    burned: input.burned,
     action: input.action,
     waitingContainerId: input.waitingContainerId,
     resultStatus: input.resultStatus,

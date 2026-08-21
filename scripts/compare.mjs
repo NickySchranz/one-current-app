@@ -46,6 +46,7 @@ async function drive(url, tag) {
   // and the testing Pro unlock so the creature-theme sweep is not paywalled.
 await page.addInitScript(() => {
   localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+localStorage.setItem("one-current-tutorial-v1", "done");
   localStorage.setItem("one-current-pro", "1");
 });
 await page.goto(url, { waitUntil: "networkidle" });

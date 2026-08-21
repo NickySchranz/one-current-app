@@ -61,6 +61,8 @@ export type SharedEvent =
       outdatedBeliefs?: string[];
       outsideControl?: string[];
       released?: string[];
+      /** Written down to burn with the thread — let go of, never stored. */
+      burned?: string[];
       conflicts?: SharedConflict[];
     };
 

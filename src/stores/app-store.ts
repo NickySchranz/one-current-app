@@ -108,6 +108,8 @@ type AppState = {
   reclaim?: ReclaimEvent;
   /** A branch was just created: its line draws itself onto the timeline. */
   born?: { key: number; branchId: string };
+  /** A worry was just burned: fire consumes its line on the timeline. */
+  burn?: { key: number; branchId: string; items: string[] };
   /** An optimistic, unsaved line shown while the create form is open. */
   draftBranchId: string | null;
   /**
@@ -160,6 +162,9 @@ type AppState = {
   /** A folded line came back to mind: it continues as an open line again. */
   reopenBranch(branchId: string): Promise<void>;
   clearReclaim(): void;
+  /** Burn a worry away: the merge is recorded, the fire is cosmetic. */
+  burnBranch(branchId: string, items: string[], farewell?: string): Promise<void>;
+  clearBurn(): void;
   clearBorn(): void;
   updateMoment(branchId: string, moment: BranchCommit): Promise<void>;
 
@@ -580,6 +585,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   clearReclaim: () => set({ reclaim: undefined }),
+
+  async burnBranch(branchId, items, farewell) {
+    const branch = get().branches.find((b) => b.id === branchId);
+    if (!branch) return;
+    await get().completeMerge({
+      branches: [branch],
+      preserveRelease: { stillValid: [], outdated: [], outsideControl: [], reclaimable: [] },
+      conflicts: [],
+      resolution: farewell?.trim() || "Burned away.",
+      contributionKind: "acceptance",
+      released: items,
+      burned: items,
+      resultStatus: "merged",
+    });
+    set({ burn: { key: Date.now(), branchId, items } });
+  },
+
+  clearBurn: () => set({ burn: undefined }),
   clearBorn: () => set({ born: undefined }),
 
   async createTodayAction(branchId, step) {

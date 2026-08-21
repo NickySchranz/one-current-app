@@ -39,6 +39,7 @@ page.on("console", (m) => {
 // the headless shell, so the anchor's click fetches its own href instead.
 await page.addInitScript(() => {
   localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+  localStorage.setItem("one-current-tutorial-v1", "done");
   const original = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function () {
     if (this.download) {
@@ -67,6 +68,26 @@ await page.getByRole("button", { name: "More" }).first().click();
 await page.waitForTimeout(600);
 await page.getByRole("button", { name: "Load example threads" }).click();
 await page.waitForTimeout(900);
+
+// 1b. burn one thread so the export carries a burned integrated event
+await page.getByRole("button", { name: "Now", exact: true }).first().click();
+await page.waitForTimeout(1500);
+// burn the thread the export will include, by its timeline label
+await page.getByText("The argument with my father", { exact: true }).first().click({ force: true });
+await page.waitForTimeout(700);
+await page.getByText("What does this thread need from you now?").first().click();
+await page.waitForTimeout(500);
+await page.getByRole("button", { name: /^Integrate\b/ }).last().click();
+await page.waitForTimeout(700);
+await page.getByRole("button", { name: /Burn it away/ }).click();
+await page.waitForTimeout(500);
+await page.getByPlaceholder(/a fear, a story/).fill("the endless what-ifs");
+await page.getByRole("button", { name: "Add to the fire" }).click();
+await page.waitForTimeout(300);
+await page.getByRole("button", { name: "Strike the match" }).click();
+await page.waitForTimeout(3200);
+await page.getByRole("button", { name: "More" }).first().click();
+await page.waitForTimeout(600);
 // Loading examples navigates back to Now — return to More for the share section.
 await page.getByRole("button", { name: "More" }).first().click();
 await page.waitForTimeout(600);
@@ -83,6 +104,12 @@ check("example threads present", allBranches.length >= 5, `n=${allBranches.lengt
 
 // 2. select two threads in the share section
 const pick = [allBranches[0], allBranches[1]];
+// the burned thread now rests in the collapsed Closed section — open it
+const closedToggle = page.getByRole("button", { name: /^Closed/ }).first();
+if (await closedToggle.isVisible().catch(() => false)) {
+  await closedToggle.click();
+  await page.waitForTimeout(300);
+}
 for (const b of pick) {
   await page
     .getByLabel("Which threads")
@@ -146,6 +173,14 @@ for (const th of share.threads) {
 }
 check("events within window", eventsOk);
 check("event kinds valid", kindsOk);
+const burnedEvents = share.threads
+  .flatMap((t) => t.events)
+  .filter((e) => e.kind === "integrated" && Array.isArray(e.burned) && e.burned.length > 0);
+check(
+  "burned rides the integrated event",
+  burnedEvents.length >= 1,
+  `burned=${JSON.stringify(burnedEvents[0]?.burned ?? [])}`,
+);
 check("loudness window + baseline", loudnessOk);
 
 // 8. thread fields present

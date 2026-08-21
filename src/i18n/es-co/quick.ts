@@ -142,4 +142,17 @@ export const quick: Record<string, string> = {
   "Mark it as carried with support": "Marcarlo como llevado con apoyo",
   "Marked. You selected support for this thread — it will hold that shape on the timeline.":
     "Marcado. Escogiste apoyo para este hilo: mantendrá esa forma en la línea de tiempo.",
+  "Burn it away": "Quémelo",
+  "Some worries don't get folded in. They get let go of — completely.":
+    "Algunas preocupaciones no se integran. Se sueltan — del todo.",
+  "Write down what burns with it. The fire keeps nothing.":
+    "Escriba lo que arde con ella. El fuego no guarda nada.",
+  "What burns with it": "Qué arde con ella",
+  "Burn {item}": "Quemar {item}",
+  "Take {item} back out": "Sacar {item} del fuego",
+  "a fear, a story, a should…": "un miedo, una historia, un \"debería\"…",
+  "Add to the fire": "Agregar al fuego",
+  "A last word to it (optional)": "Unas últimas palabras (opcional)",
+  "you kept me safe once. not anymore.": "una vez me protegió. ya no.",
+  "Strike the match": "Encienda el fósforo",
 };

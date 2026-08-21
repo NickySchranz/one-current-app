@@ -44,6 +44,8 @@ async function loadExamples(page) {
   // The login gate: seed a session so the checks land straight in the app.
 await page.addInitScript(() => {
   localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+  // the guided tour greets first-run users; the checks skip it
+  localStorage.setItem("one-current-tutorial-v1", "done");
 });
 await page.goto("http://localhost:4173/", { waitUntil: "networkidle" });
   await page.waitForTimeout(1500);
@@ -128,6 +130,57 @@ const branchPoint = (page, frac = 0.5) =>
   await page.waitForTimeout(2500);
   await page.screenshot({ path: "/tmp/gest-06-merged.png" });
   console.log("merge: done");
+  await page.close();
+}
+
+// ---- 3b. burn it away -------------------------------------------------------
+{
+  const page = await newPage();
+  await loadExamples(page);
+  const pt = await branchPoint(page, 0.4);
+  await page.mouse.click(pt.x, pt.y);
+  await page.waitForTimeout(700);
+  await page.getByText("What does this thread need from you now?").first().click();
+  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: /^Integrate\b/ }).last().click();
+  await page.waitForTimeout(800);
+  await page.getByRole("button", { name: /Burn it away/ }).click();
+  await page.waitForTimeout(600);
+  // one suggested chip (if any) plus one typed item
+  const sugg = page.getByRole("button", { name: /^Burn / }).first();
+  if (await sugg.isVisible().catch(() => false)) await sugg.click();
+  await page.getByPlaceholder(/a fear, a story/).fill("the 3am spiral");
+  await page.getByRole("button", { name: "Add to the fire" }).click();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: "/tmp/gest-08-burn-form.png" });
+  await page.getByRole("button", { name: "Strike the match" }).click();
+  await page.waitForTimeout(700); // mid-burn
+  await page.screenshot({ path: "/tmp/gest-09-burning.png" });
+  const midFire = await page.evaluate(() =>
+    [...document.querySelectorAll("svg path")].some(
+      (p) => (p.getAttribute("stroke") ?? "").toLowerCase() === "#ff9a3d",
+    ),
+  );
+  await page.waitForTimeout(2600);
+  await page.screenshot({ path: "/tmp/gest-10-burned.png" });
+  const after = await page.evaluate(() => {
+    const fire = [...document.querySelectorAll("svg path")].some(
+      (p) => (p.getAttribute("stroke") ?? "").toLowerCase() === "#ff9a3d",
+    );
+    const staleDash = [...document.querySelectorAll("svg path")].some((p) => {
+      const d = p.getAttribute("stroke-dasharray") ?? "";
+      const w = parseFloat(p.getAttribute("stroke-width") ?? "0");
+      return w >= 3 && /^8[ ,]4$/.test(d.trim());
+    });
+    return { fire, staleDash };
+  });
+  console.log(
+    "burn: done —",
+    midFire ? "flames seen" : "NO FLAMES",
+    after.fire ? "FIRE LINGERS" : "fire out",
+    after.staleDash ? "STALE DASH" : "dashes clean",
+  );
+  if (!midFire || after.fire || after.staleDash) process.exitCode = 1;
   await page.close();
 }
 

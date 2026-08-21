@@ -37,7 +37,7 @@ import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
-import { AnimatedPath, MergePreviewTarget, NowGlow, ReclaimFly, useDashFlow } from "./timeline-fx";
+import { AnimatedPath, MergePreviewTarget, NowGlow, ReclaimFly, useDashFlow, BurnAway, SmokeFly } from "./timeline-fx";
 import { Mascot } from "./Mascot";
 import { useMascot, randomFrom } from "./useMascot";
 
@@ -118,6 +118,8 @@ export function LifeTimeline() {
   const [paywalled, setPaywalled] = useState(false);
   const born = useAppStore((s) => s.born);
   const clearBorn = useAppStore((s) => s.clearBorn);
+  const burn = useAppStore((s) => s.burn);
+  const clearBurn = useAppStore((s) => s.clearBurn);
   const reducedMotion = useAppStore((s) => s.reducedMotion);
   const mascotTypePref = useAppStore((s) => s.mascotType);
   const draftBranchId = useAppStore((s) => s.draftBranchId);
@@ -147,6 +149,13 @@ export function LifeTimeline() {
   // Mascot reactions (wired after mascot is declared below — use ref so the
   // effects can safely reference the function without re-running).
   const mascotReactionRef = useRef<((text: string) => void) | null>(null);
+
+  // A worry just burned: let the fire finish, then forget the event.
+  useEffect(() => {
+    if (!burn) return;
+    const timer = setTimeout(clearBurn, reducedMotion ? 0 : 2600);
+    return () => clearTimeout(timer);
+  }, [burn, clearBurn, reducedMotion]);
 
   // A just-created line draws itself in, then settles like the others.
   useEffect(() => {
@@ -739,6 +748,7 @@ export function LifeTimeline() {
                 return (
                   <G key={g.branchId} opacity={lineOpacity}>
                   <BranchLine
+                    burning={burn?.branchId === g.branchId && !reducedMotion}
                     key={undefined}
                     branch={branch}
                     geometry={g}
@@ -782,6 +792,15 @@ export function LifeTimeline() {
                   </G>
                 );
               })}
+
+              {/* fire consuming a burned thread */}
+              {burn &&
+                !reducedMotion &&
+                (() => {
+                  const g = layout.geometries.find((x) => x.branchId === burn.branchId);
+                  if (!g || !g.inWindow) return null;
+                  return <BurnAway key={burn.key} path={g.path} />;
+                })()}
 
               {/* a merge being considered: the lines curve toward Now, reversibly */}
               {operation.kind === "confirming-merge" && (
@@ -1002,6 +1021,39 @@ export function LifeTimeline() {
             />
           </View>
         )}
+
+        {/* burned words rising as smoke */}
+        {burn &&
+          !reducedMotion &&
+          (() => {
+            const g = layout.geometries.find((x) => x.branchId === burn.branchId);
+            if (!g) return null;
+            const x0 = Math.min(g.labelX, layout.metrics.width - 80);
+            const y0 = g.labelY;
+            return (
+              <View
+                key={burn.key}
+                pointerEvents="none"
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  overflow: "hidden",
+                  zIndex: 6,
+                }}
+              >
+                {burn.items.map((item, i) => (
+                  <SmokeFly key={item} index={i} x0={x0} y0={y0}>
+                    <View style={{ opacity: 0.75 }}>
+                      <Tag label={item} />
+                    </View>
+                  </SmokeFly>
+                ))}
+              </View>
+            );
+          })()}
 
         {/* feelings returning to the main line after a decision */}
         {reclaim &&

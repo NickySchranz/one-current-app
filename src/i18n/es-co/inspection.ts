@@ -241,4 +241,8 @@ export const inspection: Record<string, string> = {
   "Add to {label}": "Agregar a {label}",
   "Add your own…": "Agrega lo tuyo…",
   Add: "Agregar",
+  "Burned with it": "Ardió con ella",
+  "Written down to be let go of — the fire kept nothing.":
+    "Escrito para soltarlo — el fuego no guardó nada.",
+  "Burned away.": "Quemado.",
 };

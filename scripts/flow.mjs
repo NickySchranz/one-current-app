@@ -46,6 +46,7 @@ const step = async (name, ms = 700) => {
 // The login gate: seed a session so the checks land straight in the app.
 await page.addInitScript(() => {
   localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+localStorage.setItem("one-current-tutorial-v1", "done");
 });
 await page.goto("http://localhost:4173/", { waitUntil: "networkidle" });
 await page.waitForTimeout(1500);

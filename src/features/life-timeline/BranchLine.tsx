@@ -68,6 +68,8 @@ type Props = {
   dimmed?: boolean;
   /** Just created: the line draws itself from the fork toward Now. */
   born?: boolean;
+  /** Being burned: the fire overlay owns the pixels; this line steps out. */
+  burning?: boolean;
   /** Comfort setting or system preference: no slither, no pulsing. */
   reducedMotion?: boolean;
   /** The app's current moment (epoch ms) — moves live, jumps on fast-forward. */
@@ -91,6 +93,7 @@ export const BranchLine = memo(function BranchLine({
   highlighted = false,
   dimmed = false,
   born = false,
+  burning = false,
   reducedMotion = false,
   nowMs,
   loudnessPreview,
@@ -137,13 +140,16 @@ export const BranchLine = memo(function BranchLine({
 
   // `.branch-dimmed { transition: opacity 0.25s ease }` — the whole group
   // steps back while another line holds the focus.
-  const groupOpacity = useSharedValue(dimmed ? 0.22 : 1);
+  const groupOpacity = useSharedValue(burning ? 0 : dimmed ? 0.22 : 1);
   useEffect(() => {
-    groupOpacity.value = withTiming(dimmed ? 0.22 : 1, {
-      duration: 250,
-      easing: Easing.inOut(Easing.ease),
-    });
-  }, [dimmed, groupOpacity]);
+    // While burning, the fire overlay draws this line instead — vanish at once.
+    groupOpacity.value = burning
+      ? 0
+      : withTiming(dimmed ? 0.22 : 1, {
+          duration: 250,
+          easing: Easing.inOut(Easing.ease),
+        });
+  }, [dimmed, burning, groupOpacity]);
   const groupProps = useAnimatedProps(() => ({ opacity: groupOpacity.value }));
 
   // `.pulse` on an emphasized endpoint: opacity 0.95 ↔ 0.55, 2.2s ease-in-out.

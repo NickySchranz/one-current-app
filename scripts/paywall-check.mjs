@@ -48,6 +48,7 @@ const check = (name, ok, detail = "") => {
 // downloads (the share file) the same way share-export.mjs does.
 await page.addInitScript(() => {
   localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+localStorage.setItem("one-current-tutorial-v1", "done");
   const today = new Date().toISOString();
   const day = today.slice(0, 10);
   const branches = Array.from({ length: 10 }, (_, i) => ({

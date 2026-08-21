@@ -147,6 +147,7 @@ function shareThread(
       outdatedBeliefs: some(g.outdatedBeliefs),
       outsideControl: some(g.outsideControl),
       released: some(g.released),
+        burned: some(g.burned ?? []),
       conflicts:
         g.conflicts.length > 0
           ? g.conflicts.map((c) => ({

@@ -3,6 +3,7 @@ import Animated, {
   cancelAnimation,
   useAnimatedProps,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withDelay,
   withRepeat,
@@ -13,9 +14,10 @@ import Animated, {
   type EasingFunctionFactory,
 } from "react-native-reanimated";
 import type { SharedValue } from "react-native-reanimated";
-import { Circle, Path } from "react-native-svg";
+import { Circle, G, Path } from "react-native-svg";
 import type { PathProps } from "react-native-svg";
 import type { ThemeId } from "@/visualization/theme";
+import { pathLength, samplePath } from "@/visualization/path-sample";
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 export const AnimatedPath = Animated.createAnimatedComponent(Path);
@@ -330,6 +332,155 @@ export function ReclaimFly({
       pointerEvents="none"
       style={[{ position: "absolute", left: x0, top: y0 }, style]}
     >
+      {children}
+    </Animated.View>
+  );
+}
+
+const AnimatedCircleFx = Animated.createAnimatedComponent(Circle);
+
+/** The ember palette, borrowed from the dragon. */
+const EMBER = "#ff9a3d";
+const EMBER_BRIGHT = "#ffd27a";
+const CHAR = "#3a2f28";
+
+/**
+ * `.burn-away` — fire consumes a thread. The line is erased from its fork to
+ * its end while a flickering flame head rides the erase front, sparks lift
+ * off the char, and the burned words rise as smoke. Purely cosmetic: the
+ * merge is already recorded before this mounts. Caller gates reduce motion.
+ */
+export function BurnAway({ path, durationMs = 2200 }: { path: string; durationMs?: number }) {
+  const len = pathLength(path);
+  const points = samplePath(path, 8);
+  const progress = useSharedValue(0);
+  const flick = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = 0;
+    progress.value = withTiming(1, { duration: durationMs, easing: Easing.inOut(Easing.quad) });
+    flick.value = withRepeat(withTiming(1, { duration: 120, easing: Easing.linear }), -1, true);
+    return () => {
+      cancelAnimation(progress);
+      cancelAnimation(flick);
+    };
+  }, [durationMs, progress, flick]);
+
+  // the ember line, erased fork → end
+  const emberProps = useAnimatedProps(() => ({
+    strokeDashoffset: -progress.value * len,
+    opacity: 1 - progress.value * 0.25,
+  }));
+  // the char left behind fades out just after the front passes
+  const charProps = useAnimatedProps(() => ({
+    strokeDashoffset: -Math.max(0, progress.value - 0.14) * len,
+    opacity: 0.5 * (1 - progress.value),
+  }));
+
+  // the flame head's position along the sampled path
+  const head = useDerivedValue(() => {
+    const idx = Math.min(points.length - 1, Math.floor(progress.value * (points.length - 1)));
+    const pnt = points[idx] ?? { x: -100, y: -100 };
+    const j = flick.value * 2 - 1;
+    return { x: pnt.x + j * 1.2, y: pnt.y - Math.abs(j) * 1.6 };
+  });
+  const glowProps = useAnimatedProps(() => ({
+    cx: head.value.x,
+    cy: head.value.y,
+    r: 9 + flick.value * 3,
+    opacity: progress.value >= 1 ? 0 : 0.3,
+  }));
+  const flameOuter = useAnimatedProps(() => ({
+    cx: head.value.x,
+    cy: head.value.y - 3 - flick.value * 2,
+    r: 4.6 + flick.value * 1.2,
+    opacity: progress.value >= 1 ? 0 : 0.9,
+  }));
+  const flameInner = useAnimatedProps(() => ({
+    cx: head.value.x,
+    cy: head.value.y - 4.5 - flick.value * 2.6,
+    r: 2.2 + flick.value * 0.8,
+    opacity: progress.value >= 1 ? 0 : 0.95,
+  }));
+
+  // sparks lifting off fixed sample points as the front passes them
+  const sparkSeeds = points.filter((_, i) => i % Math.max(2, Math.floor(points.length / 7)) === 0);
+
+  return (
+    <G pointerEvents="none">
+      <AnimatedPath
+        d={path}
+        stroke={CHAR}
+        strokeWidth={5}
+        strokeLinecap="round"
+        fill="none"
+        strokeDasharray={`${len} ${len}`}
+        animatedProps={charProps}
+      />
+      <AnimatedPath
+        d={path}
+        stroke={EMBER}
+        strokeWidth={3.4}
+        strokeLinecap="round"
+        fill="none"
+        strokeDasharray={`${len} ${len}`}
+        animatedProps={emberProps}
+      />
+      {sparkSeeds.map((pnt, i) => (
+        <Spark key={i} x={pnt.x} y={pnt.y} at={i / Math.max(1, sparkSeeds.length - 1)} progress={progress} />
+      ))}
+      <AnimatedCircleFx fill={EMBER} animatedProps={glowProps} />
+      <AnimatedCircleFx fill={EMBER} animatedProps={flameOuter} />
+      <AnimatedCircleFx fill={EMBER_BRIGHT} animatedProps={flameInner} />
+    </G>
+  );
+}
+
+/** One spark: rises and fades once the erase front passes its seed point. */
+function Spark({ x, y, at, progress }: {
+  x: number;
+  y: number;
+  at: number;
+  progress: SharedValue<number>;
+}) {
+  const props = useAnimatedProps(() => {
+    const local = Math.max(0, Math.min(1, (progress.value - at) * 4));
+    return {
+      cx: x + Math.sin((at + 1) * 40 + local * 6) * 4 * local,
+      cy: y - local * (18 + at * 22),
+      r: 1.6 * (1 - local * 0.6),
+      opacity: local <= 0 || local >= 1 ? 0 : 0.85 * (1 - local),
+    };
+  });
+  return <AnimatedCircleFx fill={EMBER_BRIGHT} animatedProps={props} />;
+}
+
+/**
+ * `.smoke-chip` — a burned word rising as smoke: up and away, greying out.
+ * The inverse of ReclaimFly, which carries feelings home.
+ */
+export function SmokeFly({ index, x0, y0, children }: {
+  index: number;
+  x0: number;
+  y0: number;
+  children: React.ReactNode;
+}) {
+  const p = useSharedValue(0);
+  useEffect(() => {
+    p.value = 0;
+    p.value = withDelay(index * 180, withTiming(1, { duration: 1900, easing: easeInOut }));
+    return () => cancelAnimation(p);
+  }, [index, p]);
+  const style = useAnimatedStyle(() => ({
+    opacity: p.value < 0.12 ? p.value * 7 : (1 - p.value) * 0.9,
+    transform: [
+      { translateX: Math.sin(p.value * 5 + index) * 10 },
+      { translateY: -70 * p.value },
+      { scale: 1 - 0.3 * p.value },
+    ],
+  }));
+  return (
+    <Animated.View pointerEvents="none" style={[{ position: "absolute", left: x0, top: y0 }, style]}>
       {children}
     </Animated.View>
   );

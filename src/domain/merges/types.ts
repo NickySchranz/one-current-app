@@ -34,6 +34,8 @@ export type BranchMerge = {
   contribution?: string;
   /** What stops continuing as a separate process. */
   released: string[];
+  /** What burned with it — written down to be let go of, never stored anywhere else. */
+  burned?: string[];
   action?: IntegratedAction;
   waitingContainerId?: string;
   resultStatus: MergeResultStatus;
