@@ -111,6 +111,56 @@ const branchPoint = (page, frac = 0.5) =>
   await page.close();
 }
 
+// ---- 2b. Pip attacks a thread ----------------------------------------------
+{
+  const page = await newPage();
+  await loadExamples(page);
+  // wait for Pip to settle on a thread: the chip appears bottom-left
+  const chip = page.getByRole("button", { name: "Have Pip calm this thread" });
+  let chipUp = false;
+  for (let i = 0; i < 40 && !chipUp; i++) {
+    chipUp = await chip.isVisible().catch(() => false);
+    if (!chipUp) await page.waitForTimeout(500);
+  }
+  if (!chipUp) {
+    console.log("attack: FAIL — chip never appeared");
+    process.exitCode = 1;
+  } else {
+    const chipText = await chip.innerText();
+    const title = chipText.replace(/^[^\n]*\n/, "").trim() || chipText.split("\n").pop().trim();
+    const before = await page.evaluate(() => JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]"));
+    await chip.click();
+    for (const [ms, name] of [[120, "a"], [180, "b"], [200, "c"], [260, "d"]]) {
+      await page.waitForTimeout(ms);
+      await page.screenshot({ path: `/tmp/gest-11-attack-${name}.png` });
+    }
+    const cooling = await chip.isVisible().catch(() => false); // hidden while hit plays
+    await page.waitForTimeout(1600);
+    const after = await page.evaluate(() => JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]"));
+    const changed = before
+      .map((b) => {
+        const now = after.find((a) => a.id === b.id);
+        return now && now.loudness === b.loudness - 1 && now.loudnessSetOn ? b.title : null;
+      })
+      .filter(Boolean);
+    const staleDash = await page.evaluate(() =>
+      [...document.querySelectorAll("svg path")].some((p) => {
+        const d = p.getAttribute("stroke-dasharray") ?? "";
+        const w = parseFloat(p.getAttribute("stroke-width") ?? "0");
+        return w >= 3 && /^8[ ,]4$/.test(d.trim());
+      }),
+    );
+    console.log(
+      "attack: done —",
+      changed.length >= 1 ? `loudness dropped (${changed[0]})` : "NO LOUDNESS CHANGE",
+      !cooling ? "chip rested during hit" : "CHIP STILL UP",
+      staleDash ? "STALE DASH" : "dashes clean",
+    );
+    if (changed.length < 1 || staleDash) process.exitCode = 1;
+  }
+  await page.close();
+}
+
 // ---- 3. merge (integrate) flow ---------------------------------------------
 {
   const page = await newPage();

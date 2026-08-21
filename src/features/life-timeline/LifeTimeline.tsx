@@ -37,7 +37,7 @@ import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
-import { AnimatedPath, MergePreviewTarget, NowGlow, ReclaimFly, useDashFlow, BurnAway, SmokeFly } from "./timeline-fx";
+import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, useDashFlow } from "./timeline-fx";
 import { Mascot } from "./Mascot";
 import { useMascot, randomFrom } from "./useMascot";
 
@@ -119,6 +119,9 @@ export function LifeTimeline() {
   const born = useAppStore((s) => s.born);
   const clearBorn = useAppStore((s) => s.clearBorn);
   const burn = useAppStore((s) => s.burn);
+  const hit = useAppStore((s) => s.hit);
+  const clearHit = useAppStore((s) => s.clearHit);
+  const attackBranch = useAppStore((s) => s.attackBranch);
   const finalizeBurn = useAppStore((s) => s.finalizeBurn);
   const reducedMotion = useAppStore((s) => s.reducedMotion);
   const mascotTypePref = useAppStore((s) => s.mascotType);
@@ -150,9 +153,23 @@ export function LifeTimeline() {
   // effects can safely reference the function without re-running).
   const mascotReactionRef = useRef<((text: string) => void) | null>(null);
 
+  // Pip just struck a thread: let the impact play, then rest the event.
+  useEffect(() => {
+    if (!hit) return;
+    const pool = hit.calm ? mascot.phrases.attackCalm : mascot.phrases.attack;
+    const say = setTimeout(() => mascotReactionRef.current?.(randomFrom(pool)), 520);
+    const timer = setTimeout(clearHit, reducedMotion ? 0 : 1400);
+    return () => {
+      clearTimeout(say);
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hit, clearHit, reducedMotion]);
+
   // A worry is burning: when the fire has consumed everything, the thread is
   // removed from the app for good — only the lesson walks out.
   const [lessonFlying, setLessonFlying] = useState(false);
+  const [attackCooldownUntil, setAttackCooldownUntil] = useState(0);
   useEffect(() => {
     if (!burn) {
       setLessonFlying(false);
@@ -811,6 +828,25 @@ export function LifeTimeline() {
                   return <BurnAway key={burn.key} path={g.path} />;
                 })()}
 
+              {/* the impact of Pip's strike */}
+              {hit &&
+                !reducedMotion &&
+                (() => {
+                  const g = layout.geometries.find((x) => x.branchId === hit.branchId);
+                  if (!g || !g.inWindow) return null;
+                  return (
+                    <AttackFx
+                      key={hit.key}
+                      x={g.endX}
+                      y={g.endY}
+                      path={g.path}
+                      variant={attackVariantFor(theme)}
+                      accent={tk.accent}
+                      calm={hit.calm}
+                    />
+                  );
+                })()}
+
               {/* a merge being considered: the lines curve toward Now, reversibly */}
               {operation.kind === "confirming-merge" && (
                 <G>
@@ -879,10 +915,23 @@ export function LifeTimeline() {
               {/* Mascot: 8-bit hero that jumps between branches and nudges the user */}
               {showMascot && mascot.visible && mascot.pos.x > -900 &&
                operation.kind !== "viewing-integrated" && (
+                <LungeG
+                  active={Boolean(hit && !hit.calm && !reducedMotion)}
+                  dx={(() => {
+                    if (!hit) return 0;
+                    const g = layout.geometries.find((x) => x.branchId === hit.branchId);
+                    return g ? Math.max(-70, Math.min(70, g.endX - mascot.pos.x)) * 0.85 : 0;
+                  })()}
+                  dy={(() => {
+                    if (!hit) return 0;
+                    const g = layout.geometries.find((x) => x.branchId === hit.branchId);
+                    return g ? Math.max(-44, Math.min(44, g.endY - mascot.pos.y)) * 0.85 : 0;
+                  })()}
+                >
                 <Mascot
                   x={mascot.pos.x}
                   y={mascot.pos.y}
-                  frame={mascot.frame}
+                  frame={hit && !hit.calm ? "LAND_A" : mascot.frame}
                   flip={mascot.flip}
                   mascotType={mascot.mascotType}
                   bubbleOpacity={mascot.bubbleOpacity}
@@ -891,6 +940,7 @@ export function LifeTimeline() {
                   theme={tk}
                   onPress={mascot.onPress}
                 />
+                </LungeG>
               )}
             </Svg>
           </View>
@@ -934,6 +984,69 @@ export function LifeTimeline() {
         />
 
         <TimelineHelp />
+
+        {/* While Pip inspects a thread: one quick tap sends him at it. Fixed
+            bottom-left (above the help dot) so it never covers anything else
+            that is tappable — Pip himself already opens the thread. */}
+        {(() => {
+          const targetId = mascot.inspectedBranchId;
+          const target = targetId ? branches.find((b) => b.id === targetId) : undefined;
+          const show =
+            showMascot &&
+            mascot.visible &&
+            target &&
+            !isClosed(target) &&
+            operation.kind === "idle" &&
+            !hit;
+          if (!show) return null;
+          const cooling = Date.now() < attackCooldownUntil;
+          const VERBS: Partial<Record<typeof theme, string>> = {
+            demonfire: "Douse!",
+            koipond: "Splash!",
+            carnival: "Whoosh!",
+            catnap: "Boop!",
+            abyss: "Dim it!",
+            gravemist: "Shoo!",
+            pompom: "Ruffle!",
+          };
+          const verb = VERBS[theme] ?? "Bonk!";
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("Have Pip calm this thread")}
+              disabled={cooling}
+              onPress={() => {
+                setAttackCooldownUntil(Date.now() + 3200);
+                void attackBranch(target.id);
+              }}
+              style={(st) => [
+                {
+                  position: "absolute",
+                  left: 14,
+                  bottom: 64,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
+                  backgroundColor: cooling ? alpha(tk.accent, 0.35) : tk.accent,
+                  borderRadius: 999,
+                  paddingHorizontal: 14,
+                  paddingVertical: 9,
+                  opacity: (st as PressableStateCallbackType & { hovered?: boolean }).hovered
+                    ? 0.92
+                    : 1,
+                },
+                shadow(tk),
+              ]}
+            >
+              <T style={{ color: tk.accentInk, fontWeight: "700", fontSize: 13.5 }}>
+                {t(verb)}
+              </T>
+              <T numberOfLines={1} style={{ color: tk.accentInk, fontSize: 11, opacity: 0.8, maxWidth: 130 }}>
+                {target.title}
+              </T>
+            </Pressable>
+          );
+        })()}
         {/* how split the present is: strands fan out per undecided line and
             come home as decisions are taken — tap it for the day's forecast */}
         <WholenessIndicator

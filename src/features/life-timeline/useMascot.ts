@@ -48,6 +48,8 @@ type Phrases = {
   note: string[];
   greet: string[];
   focus: string[];
+  attack: string[];
+  attackCalm: string[];
   action_loud: string;
   action_ready: string;
   action_waiting: string;
@@ -59,6 +61,8 @@ type Phrases = {
 };
 
 const EN: Phrases = {
+  attack:     ["TAKE THAT.", "Quieter now, hm?", "Down a notch. You're welcome.", "BONK. Handled.", "It'll think twice, boss."],
+  attackCalm: ["This one's already quiet, boss.", "Nothing to hit — it's calm.", "Shh. It's resting already."],
   merge:      ["HANDLED. One less thing, boss!", "That's done. I got you.", "CLEARED! You're lighter now.", "Merged it. Nailed it.", "That thread is FREE!", "Done and dusted, boss.", "Let it go! Yes!"],
   mergeDeep:  ["HUGE ONE. You really did that!", "BOSS MODE. That was a big one.", "That was heavy and you handled it!", "BIG WIN. I felt that one too."],
   born:       ["New thread? On it, boss.", "Got it logged. I'm watching this.", "Named it — that's step one done.", "I see this. Won't lose it.", "Got your back on this one."],
@@ -79,6 +83,8 @@ const EN: Phrases = {
 // Spanish — culturally warm, uses "jefe/a" (boss) which is casual and affectionate
 // in Latin American Spanish. Phrases are direct, expressive and celebratory.
 const ES: Phrases = {
+  attack:     ["¡TOMA YA!", "Más callado ahora, ¿eh?", "Un punto menos. De nada.", "¡PUM! Controlado.", "Se lo pensará dos veces, jefe."],
+  attackCalm: ["Este ya está tranquilo, jefe.", "Nada que golpear — está en calma.", "Shh. Ya descansa."],
   merge:      ["¡Listo, jefe! ¡Una menos que cargar!", "¡Cerrado! Eso ya no pesa.", "¡HECHO! Ya respiras mejor.", "Integrado. Bien jugado.", "¡Ese hilo es libre! ¡Dale!", "¡Terminado! Sin vueltas.", "¡Soltado! ¡Sí, así!"],
   mergeDeep:  ["¡ESE ERA GRANDE, JEFE! ¡Lo lograste!", "¡NIVEL CAPI! Ese era pesado de verdad.", "Era un hilo de peso y lo manejaste. ¡Brutal!", "¡GOLAZO! Lo sentí yo también."],
   born:       ["¿Nuevo hilo? En eso estoy, jefe.", "Anotado. Le tengo el ojo encima.", "Nombrado — eso ya es el primer paso.", "Lo veo. No lo pierdo de vista.", "Te cubro en este."],
@@ -99,6 +105,8 @@ const ES: Phrases = {
 // Colombia variant: slightly warmer slang ("parce" = friend/buddy)
 const ES_CO: Phrases = {
   ...ES,
+  attack:     ["¡TOME PUES!", "Más callado ahora, ¿cierto?", "Un punto menos. Con gusto.", "¡PUM! Controlado.", "Lo va a pensar dos veces, parce."],
+  attackCalm: ["Este ya está tranquilo, parce.", "Nada que golpear — está en calma.", "Shh. Ya descansa."],
   merge:      ["¡Listo, parce! ¡Una menos!", "¡Cerrado! Eso ya no pesa, parcero.", "¡HECHO! Ya respiras mejor.", "Integrado. Bien jugado.", "¡Ese hilo quedó libre! ¡Uy!", "¡Terminado, parcero!", "¡Soltado! ¡Sí señor!"],
   mergeDeep:  ["¡ESE ERA GRANDÍSIMO, PARCE! ¡Lo lograste!", "¡MODO CRACK! Ese era muy pesado.", "Era un hilo tenaz y lo manejaste. ¡Qué chimba!", "¡GOLAZO, PARCE! Lo sentí yo también."],
   born:       ["¿Nuevo hilo? En eso estoy, parce.", "Anotado. Le tengo el ojo encima.", "Nombrado — eso ya es el primer paso.", "Lo veo. No lo pierdo de vista.", "Te cubro en este, parcero."],

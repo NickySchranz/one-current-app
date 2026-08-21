@@ -10,8 +10,7 @@ import {
   createBranch,
   easeLoudness,
   trackLoudness,
-  type CreateBranchInput,
-} from "@/domain/branches/logic";
+  type CreateBranchInput, effectiveLoudness } from "@/domain/branches/logic";
 import { advanceSkew, appNow, getSkewMs, setRate, setSkewMs } from "@/domain/time/clock";
 import { addMomentToBranch, createMoment, type CreateMomentInput } from "@/domain/moments/logic";
 import { detectRecurrence, recordRecurrence } from "@/domain/branches/recurrence";
@@ -113,6 +112,8 @@ type AppState = {
   born?: { key: number; branchId: string };
   /** A worry is being burned: fire consumes its line, then finalizeBurn removes it. */
   burn?: { key: number; branchId: string; items: string[]; lesson: string };
+  /** Pip just struck a thread (drives the attack animation). */
+  hit?: { key: number; branchId: string; calm: boolean };
   /** An optimistic, unsaved line shown while the create form is open. */
   draftBranchId: string | null;
   /**
@@ -165,6 +166,9 @@ type AppState = {
   /** A folded line came back to mind: it continues as an open line again. */
   reopenBranch(branchId: string): Promise<void>;
   clearReclaim(): void;
+  /** Pip attacks a thread: loudness eases one notch (a touch, not a decision). */
+  attackBranch(branchId: string): Promise<void>;
+  clearHit(): void;
   /** Phase 1 of a burn: light the fire. Nothing is written or deleted yet. */
   burnBranch(branchId: string, items: string[], lesson: string): void;
   /** Phase 2: the fire is done — keep the lesson, remove the thread entirely. */
@@ -591,6 +595,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   clearReclaim: () => set({ reclaim: undefined }),
+
+  async attackBranch(branchId) {
+    const branch = get().branches.find((b) => b.id === branchId);
+    if (!branch) return;
+    const felt = Math.round(effectiveLoudness(branch, appNow()));
+    if (felt <= 1) {
+      // already as quiet as it goes: Pip shrugs instead of striking
+      set({ hit: { key: Date.now(), branchId, calm: true } });
+      return;
+    }
+    await get().dialLoudness(branchId, Math.max(1, felt - 1) as Loudness);
+    set({ hit: { key: Date.now(), branchId, calm: false } });
+  },
+
+  clearHit: () => set({ hit: undefined }),
 
   burnBranch(branchId, items, lesson) {
     if (!get().branches.some((b) => b.id === branchId)) return;

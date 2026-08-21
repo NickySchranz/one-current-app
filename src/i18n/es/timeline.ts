@@ -107,4 +107,13 @@ export const timeline: Record<string, string> = {
   Eight: "Ocho",
   Nine: "Nueve",
   Ten: "Diez",
+  "Have Pip calm this thread": "Que Pip calme este hilo",
+  "Bonk!": "¡Zas!",
+  "Douse!": "¡Apágalo!",
+  "Splash!": "¡Chof!",
+  "Whoosh!": "¡Fiuu!",
+  "Boop!": "¡Bup!",
+  "Dim it!": "¡Atenúalo!",
+  "Shoo!": "¡Fuera!",
+  "Ruffle!": "¡Despeina!",
 };
