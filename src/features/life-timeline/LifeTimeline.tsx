@@ -1078,16 +1078,6 @@ export function LifeTimeline() {
               >
                 <T style={{ color: tk.inkSoft, fontWeight: "600", fontSize: 13 }}>{t("Reflect")}</T>
               </Pressable>
-              {armedBranchId != null && (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t("Put the club away")}
-                  onPress={() => setArmedBranchId(null)}
-                  style={{ paddingHorizontal: 10, paddingVertical: 9 }}
-                >
-                  <T style={{ color: tk.inkFaint, fontSize: 13 }}>✕</T>
-                </Pressable>
-              )}
             </View>
           );
         })()}
