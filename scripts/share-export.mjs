@@ -84,8 +84,9 @@ await page.waitForTimeout(500);
 await page.getByPlaceholder(/a fear, a story/).fill("the endless what-ifs");
 await page.getByRole("button", { name: "Add to the fire" }).click();
 await page.waitForTimeout(300);
+await page.getByPlaceholder(/one sentence you'll keep/).fill("arguments end; family continues");
 await page.getByRole("button", { name: "Strike the match" }).click();
-await page.waitForTimeout(3200);
+await page.waitForTimeout(3800);
 await page.getByRole("button", { name: "More" }).first().click();
 await page.waitForTimeout(600);
 // Loading examples navigates back to Now — return to More for the share section.
@@ -173,13 +174,9 @@ for (const th of share.threads) {
 }
 check("events within window", eventsOk);
 check("event kinds valid", kindsOk);
-const burnedEvents = share.threads
-  .flatMap((t) => t.events)
-  .filter((e) => e.kind === "integrated" && Array.isArray(e.burned) && e.burned.length > 0);
 check(
-  "burned rides the integrated event",
-  burnedEvents.length >= 1,
-  `burned=${JSON.stringify(burnedEvents[0]?.burned ?? [])}`,
+  "the burned thread is gone from the export entirely",
+  !JSON.stringify(share).includes("The argument with my father"),
 );
 check("loudness window + baseline", loudnessOk);
 

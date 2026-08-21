@@ -3,6 +3,7 @@ import { AccessibilityInfo, Appearance } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { ForkPeriodChoice, PsychologicalBranch, Loudness } from "@/domain/branches/types";
 import type { BranchMerge, MergeDraft } from "@/domain/merges/types";
+import type { Lesson } from "@/domain/lessons/types";
 import type { IntegratedAction } from "@/domain/actions/types";
 import type { BranchCommit } from "@/domain/moments/types";
 import {
@@ -86,6 +87,8 @@ type AppState = {
   branches: PsychologicalBranch[];
   merges: BranchMerge[];
   actions: IntegratedAction[];
+  /** What the fires taught you — each survives its burned thread. */
+  lessons: Lesson[];
   mergeDraft?: MergeDraft;
   view: View;
   operation: TimelineOperation;
@@ -108,8 +111,8 @@ type AppState = {
   reclaim?: ReclaimEvent;
   /** A branch was just created: its line draws itself onto the timeline. */
   born?: { key: number; branchId: string };
-  /** A worry was just burned: fire consumes its line on the timeline. */
-  burn?: { key: number; branchId: string; items: string[] };
+  /** A worry is being burned: fire consumes its line, then finalizeBurn removes it. */
+  burn?: { key: number; branchId: string; items: string[]; lesson: string };
   /** An optimistic, unsaved line shown while the create form is open. */
   draftBranchId: string | null;
   /**
@@ -162,9 +165,10 @@ type AppState = {
   /** A folded line came back to mind: it continues as an open line again. */
   reopenBranch(branchId: string): Promise<void>;
   clearReclaim(): void;
-  /** Burn a worry away: the merge is recorded, the fire is cosmetic. */
-  burnBranch(branchId: string, items: string[], farewell?: string): Promise<void>;
-  clearBurn(): void;
+  /** Phase 1 of a burn: light the fire. Nothing is written or deleted yet. */
+  burnBranch(branchId: string, items: string[], lesson: string): void;
+  /** Phase 2: the fire is done — keep the lesson, remove the thread entirely. */
+  finalizeBurn(): Promise<void>;
   clearBorn(): void;
   updateMoment(branchId: string, moment: BranchCommit): Promise<void>;
 
@@ -310,6 +314,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   branches: [],
   merges: [],
   actions: [],
+  lessons: [],
   view: { kind: "now" },
   operation: { kind: "idle" },
   typeFilter: new Set(),
@@ -334,6 +339,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...settings,
       branches: data.branches,
       merges: data.merges,
+      lessons: data.lessons,
       actions: data.actions,
       mergeDraft: draft,
       nowTick: appNow().getTime(),
@@ -586,23 +592,46 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearReclaim: () => set({ reclaim: undefined }),
 
-  async burnBranch(branchId, items, farewell) {
-    const branch = get().branches.find((b) => b.id === branchId);
-    if (!branch) return;
-    await get().completeMerge({
-      branches: [branch],
-      preserveRelease: { stillValid: [], outdated: [], outsideControl: [], reclaimable: [] },
-      conflicts: [],
-      resolution: farewell?.trim() || "Burned away.",
-      contributionKind: "acceptance",
-      released: items,
-      burned: items,
-      resultStatus: "merged",
-    });
-    set({ burn: { key: Date.now(), branchId, items } });
+  burnBranch(branchId, items, lesson) {
+    if (!get().branches.some((b) => b.id === branchId)) return;
+    set({ burn: { key: Date.now(), branchId, items, lesson }, operation: { kind: "idle" } });
   },
 
-  clearBurn: () => set({ burn: undefined }),
+  async finalizeBurn() {
+    const burn = get().burn;
+    if (!burn) return;
+    const { branchId, lesson } = burn;
+    const record: Lesson = { id: newId("ls"), text: lesson, on: todayIso() };
+    // actions tied only to this thread go with it; shared ones just drop it
+    const touching = get().actions.filter((a) =>
+      a.branchesIntegrated.some((r) => r.branchId === branchId),
+    );
+    const deadActions = touching.filter((a) =>
+      a.branchesIntegrated.every((r) => r.branchId === branchId),
+    );
+    const trimmedActions = touching
+      .filter((a) => !deadActions.includes(a))
+      .map((a) => ({
+        ...a,
+        branchesIntegrated: a.branchesIntegrated.filter((r) => r.branchId !== branchId),
+      }));
+    await repo.saveLesson(record);
+    await repo.deleteBranch(branchId);
+    for (const a of deadActions) await repo.deleteAction(a.id);
+    // its waiting container, if any, goes with it
+    const waitingRows = (await repo.loadAll()).waiting.filter((w) => w.branchId === branchId);
+    for (const w of waitingRows) await repo.deleteWaiting(w.id);
+    for (const a of trimmedActions) await repo.saveAction(a);
+    set((s) => ({
+      lessons: [...s.lessons, record],
+      branches: s.branches.filter((b) => b.id !== branchId),
+      actions: s.actions
+        .filter((a) => !deadActions.some((d) => d.id === a.id))
+        .map((a) => trimmedActions.find((tr) => tr.id === a.id) ?? a),
+      burn: undefined,
+      operation: s.operation.kind !== "idle" ? { kind: "idle" } : s.operation,
+    }));
+  },
   clearBorn: () => set({ born: undefined }),
 
   async createTodayAction(branchId, step) {

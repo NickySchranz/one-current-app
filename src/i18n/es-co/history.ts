@@ -219,4 +219,7 @@ export const history: Record<string, string> = {
   "Yes, revoke": "Sí, revocar",
   "Revoke this share? The code stops working immediately.":
     "¿Revocar este archivo? El código deja de funcionar de una.",
+  "What the fires taught you": "Lo que le enseñaron los fuegos",
+  "Each of these outlived a worry you burned. The worry is gone; you changed.":
+    "Cada una sobrevivió a una preocupación que quemó. La preocupación ya no está; usted cambió.",
 };

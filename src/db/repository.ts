@@ -3,17 +3,19 @@ import type { PsychologicalBranch } from "@/domain/branches/types";
 import type { BranchMerge, MergeDraft } from "@/domain/merges/types";
 import type { WaitingContainer } from "@/domain/waiting/types";
 import type { IntegratedAction } from "@/domain/actions/types";
+import type { Lesson } from "@/domain/lessons/types";
 
 export const repo = {
   async loadAll() {
-    const [branches, merges, waiting, actions, drafts] = await Promise.all([
+    const [branches, merges, waiting, actions, drafts, lessons] = await Promise.all([
       db.branches.toArray(),
       db.merges.toArray(),
       db.waiting.toArray(),
       db.actions.toArray(),
       db.drafts.toArray(),
+      db.lessons.toArray(),
     ]);
-    return { branches, merges, waiting, actions, drafts };
+    return { branches, merges, waiting, actions, drafts, lessons };
   },
 
   saveBranch: (b: PsychologicalBranch) => db.branches.put(b),
@@ -25,6 +27,8 @@ export const repo = {
   deleteAction: (id: string) => db.actions.delete(id),
   saveDraft: (d: MergeDraft) => db.drafts.put(d),
   deleteDraft: (id: string) => db.drafts.delete(id),
+  saveLesson: (l: Lesson) => db.lessons.put(l),
+  deleteWaiting: (id: string) => db.waiting.delete(id),
 
   async exportAll(): Promise<string> {
     const data = await repo.loadAll();
@@ -48,6 +52,7 @@ export const repo = {
       db.waiting.bulkPut(d.waiting ?? []),
       db.actions.bulkPut(d.actions ?? []),
       db.drafts.bulkPut(d.drafts ?? []),
+      db.lessons.bulkPut(d.lessons ?? []),
     ]);
   },
 
@@ -58,6 +63,7 @@ export const repo = {
       db.waiting.clear(),
       db.actions.clear(),
       db.drafts.clear(),
+      db.lessons.clear(),
     ]);
   },
 };

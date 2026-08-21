@@ -61,6 +61,7 @@ export function QuickMerge({ branchId }: Props) {
   const [burnItems, setBurnItems] = useState<string[]>([]);
   const [burnInput, setBurnInput] = useState("");
   const [farewell, setFarewell] = useState("");
+  const [lesson, setLesson] = useState("");
   const [workName, setWorkName] = useState(branch?.title ?? "");
   const [workHome, setWorkHome] = useState("");
   const [firstTask, setFirstTask] = useState("");
@@ -128,14 +129,9 @@ export function QuickMerge({ branchId }: Props) {
     setBurnInput("");
   };
 
-  async function burn() {
-    if (busy || burnItems.length === 0) return;
-    setBusy(true);
-    try {
-      await burnBranch(branchId, burnItems, farewell.trim() || t("Burned away."));
-    } finally {
-      setBusy(false);
-    }
+  function burn() {
+    if (busy || burnItems.length === 0 || !lesson.trim()) return;
+    burnBranch(branchId, burnItems, lesson.trim());
   }
 
   if (burning) {
@@ -143,6 +139,9 @@ export function QuickMerge({ branchId }: Props) {
       <Panel inTray={inTray}>
         <T style={{ fontSize: 16.8, fontWeight: "600" }}>{branch.title}</T>
         <Prompt>{t("Write down what burns with it. The fire keeps nothing.")}</Prompt>
+        <Hint>
+          {t("This thread will be gone from the app — completely. No line, no history. Only the lesson stays.")}
+        </Hint>
         <Field label={t("What burns with it")}>
           {burnSuggestions.length > 0 && (
             <View style={[rowStyles.tagRow, { marginBottom: 6 }]}>
@@ -189,20 +188,29 @@ export function QuickMerge({ branchId }: Props) {
             </View>
           )}
         </Field>
+        <Field label={t("The lesson you carry out of the fire")}>
+          <AppTextInput
+            value={lesson}
+            onChangeText={setLesson}
+            placeholder={t("one sentence you'll keep — e.g. I can survive being disliked")}
+          />
+          <Hint>{t("The fire takes the weight. You keep this.")}</Hint>
+        </Field>
         <Field label={t("A last word to it (optional)")}>
           <AppTextInput
             value={farewell}
             onChangeText={setFarewell}
             placeholder={t("you kept me safe once. not anymore.")}
           />
+          <Hint>{t("Spoken to the fire — kept nowhere.")}</Hint>
         </Field>
         <View style={rowStyles.stageNav}>
           <Button variant="quiet" label={t("Back")} onPress={() => setBurning(false)} />
           <Button
             variant="primary"
             label={t("Strike the match")}
-            disabled={burnItems.length === 0 || busy}
-            onPress={() => void burn()}
+            disabled={burnItems.length === 0 || !lesson.trim() || busy}
+            onPress={burn}
           />
         </View>
       </Panel>

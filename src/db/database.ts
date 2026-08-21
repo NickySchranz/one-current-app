@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import type { BranchMerge, MergeDraft } from "@/domain/merges/types";
+import type { Lesson } from "@/domain/lessons/types";
 import type { WaitingContainer } from "@/domain/waiting/types";
 import type { IntegratedAction } from "@/domain/actions/types";
 
@@ -70,4 +71,5 @@ export const db = {
   waiting: new Table<WaitingContainer>("waiting"),
   actions: new Table<IntegratedAction>("actions"),
   drafts: new Table<MergeDraft>("drafts"),
+  lessons: new Table<Lesson>("lessons"),
 };

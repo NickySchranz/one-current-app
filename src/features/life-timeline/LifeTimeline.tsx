@@ -119,7 +119,7 @@ export function LifeTimeline() {
   const born = useAppStore((s) => s.born);
   const clearBorn = useAppStore((s) => s.clearBorn);
   const burn = useAppStore((s) => s.burn);
-  const clearBurn = useAppStore((s) => s.clearBurn);
+  const finalizeBurn = useAppStore((s) => s.finalizeBurn);
   const reducedMotion = useAppStore((s) => s.reducedMotion);
   const mascotTypePref = useAppStore((s) => s.mascotType);
   const draftBranchId = useAppStore((s) => s.draftBranchId);
@@ -150,12 +150,21 @@ export function LifeTimeline() {
   // effects can safely reference the function without re-running).
   const mascotReactionRef = useRef<((text: string) => void) | null>(null);
 
-  // A worry just burned: let the fire finish, then forget the event.
+  // A worry is burning: when the fire has consumed everything, the thread is
+  // removed from the app for good — only the lesson walks out.
+  const [lessonFlying, setLessonFlying] = useState(false);
   useEffect(() => {
-    if (!burn) return;
-    const timer = setTimeout(clearBurn, reducedMotion ? 0 : 2600);
-    return () => clearTimeout(timer);
-  }, [burn, clearBurn, reducedMotion]);
+    if (!burn) {
+      setLessonFlying(false);
+      return;
+    }
+    const fly = setTimeout(() => setLessonFlying(true), reducedMotion ? 0 : 1900);
+    const timer = setTimeout(() => void finalizeBurn(), reducedMotion ? 0 : 3200);
+    return () => {
+      clearTimeout(fly);
+      clearTimeout(timer);
+    };
+  }, [burn, finalizeBurn, reducedMotion]);
 
   // A just-created line draws itself in, then settles like the others.
   useEffect(() => {
@@ -1051,6 +1060,30 @@ export function LifeTimeline() {
                     </View>
                   </SmokeFly>
                 ))}
+                {/* the thread's own name leaves last */}
+                {(() => {
+                  const title = branches.find((b) => b.id === burn.branchId)?.title;
+                  return title ? (
+                    <SmokeFly key="title" index={burn.items.length + 1} x0={x0} y0={y0}>
+                      <View style={{ opacity: 0.6 }}>
+                        <Tag label={title} />
+                      </View>
+                    </SmokeFly>
+                  ) : null;
+                })()}
+                {/* the one thing that survives flies home to Now */}
+                {lessonFlying && (
+                  <ReclaimFly
+                    key="lesson"
+                    index={0}
+                    x0={x0}
+                    y0={y0}
+                    dx={layout.nowX - 24 - x0}
+                    dy={layout.mainY - y0}
+                  >
+                    <Tag label={burn.lesson} quality />
+                  </ReclaimFly>
+                )}
               </View>
             );
           })()}

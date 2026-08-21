@@ -155,4 +155,11 @@ export const quick: Record<string, string> = {
   "A last word to it (optional)": "Unas últimas palabras (opcional)",
   "you kept me safe once. not anymore.": "una vez me protegió. ya no.",
   "Strike the match": "Encienda el fósforo",
+  "This thread will be gone from the app — completely. No line, no history. Only the lesson stays.":
+    "Este hilo va a desaparecer de la aplicación — del todo. Sin línea, sin historial. Solo queda la lección.",
+  "The lesson you carry out of the fire": "La lección que saca del fuego",
+  "one sentence you'll keep — e.g. I can survive being disliked":
+    "una frase que va a conservar — p. ej. puedo sobrevivir a no gustar",
+  "The fire takes the weight. You keep this.": "El fuego se lleva el peso. Usted se queda con esto.",
+  "Spoken to the fire — kept nowhere.": "Dicho al fuego — no se guarda en ninguna parte.",
 };

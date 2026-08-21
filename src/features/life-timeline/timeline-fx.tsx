@@ -341,77 +341,89 @@ const AnimatedCircleFx = Animated.createAnimatedComponent(Circle);
 
 /** The ember palette, borrowed from the dragon. */
 const EMBER = "#ff9a3d";
+const EMBER_DEEP = "#ff6a2d";
 const EMBER_BRIGHT = "#ffd27a";
 const CHAR = "#3a2f28";
 
 /**
- * `.burn-away` — fire consumes a thread. The line is erased from its fork to
- * its end while a flickering flame head rides the erase front, sparks lift
- * off the char, and the burned words rise as smoke. Purely cosmetic: the
- * merge is already recorded before this mounts. Caller gates reduce motion.
+ * `.burn-away` v2 — fire truly consumes a thread. The whole line ignites and
+ * flickers alive, an erase front sweeps fork→end while char crumbles behind
+ * it, flame clusters burn at intervals along the path, embers rise and
+ * drift, and it ends with nothing left: the thread is deleted when the fire
+ * is done. Purely visual — finalizeBurn does the removing. Caller gates
+ * reduce motion.
  */
-export function BurnAway({ path, durationMs = 2200 }: { path: string; durationMs?: number }) {
+export function BurnAway({ path, durationMs = 2800 }: { path: string; durationMs?: number }) {
   const len = pathLength(path);
   const points = samplePath(path, 8);
   const progress = useSharedValue(0);
   const flick = useSharedValue(0);
+  const flash = useSharedValue(0);
 
   useEffect(() => {
     progress.value = 0;
-    progress.value = withTiming(1, { duration: durationMs, easing: Easing.inOut(Easing.quad) });
-    flick.value = withRepeat(withTiming(1, { duration: 120, easing: Easing.linear }), -1, true);
+    flash.value = 0;
+    // ignition: a bright flash, then the sweep begins
+    flash.value = withSequence(
+      withTiming(1, { duration: 160, easing: Easing.out(Easing.quad) }),
+      withTiming(0, { duration: 420, easing: Easing.inOut(Easing.quad) }),
+    );
+    progress.value = withDelay(
+      300,
+      withTiming(1, { duration: durationMs - 300, easing: Easing.inOut(Easing.quad) }),
+    );
+    flick.value = withRepeat(withTiming(1, { duration: 90, easing: Easing.linear }), -1, true);
     return () => {
       cancelAnimation(progress);
       cancelAnimation(flick);
+      cancelAnimation(flash);
     };
-  }, [durationMs, progress, flick]);
+  }, [durationMs, progress, flick, flash]);
 
-  // the ember line, erased fork → end
-  const emberProps = useAnimatedProps(() => ({
+  // the not-yet-consumed line burns alive: flickering width and brightness
+  const aliveProps = useAnimatedProps(() => ({
     strokeDashoffset: -progress.value * len,
-    opacity: 1 - progress.value * 0.25,
-  }));
-  // the char left behind fades out just after the front passes
-  const charProps = useAnimatedProps(() => ({
-    strokeDashoffset: -Math.max(0, progress.value - 0.14) * len,
-    opacity: 0.5 * (1 - progress.value),
-  }));
-
-  // the flame head's position along the sampled path
-  const head = useDerivedValue(() => {
-    const idx = Math.min(points.length - 1, Math.floor(progress.value * (points.length - 1)));
-    const pnt = points[idx] ?? { x: -100, y: -100 };
-    const j = flick.value * 2 - 1;
-    return { x: pnt.x + j * 1.2, y: pnt.y - Math.abs(j) * 1.6 };
-  });
-  const glowProps = useAnimatedProps(() => ({
-    cx: head.value.x,
-    cy: head.value.y,
-    r: 9 + flick.value * 3,
-    opacity: progress.value >= 1 ? 0 : 0.3,
-  }));
-  const flameOuter = useAnimatedProps(() => ({
-    cx: head.value.x,
-    cy: head.value.y - 3 - flick.value * 2,
-    r: 4.6 + flick.value * 1.2,
-    opacity: progress.value >= 1 ? 0 : 0.9,
-  }));
-  const flameInner = useAnimatedProps(() => ({
-    cx: head.value.x,
-    cy: head.value.y - 4.5 - flick.value * 2.6,
-    r: 2.2 + flick.value * 0.8,
+    strokeWidth: 3.2 + flick.value * 2.6,
+    stroke: flick.value > 0.66 ? EMBER_BRIGHT : flick.value > 0.33 ? EMBER : EMBER_DEEP,
     opacity: progress.value >= 1 ? 0 : 0.95,
   }));
+  // a hot glow underneath the burning stretch
+  const glowLineProps = useAnimatedProps(() => ({
+    strokeDashoffset: -progress.value * len,
+    strokeWidth: 10 + flick.value * 5,
+    opacity: progress.value >= 1 ? 0 : 0.22 + flick.value * 0.08,
+  }));
+  // char crumbling behind the front: broken dashes, fading
+  const charProps = useAnimatedProps(() => ({
+    strokeDashoffset: -Math.max(0, progress.value - 0.1) * len,
+    opacity: 0.55 * (1 - progress.value),
+  }));
+  // the ignition flash at the endpoint
+  const end = points[points.length - 1] ?? { x: 0, y: 0 };
+  const flashProps = useAnimatedProps(() => ({
+    r: Math.max(0.1, 6 + flash.value * 30),
+    opacity: flash.value * 0.7,
+  }));
 
-  // sparks lifting off fixed sample points as the front passes them
-  const sparkSeeds = points.filter((_, i) => i % Math.max(2, Math.floor(points.length / 7)) === 0);
+  // flame clusters along the whole path, each with its own phase; a cluster
+  // burns while the front has not passed it, then gutters out
+  const clusterEvery = Math.max(3, Math.floor(points.length / 9));
+  const clusters = points.filter((_, i) => i % clusterEvery === 0);
 
   return (
     <G pointerEvents="none">
       <AnimatedPath
         d={path}
+        stroke={EMBER}
+        strokeLinecap="round"
+        fill="none"
+        strokeDasharray={`${len} ${len}`}
+        animatedProps={glowLineProps}
+      />
+      <AnimatedPath
+        d={path}
         stroke={CHAR}
-        strokeWidth={5}
+        strokeWidth={4.5}
         strokeLinecap="round"
         fill="none"
         strokeDasharray={`${len} ${len}`}
@@ -419,19 +431,64 @@ export function BurnAway({ path, durationMs = 2200 }: { path: string; durationMs
       />
       <AnimatedPath
         d={path}
-        stroke={EMBER}
-        strokeWidth={3.4}
         strokeLinecap="round"
         fill="none"
         strokeDasharray={`${len} ${len}`}
-        animatedProps={emberProps}
+        animatedProps={aliveProps}
       />
-      {sparkSeeds.map((pnt, i) => (
-        <Spark key={i} x={pnt.x} y={pnt.y} at={i / Math.max(1, sparkSeeds.length - 1)} progress={progress} />
+      {clusters.map((pnt, i) => (
+        <FlameCluster
+          key={i}
+          x={pnt.x}
+          y={pnt.y}
+          at={i / Math.max(1, clusters.length - 1)}
+          progress={progress}
+          flick={flick}
+          phase={(i * 37) % 100}
+        />
       ))}
-      <AnimatedCircleFx fill={EMBER} animatedProps={glowProps} />
-      <AnimatedCircleFx fill={EMBER} animatedProps={flameOuter} />
-      <AnimatedCircleFx fill={EMBER_BRIGHT} animatedProps={flameInner} />
+      {points
+        .filter((_, i) => i % Math.max(2, Math.floor(points.length / 18)) === 0)
+        .map((pnt, i, arr) => (
+          <Spark key={`s${i}`} x={pnt.x} y={pnt.y} at={i / Math.max(1, arr.length - 1)} progress={progress} />
+        ))}
+      <AnimatedCircleFx cx={end.x} cy={end.y} fill={EMBER_BRIGHT} animatedProps={flashProps} />
+    </G>
+  );
+}
+
+/** Three teardrop flames sharing a base, flickering out of phase. */
+function FlameCluster({ x, y, at, progress, flick, phase }: {
+  x: number;
+  y: number;
+  at: number;
+  progress: SharedValue<number>;
+  flick: SharedValue<number>;
+  phase: number;
+}) {
+  const mk = (dx: number, size: number, speed: number) =>
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useAnimatedProps(() => {
+      const consumed = progress.value > at;
+      const gutter = consumed ? Math.max(0, 1 - (progress.value - at) * 6) : 1;
+      const j = Math.abs(Math.sin((flick.value + phase / 100) * Math.PI * speed));
+      return {
+        cx: x + dx + j * 1.4,
+        cy: y - 3 - j * (3 + size),
+        r: Math.max(0.1, (size + j * 1.6) * gutter),
+        opacity: progress.value >= 1 ? 0 : 0.85 * gutter,
+      };
+    });
+  const f1 = mk(-3, 2.2, 2);
+  const f2 = mk(0, 3.4, 3);
+  const f3 = mk(3, 2.0, 2.5);
+  const core = mk(0, 1.6, 3.5);
+  return (
+    <G>
+      <AnimatedCircleFx fill={EMBER_DEEP} animatedProps={f1} />
+      <AnimatedCircleFx fill={EMBER} animatedProps={f2} />
+      <AnimatedCircleFx fill={EMBER} animatedProps={f3} />
+      <AnimatedCircleFx fill={EMBER_BRIGHT} animatedProps={core} />
     </G>
   );
 }
@@ -444,12 +501,12 @@ function Spark({ x, y, at, progress }: {
   progress: SharedValue<number>;
 }) {
   const props = useAnimatedProps(() => {
-    const local = Math.max(0, Math.min(1, (progress.value - at) * 4));
+    const local = Math.max(0, Math.min(1, (progress.value - at) * 3.2));
     return {
-      cx: x + Math.sin((at + 1) * 40 + local * 6) * 4 * local,
-      cy: y - local * (18 + at * 22),
-      r: 1.6 * (1 - local * 0.6),
-      opacity: local <= 0 || local >= 1 ? 0 : 0.85 * (1 - local),
+      cx: x + Math.sin((at + 1) * 40 + local * 7) * 7 * local,
+      cy: y - local * (22 + at * 26),
+      r: Math.max(0.1, 1.7 * (1 - local * 0.55)),
+      opacity: local <= 0 || local >= 1 ? 0 : 0.9 * (1 - local),
     };
   });
   return <AnimatedCircleFx fill={EMBER_BRIGHT} animatedProps={props} />;

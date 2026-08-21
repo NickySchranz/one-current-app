@@ -133,54 +133,75 @@ const branchPoint = (page, frac = 0.5) =>
   await page.close();
 }
 
-// ---- 3b. burn it away -------------------------------------------------------
+// ---- 3b. burn it away: fire, then truly gone ------------------------------
 {
   const page = await newPage();
   await loadExamples(page);
-  const pt = await branchPoint(page, 0.4);
-  await page.mouse.click(pt.x, pt.y);
+  await page.getByText("The rent increase letter", { exact: true }).first().click({ force: true });
   await page.waitForTimeout(700);
   await page.getByText("What does this thread need from you now?").first().click();
   await page.waitForTimeout(500);
   await page.getByRole("button", { name: /^Integrate\b/ }).last().click();
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(700);
   await page.getByRole("button", { name: /Burn it away/ }).click();
-  await page.waitForTimeout(600);
-  // one suggested chip (if any) plus one typed item
+  await page.waitForTimeout(500);
   const sugg = page.getByRole("button", { name: /^Burn / }).first();
   if (await sugg.isVisible().catch(() => false)) await sugg.click();
   await page.getByPlaceholder(/a fear, a story/).fill("the 3am spiral");
   await page.getByRole("button", { name: "Add to the fire" }).click();
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(200);
+  const strike = page.getByRole("button", { name: "Strike the match" });
+  const disabledBefore = await strike.isDisabled();
+  await page.getByPlaceholder(/one sentence you'll keep/).fill("rent is a problem, not a verdict");
+  await page.waitForTimeout(200);
+  const enabledAfter = !(await strike.isDisabled());
   await page.screenshot({ path: "/tmp/gest-08-burn-form.png" });
-  await page.getByRole("button", { name: "Strike the match" }).click();
-  await page.waitForTimeout(700); // mid-burn
-  await page.screenshot({ path: "/tmp/gest-09-burning.png" });
+  await strike.click();
+  for (const [ms, name] of [[400, "a"], [500, "b"], [600, "c"], [700, "d"]]) {
+    await page.waitForTimeout(ms);
+    await page.screenshot({ path: `/tmp/gest-09-burning-${name}.png` });
+  }
   const midFire = await page.evaluate(() =>
-    [...document.querySelectorAll("svg path")].some(
-      (p) => (p.getAttribute("stroke") ?? "").toLowerCase() === "#ff9a3d",
-    ),
+    [...document.querySelectorAll("svg circle, svg path")].some((p) => {
+      const c = (p.getAttribute("stroke") ?? p.getAttribute("fill") ?? "").toLowerCase();
+      return c === "#ff9a3d" || c === "#ffd27a" || c === "#ff6a2d";
+    }),
   );
-  await page.waitForTimeout(2600);
+  await page.waitForTimeout(1800);
   await page.screenshot({ path: "/tmp/gest-10-burned.png" });
-  const after = await page.evaluate(() => {
-    const fire = [...document.querySelectorAll("svg path")].some(
-      (p) => (p.getAttribute("stroke") ?? "").toLowerCase() === "#ff9a3d",
-    );
+  const after = await page.evaluate(async () => {
+    const fire = [...document.querySelectorAll("svg circle, svg path")].some((p) => {
+      const c = (p.getAttribute("stroke") ?? p.getAttribute("fill") ?? "").toLowerCase();
+      return c === "#ff9a3d" || c === "#ffd27a" || c === "#ff6a2d";
+    });
+    const titleInDom = document.body.textContent.includes("The rent increase letter");
+    const raw = localStorage.getItem("one-current/table/branches");
+    const inStorage = raw ? raw.includes("The rent increase letter") : false;
     const staleDash = [...document.querySelectorAll("svg path")].some((p) => {
       const d = p.getAttribute("stroke-dasharray") ?? "";
       const w = parseFloat(p.getAttribute("stroke-width") ?? "0");
       return w >= 3 && /^8[ ,]4$/.test(d.trim());
     });
-    return { fire, staleDash };
+    return { fire, titleInDom, inStorage, staleDash };
   });
+  await page.getByRole("button", { name: "History" }).first().click();
+  await page.waitForTimeout(900);
+  const lessonKept = (await page.getByText("rent is a problem, not a verdict").count()) > 0;
+  const sectionShown = (await page.getByText("What the fires taught you").count()) > 0;
   console.log(
     "burn: done —",
+    disabledBefore && enabledAfter ? "lesson gate ok" : "LESSON GATE BROKEN",
     midFire ? "flames seen" : "NO FLAMES",
     after.fire ? "FIRE LINGERS" : "fire out",
+    !after.titleInDom && !after.inStorage ? "thread fully gone" : "THREAD SURVIVED",
     after.staleDash ? "STALE DASH" : "dashes clean",
+    lessonKept && sectionShown ? "lesson kept in history" : "LESSON MISSING",
   );
-  if (!midFire || after.fire || after.staleDash) process.exitCode = 1;
+  if (
+    !disabledBefore || !enabledAfter || !midFire || after.fire ||
+    after.titleInDom || after.inStorage || after.staleDash || !lessonKept || !sectionShown
+  )
+    process.exitCode = 1;
   await page.close();
 }
 

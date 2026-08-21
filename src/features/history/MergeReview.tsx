@@ -131,23 +131,13 @@ export function MergeReview({ mergeId }: Props) {
           </Card>
         </View>
 
-        {(merge.burned?.length ?? 0) > 0 ? (
+        {merge.released.length > 0 && (
           <Card sunken>
-            <H3>{t("Burned with it")}</H3>
-            {merge.burned!.map((r) => (
+            <H3>{t("Stopped running separately")}</H3>
+            {merge.released.map((r) => (
               <DiffItem key={r}>{r}</DiffItem>
             ))}
-            <Hint>{t("Written down to be let go of — the fire kept nothing.")}</Hint>
           </Card>
-        ) : (
-          merge.released.length > 0 && (
-            <Card sunken>
-              <H3>{t("Stopped running separately")}</H3>
-              {merge.released.map((r) => (
-                <DiffItem key={r}>{r}</DiffItem>
-              ))}
-            </Card>
-          )
         )}
 
         {merge.conflicts.length > 0 && (

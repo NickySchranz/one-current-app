@@ -69,6 +69,7 @@ export function HistoryView() {
   const dayIso = (offset: number) =>
     new Date(nowTick + offset * DAY).toISOString().slice(0, 10);
   const merges = useAppStore((s) => s.merges);
+  const lessons = useAppStore((s) => s.lessons);
   const setView = useAppStore((s) => s.setView);
   // 0 = today; step back as far as you like.
   const [dayOffset, setDayOffset] = useState(0);
@@ -125,6 +126,28 @@ export function HistoryView() {
   return (
     <ScrollView>
       <Panel>
+        {/* Fires leave exactly one thing behind. The threads are gone; these stay. */}
+        {lessons.length > 0 && (
+          <Card sunken style={{ marginTop: 8, marginBottom: 4 }}>
+            <H3>{t("What the fires taught you")}</H3>
+            {lessons
+              .slice()
+              .sort((a, b) => b.on.localeCompare(a.on))
+              .map((l) => (
+                <View
+                  key={l.id}
+                  style={{ flexDirection: "row", alignItems: "baseline", gap: 8, marginTop: 6 }}
+                >
+                  <T style={{ fontSize: 13.6, flex: 1 }}>{l.text}</T>
+                  <T style={{ fontSize: 11, opacity: 0.55 }}>{l.on}</T>
+                </View>
+              ))}
+            <Hint style={{ marginTop: 8, marginBottom: 0 }}>
+              {t("Each of these outlived a worry you burned. The worry is gone; you changed.")}
+            </Hint>
+          </Card>
+        )}
+
         {/* The day itself is the page header: swipe or step through the days here. */}
         <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6.4, marginBottom: 3.2 }}>
           <View {...pan.panHandlers} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
