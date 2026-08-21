@@ -1003,10 +1003,14 @@ export function LifeTimeline() {
             instantly (and again, and again), Reflect opens the full panel. It
             rests on the date strip — the one band no thread can enter. */}
         {(() => {
-          const target = armedBranchId ? branches.find((b) => b.id === armedBranchId) : undefined;
-          const show = target && !isClosed(target) && operation.kind === "idle";
-          if (!show) return null;
-          const cooling = Date.now() < attackCooldownUntil;
+          // Bonk always has a target: the thread you armed, or wherever Pip
+          // is right now on his own patrol.
+          const focusId =
+            armedBranchId ?? mascot.pendingBranchId ?? mascot.inspectedBranchId ?? undefined;
+          const target = focusId ? branches.find((b) => b.id === focusId) : undefined;
+          const usable = target && !isClosed(target);
+          if (operation.kind !== "idle") return null;
+          const cooling = Date.now() < attackCooldownUntil || !usable;
           const VERBS: Partial<Record<typeof theme, string>> = {
             demonfire: "Douse!",
             koipond: "Splash!",
@@ -1020,31 +1024,30 @@ export function LifeTimeline() {
           return (
             <View
               style={{
-                // The one band threads never enter is the date strip — the bar
-                // borrows it while armed, so no line is ever covered.
+                // Rests on the date strip (the one band threads never enter)
+                // and hugs the left, well clear of the + button on the right.
                 position: "absolute",
                 left: 0,
-                right: 0,
                 bottom: 0,
                 flexDirection: "row",
                 alignItems: "center",
-                justifyContent: "center",
-                gap: 10,
+                gap: 6,
                 backgroundColor: alpha(tk.bgRaised, 0.97),
                 borderTopWidth: 1,
-                borderTopColor: alpha(tk.lineAxis, 0.9),
-                paddingHorizontal: 12,
+                borderRightWidth: 1,
+                borderColor: alpha(tk.lineAxis, 0.9),
+                borderTopRightRadius: tk.radiusLg,
+                paddingLeft: 14,
+                paddingRight: 6,
                 paddingVertical: 4,
               }}
             >
-              <T numberOfLines={1} style={{ fontSize: 11.5, color: tk.inkSoft, maxWidth: 120 }}>
-                {target.title}
-              </T>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t("Have Pip calm this thread")}
                 disabled={cooling}
                 onPress={() => {
+                  if (!target) return;
                   setAttackCooldownUntil(Date.now() + 500);
                   void attackBranch(target.id);
                 }}
@@ -1060,7 +1063,9 @@ export function LifeTimeline() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t("Reflect on this thread")}
+                disabled={!usable}
                 onPress={() => {
+                  if (!target) return;
                   setArmedBranchId(null);
                   setOperation({ kind: "quick-touch", branchId: target.id });
                 }}
@@ -1072,14 +1077,16 @@ export function LifeTimeline() {
               >
                 <T style={{ color: tk.inkSoft, fontWeight: "600", fontSize: 13 }}>{t("Reflect")}</T>
               </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t("Put the club away")}
-                onPress={() => setArmedBranchId(null)}
-                style={{ paddingHorizontal: 10, paddingVertical: 9 }}
-              >
-                <T style={{ color: tk.inkFaint, fontSize: 13 }}>✕</T>
-              </Pressable>
+              {armedBranchId != null && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t("Put the club away")}
+                  onPress={() => setArmedBranchId(null)}
+                  style={{ paddingHorizontal: 10, paddingVertical: 9 }}
+                >
+                  <T style={{ color: tk.inkFaint, fontSize: 13 }}>✕</T>
+                </Pressable>
+              )}
             </View>
           );
         })()}

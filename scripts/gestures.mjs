@@ -149,10 +149,25 @@ const branchPoint = (page, frac = 0.5) =>
     arg1.loudnessSetOn === today &&
     arg1.loudness <= arg0.loudness &&
     arg1.loudnessSetOn !== arg0.loudnessSetOn;
-  // tapping the SAME thread again opens the panel
-  await page.getByText("The argument with my father", { exact: true }).first().click({ force: true });
-  await page.waitForTimeout(600);
+  // with nothing armed, Bonk strikes wherever Pip is patrolling
+  await page.getByRole("button", { name: "Put the club away" }).click().catch(() => {});
+  await page.waitForTimeout(400);
+  const barStillThere = await bonk.isVisible().catch(() => false);
+  const beforeFree = await page.evaluate(() => JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]"));
+  await bonk.click();
+  await page.waitForTimeout(1000);
+  const afterFree = await page.evaluate(() => JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]"));
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const freeHit = afterFree.some((b) => {
+    const was = beforeFree.find((x) => x.id === b.id);
+    return was && b.loudnessSetOn === todayStr && (was.loudnessSetOn !== b.loudnessSetOn || b.loudness < was.loudness);
+  });
+
+  // Reflect opens the full panel for whatever is focused
+  await page.getByRole("button", { name: "Reflect on this thread" }).click();
+  await page.waitForTimeout(800);
   const panelOnSecondTap =
+    (await page.getByText("How loud is this thread right now?").count()) > 0 ||
     (await page.getByText("What does this thread need from you now?").count()) > 0;
   console.log(
     "attack: done —",
@@ -160,9 +175,11 @@ const branchPoint = (page, frac = 0.5) =>
     panelStayedShut ? "panel stayed shut" : "PANEL OPENED EARLY",
     droppedTwice ? "rapid double bonk (-2)" : `RAPID BONK BROKE (${rent0.loudness}→${rent1.loudness})`,
     rearmed && secondHit ? "ran to next thread (-1)" : "SECOND TARGET FAILED",
-    panelOnSecondTap ? "second tap reflects" : "SECOND TAP DID NOT OPEN",
+    panelOnSecondTap ? "reflect opens the panel" : "REFLECT DID NOT OPEN",
+    barStillThere ? "bar always up" : "BAR HID",
+    freeHit ? "bonks pip's own focus" : "FREE BONK MISSED",
   );
-  if (!armed || !panelStayedShut || !droppedTwice || !rearmed || !secondHit || !panelOnSecondTap)
+  if (!armed || !panelStayedShut || !droppedTwice || !rearmed || !secondHit || !panelOnSecondTap || !barStillThere || !freeHit)
     process.exitCode = 1;
   await page.close();
 }
