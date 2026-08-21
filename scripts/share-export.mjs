@@ -74,7 +74,9 @@ await page.getByRole("button", { name: "Now", exact: true }).first().click();
 await page.waitForTimeout(1500);
 // burn the thread the export will include, by its timeline label
 await page.getByText("The argument with my father", { exact: true }).first().click({ force: true });
-await page.waitForTimeout(700);
+await page.waitForTimeout(400);
+await page.getByRole("button", { name: "Reflect on this thread" }).click();
+await page.waitForTimeout(600);
 await page.getByText("What does this thread need from you now?").first().click();
 await page.waitForTimeout(500);
 await page.getByRole("button", { name: /^Integrate\b/ }).last().click();

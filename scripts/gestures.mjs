@@ -111,53 +111,59 @@ const branchPoint = (page, frac = 0.5) =>
   await page.close();
 }
 
-// ---- 2b. Pip attacks a thread ----------------------------------------------
+
+// ---- 2b. Pip attacks: tap a thread, bonk it, run to the next --------------
 {
   const page = await newPage();
   await loadExamples(page);
-  // wait for Pip to settle on a thread: the chip appears bottom-left
-  const chip = page.getByRole("button", { name: "Have Pip calm this thread" });
-  let chipUp = false;
-  for (let i = 0; i < 40 && !chipUp; i++) {
-    chipUp = await chip.isVisible().catch(() => false);
-    if (!chipUp) await page.waitForTimeout(500);
-  }
-  if (!chipUp) {
-    console.log("attack: FAIL — chip never appeared");
+  await page.getByText("The rent increase letter", { exact: true }).first().click({ force: true });
+  await page.waitForTimeout(400);
+  const bonk = page.getByRole("button", { name: "Have Pip calm this thread" });
+  const armed = await bonk.isVisible().catch(() => false);
+  const panelStayedShut =
+    (await page.getByText("What does this thread need from you now?").count()) === 0;
+  const before = await page.evaluate(() => JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]"));
+  await bonk.click();
+  await page.waitForTimeout(180);
+  await page.screenshot({ path: "/tmp/gest-11-attack-a.png" });
+  await page.waitForTimeout(420);
+  await bonk.click(); // rapid-fire: right after the cooldown lets go
+  await page.waitForTimeout(1400);
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]"));
+  const rent0 = before.find((b) => b.title === "The rent increase letter");
+  const rent1 = after.find((b) => b.title === "The rent increase letter");
+  const droppedTwice = rent1.loudness === Math.max(1, rent0.loudness - 2);
+  // run to another thread: arming is instant, no patrol wait
+  await page.getByText("The argument with my father", { exact: true }).first().click({ force: true });
+  await page.waitForTimeout(400);
+  const rearmed = await bonk.isVisible().catch(() => false);
+  await bonk.click();
+  await page.waitForTimeout(1200);
+  const after2 = await page.evaluate(() => JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]"));
+  const arg0 = before.find((b) => b.title === "The argument with my father");
+  const arg1 = after2.find((b) => b.title === "The argument with my father");
+  // the strike works on the FELT (drifted) loudness, so the stored value may
+  // stay equal while the drift anchor resets — the proof is the fresh anchor
+  const today = new Date().toISOString().slice(0, 10);
+  const secondHit =
+    arg1.loudnessSetOn === today &&
+    arg1.loudness <= arg0.loudness &&
+    arg1.loudnessSetOn !== arg0.loudnessSetOn;
+  // tapping the SAME thread again opens the panel
+  await page.getByText("The argument with my father", { exact: true }).first().click({ force: true });
+  await page.waitForTimeout(600);
+  const panelOnSecondTap =
+    (await page.getByText("What does this thread need from you now?").count()) > 0;
+  console.log(
+    "attack: done —",
+    armed ? "armed on first tap" : "NOT ARMED",
+    panelStayedShut ? "panel stayed shut" : "PANEL OPENED EARLY",
+    droppedTwice ? "rapid double bonk (-2)" : `RAPID BONK BROKE (${rent0.loudness}→${rent1.loudness})`,
+    rearmed && secondHit ? "ran to next thread (-1)" : "SECOND TARGET FAILED",
+    panelOnSecondTap ? "second tap reflects" : "SECOND TAP DID NOT OPEN",
+  );
+  if (!armed || !panelStayedShut || !droppedTwice || !rearmed || !secondHit || !panelOnSecondTap)
     process.exitCode = 1;
-  } else {
-    const chipText = await chip.innerText();
-    const title = chipText.replace(/^[^\n]*\n/, "").trim() || chipText.split("\n").pop().trim();
-    const before = await page.evaluate(() => JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]"));
-    await chip.click();
-    for (const [ms, name] of [[120, "a"], [180, "b"], [200, "c"], [260, "d"]]) {
-      await page.waitForTimeout(ms);
-      await page.screenshot({ path: `/tmp/gest-11-attack-${name}.png` });
-    }
-    const cooling = await chip.isVisible().catch(() => false); // hidden while hit plays
-    await page.waitForTimeout(1600);
-    const after = await page.evaluate(() => JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]"));
-    const changed = before
-      .map((b) => {
-        const now = after.find((a) => a.id === b.id);
-        return now && now.loudness === b.loudness - 1 && now.loudnessSetOn ? b.title : null;
-      })
-      .filter(Boolean);
-    const staleDash = await page.evaluate(() =>
-      [...document.querySelectorAll("svg path")].some((p) => {
-        const d = p.getAttribute("stroke-dasharray") ?? "";
-        const w = parseFloat(p.getAttribute("stroke-width") ?? "0");
-        return w >= 3 && /^8[ ,]4$/.test(d.trim());
-      }),
-    );
-    console.log(
-      "attack: done —",
-      changed.length >= 1 ? `loudness dropped (${changed[0]})` : "NO LOUDNESS CHANGE",
-      !cooling ? "chip rested during hit" : "CHIP STILL UP",
-      staleDash ? "STALE DASH" : "dashes clean",
-    );
-    if (changed.length < 1 || staleDash) process.exitCode = 1;
-  }
   await page.close();
 }
 
@@ -167,7 +173,12 @@ const branchPoint = (page, frac = 0.5) =>
   await loadExamples(page);
   const pt = await branchPoint(page, 0.6);
   await page.mouse.click(pt.x, pt.y);
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(500);
+  {
+    const reflect = page.getByRole("button", { name: "Reflect on this thread" });
+    if (await reflect.isVisible().catch(() => false)) await reflect.click();
+  }
+  await page.waitForTimeout(600);
   await page.getByText("What does this thread need from you now?").first().click();
   await page.waitForTimeout(500);
   const integrate = page.getByRole("button", { name: /^Integrate\b/ }).last();
@@ -188,7 +199,12 @@ const branchPoint = (page, frac = 0.5) =>
   const page = await newPage();
   await loadExamples(page);
   await page.getByText("The rent increase letter", { exact: true }).first().click({ force: true });
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(500);
+  {
+    const reflect = page.getByRole("button", { name: "Reflect on this thread" });
+    if (await reflect.isVisible().catch(() => false)) await reflect.click();
+  }
+  await page.waitForTimeout(600);
   await page.getByText("What does this thread need from you now?").first().click();
   await page.waitForTimeout(500);
   await page.getByRole("button", { name: /^Integrate\b/ }).last().click();

@@ -170,6 +170,8 @@ export function LifeTimeline() {
   // removed from the app for good — only the lesson walks out.
   const [lessonFlying, setLessonFlying] = useState(false);
   const [attackCooldownUntil, setAttackCooldownUntil] = useState(0);
+  /** The thread Pip has been sent to: first tap arms it, the bar acts on it. */
+  const [armedBranchId, setArmedBranchId] = useState<string | null>(null);
   useEffect(() => {
     if (!burn) {
       setLessonFlying(false);
@@ -804,12 +806,24 @@ export function LifeTimeline() {
                     dimmed={!!focusedBranchId && branch.id !== focusedBranchId}
                     born={!reducedMotion && born?.branchId === branch.id}
                     reducedMotion={reducedMotion}
-                    onSelect={guarded(() =>
-                      setOperation({ kind: "quick-touch", branchId: branch.id }),
-                    )}
-                    onSelectMoment={guarded(() =>
-                      setOperation({ kind: "quick-touch", branchId: branch.id }),
-                    )}
+                    onSelect={guarded(() => {
+                      if (isClosed(branch) || armedBranchId === branch.id) {
+                        setArmedBranchId(null);
+                        setOperation({ kind: "quick-touch", branchId: branch.id });
+                        return;
+                      }
+                      setArmedBranchId(branch.id);
+                      mascot.focusBranch(branch.id);
+                    })}
+                    onSelectMoment={guarded(() => {
+                      if (isClosed(branch) || armedBranchId === branch.id) {
+                        setArmedBranchId(null);
+                        setOperation({ kind: "quick-touch", branchId: branch.id });
+                        return;
+                      }
+                      setArmedBranchId(branch.id);
+                      mascot.focusBranch(branch.id);
+                    })}
                     onSelectMergePoint={guarded(() => {
                       const mergeId = branch.mergeIds[branch.mergeIds.length - 1];
                       if (mergeId) setView({ kind: "merge-review", mergeId });
@@ -985,19 +999,12 @@ export function LifeTimeline() {
 
         <TimelineHelp />
 
-        {/* While Pip inspects a thread: one quick tap sends him at it. Fixed
-            bottom-left (above the help dot) so it never covers anything else
-            that is tappable — Pip himself already opens the thread. */}
+        {/* First tap on a thread sends Pip over and arms this bar: Bonk fires
+            instantly (and again, and again), Reflect opens the full panel. It
+            rests on the date strip — the one band no thread can enter. */}
         {(() => {
-          const targetId = mascot.inspectedBranchId;
-          const target = targetId ? branches.find((b) => b.id === targetId) : undefined;
-          const show =
-            showMascot &&
-            mascot.visible &&
-            target &&
-            !isClosed(target) &&
-            operation.kind === "idle" &&
-            !hit;
+          const target = armedBranchId ? branches.find((b) => b.id === armedBranchId) : undefined;
+          const show = target && !isClosed(target) && operation.kind === "idle";
           if (!show) return null;
           const cooling = Date.now() < attackCooldownUntil;
           const VERBS: Partial<Record<typeof theme, string>> = {
@@ -1011,40 +1018,69 @@ export function LifeTimeline() {
           };
           const verb = VERBS[theme] ?? "Bonk!";
           return (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t("Have Pip calm this thread")}
-              disabled={cooling}
-              onPress={() => {
-                setAttackCooldownUntil(Date.now() + 3200);
-                void attackBranch(target.id);
+            <View
+              style={{
+                // The one band threads never enter is the date strip — the bar
+                // borrows it while armed, so no line is ever covered.
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10,
+                backgroundColor: alpha(tk.bgRaised, 0.97),
+                borderTopWidth: 1,
+                borderTopColor: alpha(tk.lineAxis, 0.9),
+                paddingHorizontal: 12,
+                paddingVertical: 4,
               }}
-              style={(st) => [
-                {
-                  position: "absolute",
-                  left: 14,
-                  bottom: 64,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 6,
-                  backgroundColor: cooling ? alpha(tk.accent, 0.35) : tk.accent,
-                  borderRadius: 999,
-                  paddingHorizontal: 14,
-                  paddingVertical: 9,
-                  opacity: (st as PressableStateCallbackType & { hovered?: boolean }).hovered
-                    ? 0.92
-                    : 1,
-                },
-                shadow(tk),
-              ]}
             >
-              <T style={{ color: tk.accentInk, fontWeight: "700", fontSize: 13.5 }}>
-                {t(verb)}
-              </T>
-              <T numberOfLines={1} style={{ color: tk.accentInk, fontSize: 11, opacity: 0.8, maxWidth: 130 }}>
+              <T numberOfLines={1} style={{ fontSize: 11.5, color: tk.inkSoft, maxWidth: 120 }}>
                 {target.title}
               </T>
-            </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("Have Pip calm this thread")}
+                disabled={cooling}
+                onPress={() => {
+                  setAttackCooldownUntil(Date.now() + 500);
+                  void attackBranch(target.id);
+                }}
+                style={{
+                  backgroundColor: cooling ? alpha(tk.accent, 0.5) : tk.accent,
+                  borderRadius: 999,
+                  paddingHorizontal: 16,
+                  paddingVertical: 9,
+                }}
+              >
+                <T style={{ color: tk.accentInk, fontWeight: "700", fontSize: 14 }}>{t(verb)}</T>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("Reflect on this thread")}
+                onPress={() => {
+                  setArmedBranchId(null);
+                  setOperation({ kind: "quick-touch", branchId: target.id });
+                }}
+                style={{
+                  borderRadius: 999,
+                  paddingHorizontal: 12,
+                  paddingVertical: 9,
+                }}
+              >
+                <T style={{ color: tk.inkSoft, fontWeight: "600", fontSize: 13 }}>{t("Reflect")}</T>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("Put the club away")}
+                onPress={() => setArmedBranchId(null)}
+                style={{ paddingHorizontal: 10, paddingVertical: 9 }}
+              >
+                <T style={{ color: tk.inkFaint, fontSize: 13 }}>✕</T>
+              </Pressable>
+            </View>
           );
         })()}
         {/* how split the present is: strands fan out per undecided line and

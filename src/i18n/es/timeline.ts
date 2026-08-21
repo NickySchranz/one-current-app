@@ -116,4 +116,7 @@ export const timeline: Record<string, string> = {
   "Dim it!": "¡Atenúalo!",
   "Shoo!": "¡Fuera!",
   "Ruffle!": "¡Despeina!",
+  "Reflect": "Reflexionar",
+  "Reflect on this thread": "Reflexionar sobre este hilo",
+  "Put the club away": "Guardar el garrote",
 };

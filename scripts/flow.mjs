@@ -71,7 +71,10 @@ const pt = await page.evaluate(() => {
   return { x: m.a * p.x + m.c * p.y + m.e, y: m.b * p.x + m.d * p.y + m.f };
 });
 await page.mouse.click(pt.x, pt.y);
-await step("03-quick-menu");
+await step("03-armed-bar");
+await page.getByRole("button", { name: "Reflect on this thread" }).click();
+await page.waitForTimeout(500);
+await step("03b-quick-menu");
 
 // 4. expand "what does this thread need" and choose Act
 await page.getByText("What does this thread need from you now?").first().click();
