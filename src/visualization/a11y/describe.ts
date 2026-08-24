@@ -60,7 +60,7 @@ export function describeTimeline(
 
   const top = mostActivated(branches);
   if (top && open.length > 1) {
-    parts.push(t("{title} is currently the most activated thread.", { title: top.title }));
+    parts.push(t("{title} is currently the loudest thread.", { title: top.title }));
   }
   if (merged.length > 0) {
     parts.push(

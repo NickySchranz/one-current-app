@@ -26,7 +26,7 @@ import {
 } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
-import { LoudnessSlider } from "@/ui/LoudnessSlider";
+import { LoudnessSlider, loudnessWord } from "@/ui/LoudnessSlider";
 import {
   IconEye,
   IconHeart,
@@ -141,7 +141,7 @@ export function QuickBranchMenu({ branchId, startExpanded = false }: Props) {
         <CalmNote style={{ marginVertical: 8 }}>
           <T>
             {t(
-              "Nothing can be done about it right now — and you have said so. Its loudness eases; the line simply stays until something changes.",
+              "You let it rest — that's a real answer. Its loudness eases; the line simply waits until something changes.",
             )}
           </T>
         </CalmNote>
@@ -228,13 +228,14 @@ export function QuickBranchMenu({ branchId, startExpanded = false }: Props) {
           <Hint style={{ marginBottom: 0 }}>{t("How loud is this thread right now?")}</Hint>
           <LoudnessSlider
             value={felt}
-            accessibilityText={
-              felt === 1 ? t("Quiet") : t("Loudness {level} of 5", { level: Math.round(felt) })
-            }
+            accessibilityText={t("{word} — {level} of 5", {
+              word: t(loudnessWord(felt)),
+              level: Math.round(felt),
+            })}
             onChange={(v) => void dialLoudness(branchId, v as Loudness)}
           />
           {felt > branch.loudness && (
-            <Hint style={{ marginBottom: 0 }}>{t("Undecided days have made it louder.")}</Hint>
+            <Hint style={{ marginBottom: 0 }}>{t("Days without an answer make it ask louder.")}</Hint>
           )}
         </View>
       )}
@@ -290,8 +291,8 @@ export function QuickBranchMenu({ branchId, startExpanded = false }: Props) {
             ))}
             <Choice
               icon={IconSetDown}
-              title={t("Can't do anything about it now")}
-              accessibilityHint={t("Set it down. It stays on the line without pulling at you.")}
+              title={t("Let it rest")}
+              accessibilityHint={t("Nothing to do today — saying so is a real answer.")}
               onPress={leaveForToday}
             />
           </View>

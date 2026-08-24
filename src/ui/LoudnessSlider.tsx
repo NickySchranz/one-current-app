@@ -3,6 +3,11 @@ import { View } from "react-native";
 import { useTheme } from "./theme";
 import { alpha } from "./color";
 
+/** Sound-family names for the five rungs, level 1..5 — pass through t() where shown. */
+export const LOUDNESS_WORDS = ["quiet", "murmuring", "speaking", "calling", "loud"] as const;
+export const loudnessWord = (level: number) =>
+  LOUDNESS_WORDS[Math.min(5, Math.max(1, Math.round(level))) - 1];
+
 /** The loudness dial: a thumb-sized bar — tap or drag anywhere to fill it. */
 export function LoudnessSlider({
   value,

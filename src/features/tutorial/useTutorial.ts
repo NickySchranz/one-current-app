@@ -17,7 +17,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'welcome',
     text: "Hi! I'm Pip!",
     subtext:
-      "I live on your timelines and help you manage what's on your mind. Let me show you around.",
+      "I live on your timelines and help you answer what's on your mind. Let me show you around.",
     frame: 'REACT',
     highlight: null,
   },
@@ -25,13 +25,13 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'main-line',
     text: "This horizontal line is your 'Now'.",
     subtext:
-      "Your present moment flows along it. Everything else branches off from here.",
+      "Your present moment flows along it. Everything on your mind gets its own line from here.",
     frame: 'INSPECT_A',
     highlight: 'now',
   },
   {
     id: 'branches',
-    text: 'These branching lines are your threads.',
+    text: 'These lines are your threads.',
     subtext:
       'Each one is something pulling your attention — a worry, project, or waiting situation.',
     frame: 'INSPECT_B',
@@ -57,13 +57,13 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'add',
     text: 'The + button adds a new thread.',
     subtext:
-      'When something new lands on your mind, name it here. Named things are easier to work with.',
+      "When something new lands on your mind, name it here. Naming a worry is one of the better-studied ways to quiet it — that's step one.",
     frame: 'REACT',
     highlight: 'add',
   },
   {
     id: 'merge',
-    text: 'When a thread is resolved, merge it back.',
+    text: 'When a thread has given you what it carries, integrate it.',
     subtext:
       'It rejoins your main line. The mental energy you were spending on it comes home.',
     frame: 'TALK_B',
@@ -73,7 +73,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'history',
     text: "History shows each day's progress.",
     subtext:
-      'Merges, notes, actions taken — all recorded. Reviewing it builds self-knowledge.',
+      'Integrations, notes, actions taken — all recorded. Reviewing it builds self-knowledge.',
     frame: 'INSPECT_B',
     highlight: 'history',
   },

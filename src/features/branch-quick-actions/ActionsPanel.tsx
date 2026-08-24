@@ -143,7 +143,7 @@ export function ActionsPanel() {
   // Threads whose decision today was not a planned step.
   const settled = open.filter((b) => !hasPending(b) && !undecided.includes(b));
   const settledLabel = (b: PsychologicalBranch): string => {
-    if (b.leftOn === today) return t("You chose rest — nothing can be done for now.");
+    if (b.leftOn === today) return t("You let it rest for today.");
     return t("You decided what this needs today.");
   };
 
@@ -163,14 +163,14 @@ export function ActionsPanel() {
 
       {undecided.length > 0 && (
         <>
-          <SectionLabel>{t("Still undecided today")}</SectionLabel>
+          <SectionLabel>{t("Waiting for today's answer")}</SectionLabel>
           <View style={listStyle}>
             {undecided.map((b) => (
               <View key={b.id} style={rowStyle}>
                 <RowMain
                   kind="undecided"
                   title={b.title}
-                  hint={t("Decide what it needs — even that nothing can be done.")}
+                  hint={t('Decide what it needs — even "let it rest" counts.')}
                   onPress={() => setOperation({ kind: "quick-touch", branchId: b.id })}
                 />
               </View>

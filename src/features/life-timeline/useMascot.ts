@@ -61,17 +61,17 @@ type Phrases = {
 };
 
 const EN: Phrases = {
-  attack:     ["TAKE THAT.", "Quieter now, hm?", "Down a notch. You're welcome.", "BONK. Handled.", "It'll think twice, boss."],
+  attack:     ["BONK. Shhh — settling now.", "Quieter now, hm?", "Down a notch. You're welcome.", "Soothed it, boss.", "It'll rest easier now."],
   attackCalm: ["This one's already quiet, boss.", "Nothing to hit — it's calm.", "Shh. It's resting already."],
-  merge:      ["HANDLED. One less thing, boss!", "That's done. I got you.", "CLEARED! You're lighter now.", "Merged it. Nailed it.", "That thread is FREE!", "Done and dusted, boss.", "Let it go! Yes!"],
+  merge:      ["HOME. One less thing, boss!", "That's done. I got you.", "CLEARED! You're lighter now.", "Back in your line. Nailed it.", "That thread is FREE!", "Done and dusted, boss.", "Let it go! Yes!"],
   mergeDeep:  ["HUGE ONE. You really did that!", "BOSS MODE. That was a big one.", "That was heavy and you handled it!", "BIG WIN. I felt that one too."],
   born:       ["New thread? On it, boss.", "Got it logged. I'm watching this.", "Named it — that's step one done.", "I see this. Won't lose it.", "Got your back on this one."],
   action:     ["PLAN LOCKED. Let's go!", "Decided. Your future self thanks you!", "That's a real move. Love it.", "Done! Moving forward together.", "Action taken. That's how we roll."],
   note:       ["Got it. Witnessed, boss.", "Recorded — nothing gets lost on my watch.", "I heard that. Logged.", "Got it, boss. Keep going."],
   greet:      ["I got it, boss! Working on these with you.", "Don't worry — I'm keeping an eye on everything.", "Hey boss! Your threads are in good hands.", "On the job! I got these timelines."],
   focus:      ["On it, boss!", "Right, I see this one.", "Got you!", "Let's look at this."],
-  action_loud:       "This one's LOUD, boss. Handle it?",
-  action_ready:      "Boss, this one's ready to close!",
+  action_loud:       "This one's LOUD, boss. Give it an answer?",
+  action_ready:      "Boss, this one's ready to come home!",
   action_waiting:    "Still waiting on this one…",
   action_support:    "This might need some backup.",
   action_identity:   "Deep stuff. Worth a sit-down.",

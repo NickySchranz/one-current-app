@@ -529,7 +529,7 @@ export function SettingsSections() {
       <Card>
         <Hint>
           {t(
-            "Everything you write stays in this browser, stored locally on your device. Nothing is sent anywhere. Export a copy before switching devices.",
+            "Everything you write stays on this device, stored locally. Nothing is sent anywhere. Export a copy before switching devices.",
           )}
         </Hint>
         <View style={rowStyles.filterRow}>

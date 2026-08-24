@@ -26,7 +26,7 @@ const COPY: Record<PaywallReason, { title: string; body: string }> = {
     body: "The five plain looks are always free. The creature themes — where every open thread becomes a small companion — come with One Current Pro.",
   },
   "thread-limit": {
-    title: "Ten threads is the free current",
+    title: "The free current holds {n} threads",
     body: "The free plan holds {n} open threads at a time. Integrate or close one to make room — or let One Current Pro carry as many as your days do.",
   },
   share: {
@@ -107,7 +107,7 @@ export function PaywallPrompt({
             cursor: "auto",
           }}
         >
-          <H2 style={{ marginTop: 0 }}>{t(copy.title)}</H2>
+          <H2 style={{ marginTop: 0 }}>{t(copy.title, { n: FREE_OPEN_THREAD_LIMIT })}</H2>
           <Hint>{t(copy.body, { n: FREE_OPEN_THREAD_LIMIT })}</Hint>
           {error !== "" && <Hint style={{ color: tk.danger }}>{error}</Hint>}
           <View style={rowStyles.filterRow}>

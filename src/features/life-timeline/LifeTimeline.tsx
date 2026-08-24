@@ -37,6 +37,7 @@ import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
+import { loudnessWord } from "@/ui/LoudnessSlider";
 import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, useDashFlow } from "./timeline-fx";
 import { Mascot } from "./Mascot";
 import { useMascot, randomFrom } from "./useMascot";
@@ -1194,6 +1195,9 @@ export function LifeTimeline() {
                 />
               ))}
             </View>
+            <T style={{ fontSize: 11, color: tk.inkSoft }}>
+              {t(loudnessWord(preview.level))}
+            </T>
           </Animated.View>
         )}
 

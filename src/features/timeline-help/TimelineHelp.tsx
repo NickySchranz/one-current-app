@@ -99,6 +99,9 @@ export function TimelineHelp() {
             {"\n"}
             {t("drag or scroll sideways = move through time · along the dates = move faster")}
           </Hint>
+          <Hint style={{ marginBottom: 0 }}>
+            {t("bonk = Pip soothes a thread, easing its loudness for today")}
+          </Hint>
         </View>
       )}
     </View>

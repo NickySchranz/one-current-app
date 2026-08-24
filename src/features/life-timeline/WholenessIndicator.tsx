@@ -7,7 +7,6 @@ import {
 } from "react-native";
 import Animated, {
   cancelAnimation,
-  interpolateColor,
   useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
@@ -149,50 +148,37 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
               "Today can feel foggy and tiring, like living several days at once. One small decision starts bringing you back.",
             );
 
+  // The low rungs describe the attention, never the self — the forecast's own
+  // "That is the split — not you" holds for the headline too.
+  const headline =
+    wholeness >= 0.65
+      ? t("You are {word}.", { word })
+      : t("Your attention is {word}.", { word });
   const summary =
-    t("You are {word} — about {pct} percent of you moves with your main line.", {
-      word,
-      pct: Math.round(wholeness * 100),
-    }) +
+    (wholeness >= 0.65
+      ? t("You are {word} — about {pct} percent of you moves with your main line.", {
+          word,
+          pct: Math.round(wholeness * 100),
+        })
+      : t(
+          "Your attention is {word} — about {pct} percent of you moves with your main line.",
+          { word, pct: Math.round(wholeness * 100) },
+        )) +
     (activeLines.length > 0
       ? " " +
-        t("{undecided} of {active} open threads still undecided today.", {
-          undecided: undecided.length,
+        t("{decided} of {active} open threads already answered today.", {
+          decided: activeLines.length - undecided.length,
           active: activeLines.length,
         })
       : "");
-
-  // `.fragmentation-indicator.low` pulses its border, quietly insistent.
-  const urgent = useSharedValue(0);
-  useEffect(() => {
-    if (tone !== "low" || reducedMotion) {
-      cancelAnimation(urgent);
-      urgent.value = 0;
-      return;
-    }
-    urgent.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 900, easing: easeInOut }),
-        withTiming(0, { duration: 900, easing: easeInOut }),
-      ),
-      -1,
-      false,
-    );
-    return () => cancelAnimation(urgent);
-  }, [tone, reducedMotion, urgent]);
-  const borderLo = mix(tk.danger, tk.bgSunken, 25);
-  const borderHi = mix(tk.danger, tk.bgSunken, 55);
-  const urgentStyle = useAnimatedStyle(() => ({
-    borderColor: interpolateColor(urgent.value, [0, 1], [borderLo, borderHi]),
-  }));
 
   // strand sway phases, echoing the CSS nth-of-type delays
   const DELAYS = [0, 2600, 1200, 2600, 0, 1200];
   const swayPx = tone === "low" ? 2.6 : tone === "mid" ? 1.8 : 1.1;
   const swayDur = tone === "low" ? 1800 : tone === "mid" ? 3600 : 7000;
 
-  const fillColor =
-    tone === "low" ? tk.danger : tone === "mid" ? mix(tk.accent, tk.danger, 45) : tk.accent;
+  // No danger red on the low rung — a scattered day is information, not a warning.
+  const fillColor = tone === "good" ? tk.accent : mix(tk.accent, tk.danger, 45);
 
   return (
     <View style={{ position: "absolute", top: 9.6, left: 14.4, zIndex: 10 }}>
@@ -226,7 +212,6 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
                   ? mix(tk.accent, alpha(tk.lineAxis, 0.55), 45)
                   : tk.bgSunken,
               },
-              tone === "low" ? urgentStyle : null,
               tk.shadows ? shadow(tk) : null,
             ]}
           >
@@ -244,9 +229,7 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
                   <Strand
                     key={b.id}
                     d={`M 20 10 C 30 10, 38 ${y}, 54 ${y}`}
-                    stroke={
-                      !isUndecided ? tk.accent : tone === "low" ? tk.danger : tk.inkSoft
-                    }
+                    stroke={!isUndecided ? tk.accent : tk.inkSoft}
                     opacity={!isUndecided ? 0.5 : tone === "low" ? 0.75 : 0.9}
                     swayPx={swayPx}
                     durationMs={swayDur}
@@ -261,7 +244,7 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
                 style={{
                   fontSize: 10.9,
                   lineHeight: 11,
-                  color: tone === "low" ? tk.danger : tk.inkSoft,
+                  color: tk.inkSoft,
                   letterSpacing: 0.2,
                 }}
               >
@@ -309,14 +292,7 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
           ]}
         >
           <Hint style={{ margin: 0 }}>
-            <T
-              style={{
-                fontWeight: "700",
-                color: tone === "low" ? tk.danger : tk.ink,
-              }}
-            >
-              {t("You are {word}.", { word })}
-            </T>
+            <T style={{ fontWeight: "700", color: tk.ink }}>{headline}</T>
             {"\n"}
             {forecast}
           </Hint>
@@ -343,12 +319,12 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
                 >
                   <T style={{ fontWeight: "700" }}>{b.title}</T>
                   <Hint style={{ margin: 0 }}>
-                    {i === 0 ? t("pulling hardest right now") : t("still undecided today")}
+                    {i === 0 ? t("pulling hardest right now") : t("waiting for today's answer")}
                   </Hint>
                 </Pressable>
               ))}
               <Hint style={{ margin: 0 }}>
-                {t("An action counts. So does deciding that nothing can be done.")}
+                {t("An action counts. So does letting it rest.")}
               </Hint>
             </>
           ) : (
