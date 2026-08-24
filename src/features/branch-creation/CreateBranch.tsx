@@ -17,10 +17,9 @@ import {
   rowStyles,
   useInTray,
 } from "@/ui/primitives";
-import { LoudnessSlider } from "@/ui/LoudnessSlider";
+import { LoudnessSlider, loudnessWord } from "@/ui/LoudnessSlider";
 
 type WhenId = "today" | "this-week" | "this-month" | "earlier";
-type EarlierId = "date" | "period" | "unsure";
 
 const WHEN_OPTIONS: { id: WhenId; label: string }[] = [
   { id: "today", label: "Today" },
@@ -29,11 +28,21 @@ const WHEN_OPTIONS: { id: WhenId; label: string }[] = [
   { id: "earlier", label: "Earlier…" },
 ];
 
-const EARLIER_OPTIONS: { id: EarlierId; label: string }[] = [
-  { id: "date", label: "Around a date" },
-  { id: "period", label: "A life period" },
-  { id: "unsure", label: "I am not sure" },
-];
+// "Earlier" is answered by tapping a year — a rough anchor is all the fork
+// point needs, so nothing here asks for typing.
+const EARLIER_THIS_YEAR = "this-year";
+const EARLIER_LONGER = "longer";
+const EARLIER_UNSURE = "unsure";
+
+function earlierChoices(now: Date): { id: string; label: string }[] {
+  const y = now.getFullYear();
+  return [
+    { id: EARLIER_THIS_YEAR, label: "Earlier this year" },
+    ...[1, 2, 3, 4, 5].map((d) => ({ id: String(y - d), label: String(y - d) })),
+    { id: EARLIER_LONGER, label: "Longer ago" },
+    { id: EARLIER_UNSURE, label: "I am not sure" },
+  ];
+}
 
 /**
  * Four small questions: what pulls, since when, what it makes you feel, how
@@ -52,10 +61,7 @@ export function CreateBranch() {
   const [stage, setStage] = useState(0);
   const [title, setTitle] = useState("");
   const [whenId, setWhenId] = useState<WhenId>("today");
-  const [earlierId, setEarlierId] = useState<EarlierId>("date");
-  const [approxDate, setApproxDate] = useState("");
-  const [periodLabel, setPeriodLabel] = useState("");
-  const [periodYear, setPeriodYear] = useState("");
+  const [earlier, setEarlier] = useState<string | null>(null);
   const [anxieties, setAnxieties] = useState<string[]>([]);
   const [loudness, setLoudness] = useState<number>(3);
   const [busy, setBusy] = useState(false);
@@ -72,14 +78,16 @@ export function CreateBranch() {
     if (whenId === "today") return { kind: "today" };
     if (whenId === "this-week") return { kind: "this-week" };
     if (whenId === "this-month") return { kind: "this-month" };
-    if (earlierId === "date") {
-      return approxDate ? { kind: "approximate-date", date: approxDate } : null;
+    if (!earlier) return null;
+    if (earlier === EARLIER_UNSURE) return { kind: "unsure" };
+    const y = appNow().getFullYear();
+    if (earlier === EARLIER_THIS_YEAR) {
+      return { kind: "approximate-date", date: `${y}-02-01` };
     }
-    if (earlierId === "period") {
-      if (!periodLabel || !periodYear) return null;
-      return { kind: "life-period", label: periodLabel, approximateDate: `${periodYear}-06-15` };
+    if (earlier === EARLIER_LONGER) {
+      return { kind: "life-period", label: t("Longer ago"), approximateDate: `${y - 8}-06-15` };
     }
-    return { kind: "unsure" };
+    return { kind: "life-period", label: earlier, approximateDate: `${earlier}-06-15` };
   }
 
   // The optimistic line follows the "since when?" answer as it changes.
@@ -155,6 +163,9 @@ export function CreateBranch() {
                 blurOnSubmit={false}
               />
             </Field>
+            <Hint style={{ marginTop: 4, marginBottom: 0 }}>
+              {t("Named things get quieter.")}
+            </Hint>
           </StepFrame>
         )}
         {stage === 1 && (
@@ -185,52 +196,20 @@ export function CreateBranch() {
               ))}
             </View>
             {whenId === "earlier" && (
-              <>
-                <View
-                  style={rowStyles.tagRow}
-                  accessibilityRole="radiogroup"
-                  accessibilityLabel={t("Earlier, more precisely")}
-                >
-                  {EARLIER_OPTIONS.map((opt) => (
-                    <Tag
-                      key={opt.id}
-                      label={t(opt.label)}
-                      pressed={earlierId === opt.id}
-                      onPress={() => setEarlierId(opt.id)}
-                    />
-                  ))}
-                </View>
-                {earlierId === "date" && (
-                  <Field label={t("Roughly when?")}>
-                    <AppTextInput
-                      value={approxDate}
-                      onChangeText={setApproxDate}
-                      placeholder="YYYY-MM-DD"
-                      accessibilityLabel={t("Roughly when?")}
-                    />
-                  </Field>
-                )}
-                {earlierId === "period" && (
-                  <>
-                    <Field label={t("Name the period")}>
-                      <AppTextInput
-                        value={periodLabel}
-                        onChangeText={setPeriodLabel}
-                        placeholder={t("e.g. after the move, my first job")}
-                      />
-                    </Field>
-                    <Field label={t("Around which year?")}>
-                      <AppTextInput
-                        value={periodYear}
-                        onChangeText={setPeriodYear}
-                        keyboardType="number-pad"
-                        placeholder={String(appNow().getFullYear())}
-                        accessibilityLabel={t("Around which year?")}
-                      />
-                    </Field>
-                  </>
-                )}
-              </>
+              <View
+                style={rowStyles.tagRow}
+                accessibilityRole="radiogroup"
+                accessibilityLabel={t("Earlier, more precisely")}
+              >
+                {earlierChoices(appNow()).map((opt) => (
+                  <Tag
+                    key={opt.id}
+                    label={/^\d+$/.test(opt.label) ? opt.label : t(opt.label)}
+                    pressed={earlier === opt.id}
+                    onPress={() => setEarlier(opt.id)}
+                  />
+                ))}
+              </View>
             )}
           </StepFrame>
         )}
@@ -260,7 +239,7 @@ export function CreateBranch() {
             />
             {anxieties.length > 0 && (
               <Hint style={{ marginTop: 6, marginBottom: 0 }}>
-                {t("While it stays open, it may draw on {list}.", {
+                {t("It may hold some of {list} for now — integrating it brings them home.", {
                   list: suggestLockedFeelings(anxieties)
                     .map((f) => t(f))
                     .join(", "),
@@ -284,11 +263,10 @@ export function CreateBranch() {
           >
             <LoudnessSlider
               value={loudness}
-              accessibilityText={
-                loudness === 1
-                  ? t("Quiet")
-                  : t("Loudness {level} of 5", { level: Math.round(loudness) })
-              }
+              accessibilityText={t("{word} — {level} of 5", {
+                word: t(loudnessWord(loudness)),
+                level: Math.round(loudness),
+              })}
               onChange={(v) => {
                 setLoudness(v);
                 // the lone line on the map thickens as the dial fills

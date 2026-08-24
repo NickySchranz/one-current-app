@@ -4,7 +4,6 @@ import type { MergeConflict } from "@/domain/conflicts/types";
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import { CONFLICT_TYPE_LABELS, resolveConflict } from "@/domain/conflicts/logic";
 import { useT } from "@/i18n/i18n";
-import { TagListEditor } from "@/ui/TagListEditor";
 import { AppTextInput, Button, CalmNote, Card, Field, H3, Hint, T } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
 
@@ -18,8 +17,6 @@ type Props = {
 export function ConflictResolver({ conflict, branches, onResolved }: Props) {
   const t = useT();
   const th = useTheme();
-  const [preserved, setPreserved] = useState<string[]>(conflict.preservedTruths);
-  const [excesses, setExcesses] = useState<string[]>(conflict.rejectedExcesses);
   const [resolution, setResolution] = useState(conflict.resolution ?? "");
   const involved = branches.filter((b) => conflict.branchIds.includes(b.id));
 
@@ -66,18 +63,6 @@ export function ConflictResolver({ conflict, branches, onResolved }: Props) {
         </CalmNote>
       ) : (
         <>
-          <TagListEditor
-            label={t("What does each thread correctly understand?")}
-            values={preserved}
-            onChange={setPreserved}
-            placeholder={t("A truth worth keeping")}
-          />
-          <TagListEditor
-            label={t("Where is each thread becoming excessive?")}
-            values={excesses}
-            onChange={setExcesses}
-            placeholder={t("A demand that would fragment you")}
-          />
           <Field
             label={t(
               "What action respects both truths without letting either thread control the whole present?",
@@ -90,7 +75,14 @@ export function ConflictResolver({ conflict, branches, onResolved }: Props) {
             label={t("Resolve the conflict")}
             disabled={!resolution.trim()}
             onPress={() =>
-              onResolved(resolveConflict(conflict, resolution.trim(), preserved, excesses))
+              onResolved(
+                resolveConflict(
+                  conflict,
+                  resolution.trim(),
+                  conflict.preservedTruths,
+                  conflict.rejectedExcesses,
+                ),
+              )
             }
             style={{ alignSelf: "flex-start" }}
           />

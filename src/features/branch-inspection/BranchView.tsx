@@ -127,7 +127,6 @@ export function BranchView({ branchId }: Props) {
     [branches, branchId],
   );
 
-  const [happened, setHappened] = useState(branch?.description ?? "");
   const [belief, setBelief] = useState(branch?.originalBelief ?? "");
   const [currentBelief, setCurrentBelief] = useState(branch?.currentBelief ?? "");
   const [addingMoment, setAddingMoment] = useState(false);
@@ -163,7 +162,6 @@ export function BranchView({ branchId }: Props) {
   function saveStory() {
     if (!branch) return;
     const patch: Parameters<typeof updateBranch>[1] = {};
-    if (happened !== (branch.description ?? "")) patch.description = happened;
     if (belief !== (branch.originalBelief ?? "")) patch.originalBelief = belief;
     if (currentBelief !== (branch.currentBelief ?? "")) {
       patch.currentBelief = currentBelief;
@@ -267,17 +265,6 @@ export function BranchView({ branchId }: Props) {
             <T style={compareAnchorStyle}>
               {t("Where it began · {date}", { date: forkWhen })}
             </T>
-            <View style={{ marginBottom: 9.6 }}>
-              <AppTextInput
-                multiline
-                value={happened}
-                onChangeText={setHappened}
-                onBlur={saveStory}
-                placeholder={t("What was happening when this thread began")}
-                accessibilityLabel={t("What happened when this thread began")}
-                style={{ minHeight: 54.4 }}
-              />
-            </View>
             <View style={{ marginBottom: 9.6 }}>
               <AppTextInput
                 multiline

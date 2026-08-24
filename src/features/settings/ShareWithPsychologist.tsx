@@ -19,7 +19,7 @@ function isoDaysAgo(days: number): string {
   return new Date(appNow().getTime() - days * DAY).toISOString().slice(0, 10);
 }
 
-type SinceChoice = "week" | "month" | "3months" | "custom";
+type SinceChoice = "week" | "month" | "3months" | "all";
 
 /**
  * Share with a psychologist: pick threads and a start date, get a file
@@ -37,7 +37,6 @@ export function ShareWithPsychologist() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [since, setSince] = useState<SinceChoice>("month");
-  const [customDate, setCustomDate] = useState("");
   const [practitionerEmail, setPractitionerEmail] = useState("");
   const [emailErr, setEmailErr] = useState("");
   const [paywalled, setPaywalled] = useState(false);
@@ -57,8 +56,8 @@ export function ShareWithPsychologist() {
         ? isoDaysAgo(30)
         : since === "3months"
           ? isoDaysAgo(90)
-          : customDate;
-  const fromValid = /^\d{4}-\d{2}-\d{2}$/.test(from) && !Number.isNaN(Date.parse(from));
+          : isoDaysAgo(365 * 50); // "From the beginning" — far enough back for any thread
+  const fromValid = true;
 
   async function createFile() {
     // Waiting containers live only in the database, not in store state.
@@ -174,20 +173,11 @@ export function ShareWithPsychologist() {
                 label={t("Last 3 months")}
               />
               <Button
-                selected={since === "custom"}
-                onPress={() => setSince("custom")}
-                label={t("Since a date…")}
+                selected={since === "all"}
+                onPress={() => setSince("all")}
+                label={t("From the beginning")}
               />
             </View>
-            {since === "custom" && (
-              <AppTextInput
-                value={customDate}
-                onChangeText={setCustomDate}
-                placeholder="YYYY-MM-DD"
-                accessibilityLabel={t("Since a date…")}
-                style={{ marginTop: 8, maxWidth: 200 }}
-              />
-            )}
             {hasTokens() && (
               <View style={{ marginTop: 10, gap: 4 }}>
                 <AppTextInput

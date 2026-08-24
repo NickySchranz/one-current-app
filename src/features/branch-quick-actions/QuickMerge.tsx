@@ -65,6 +65,8 @@ const OUTCOMES: {
 
 type Path = "choice" | "burn" | "own-task";
 
+const WORK_HOMES = ["My task list", "My calendar", "The team board", "Someone else's hands"];
+
 /** Bringing back is an ending: resolved, handed off as real work, or moved past. */
 export function QuickMerge({ branchId }: Props) {
   const branch = useAppStore((s) => s.branches.find((b) => b.id === branchId));
@@ -82,11 +84,8 @@ export function QuickMerge({ branchId }: Props) {
   const [stepIndex, setStepIndex] = useState(0);
   const [burnItems, setBurnItems] = useState<string[]>([]);
   const [burnInput, setBurnInput] = useState("");
-  const [farewell, setFarewell] = useState("");
   const [lesson, setLesson] = useState("");
-  const [workName, setWorkName] = useState(branch?.title ?? "");
   const [workHome, setWorkHome] = useState("");
-  const [firstTask, setFirstTask] = useState("");
   const [busy, setBusy] = useState(false);
 
   if (!branch) return null;
@@ -120,20 +119,16 @@ export function QuickMerge({ branchId }: Props) {
   }
 
   async function convert() {
-    if (!workName.trim() || busy) return;
+    if (busy) return;
     setBusy(true);
     try {
+      // The work keeps the thread's own name — no renaming step.
       await addMoment({
         branchId,
         date: appNow().toISOString().slice(0, 10),
-        title: t("Became real work: {name}", { name: workName.trim() }),
+        title: t("Became real work: {name}", { name: branch!.title }),
         type: "decision",
-        description: [
-          workHome.trim() && t("Lives in: {place}", { place: workHome.trim() }),
-          firstTask.trim() && t("First task: {task}", { task: firstTask.trim() }),
-        ]
-          .filter(Boolean)
-          .join(" · "),
+        description: workHome ? t("Lives in: {place}", { place: t(workHome) }) : "",
       });
       await handOffBranch(branchId);
     } finally {
@@ -174,7 +169,7 @@ export function QuickMerge({ branchId }: Props) {
               title={branch.title}
               prompt={t("What burns with it?")}
               stepIndex={0}
-              totalSteps={3}
+              totalSteps={2}
               onBack={back}
               next={{
                 label: t("Next"),
@@ -229,33 +224,7 @@ export function QuickMerge({ branchId }: Props) {
               title={branch.title}
               prompt={t("The lesson you carry out of the fire")}
               stepIndex={1}
-              totalSteps={3}
-              onBack={back}
-              next={{
-                label: t("Next"),
-                disabled: !lesson.trim(),
-                onPress: () => setStepIndex(2),
-              }}
-            >
-              <AppTextInput
-                autoFocus
-                value={lesson}
-                onChangeText={setLesson}
-                placeholder={t("one sentence you'll keep — e.g. I can survive being disliked")}
-                onSubmitEditing={() => lesson.trim() && setStepIndex(2)}
-                blurOnSubmit={false}
-              />
-              <Hint style={{ marginTop: 6, marginBottom: 0 }}>
-                {t("The fire takes the weight. You keep this.")}
-              </Hint>
-            </StepFrame>
-          )}
-          {stepIndex === 2 && (
-            <StepFrame
-              title={branch.title}
-              prompt={t("A last word to it (optional)")}
-              stepIndex={2}
-              totalSteps={3}
+              totalSteps={2}
               onBack={back}
               next={{
                 label: t("Strike the match"),
@@ -266,12 +235,14 @@ export function QuickMerge({ branchId }: Props) {
             >
               <AppTextInput
                 autoFocus
-                value={farewell}
-                onChangeText={setFarewell}
-                placeholder={t("you kept me safe once. not anymore.")}
+                value={lesson}
+                onChangeText={setLesson}
+                placeholder={t("one sentence you'll keep — e.g. I can survive being disliked")}
+                onSubmitEditing={burn}
+                blurOnSubmit={false}
               />
               <Hint style={{ marginTop: 6, marginBottom: 0 }}>
-                {t("Spoken to the fire — kept nowhere.")}
+                {t("The fire takes the weight. You keep this.")}
               </Hint>
             </StepFrame>
           )}
@@ -281,75 +252,32 @@ export function QuickMerge({ branchId }: Props) {
   }
 
   if (path === "own-task") {
+    // One screen, no typing: the work keeps the thread's name; picking where
+    // it lives is a tap and optional.
     return (
       <Panel inTray={inTray}>
-        <StepTransition stepKey={stepIndex}>
-          {stepIndex === 0 && (
-            <StepFrame
-              title={branch.title}
-              prompt={t("What is the work called?")}
-              stepIndex={0}
-              totalSteps={3}
-              onBack={back}
-              next={{
-                label: t("Next"),
-                disabled: !workName.trim(),
-                onPress: () => setStepIndex(1),
-              }}
-            >
-              <AppTextInput
-                autoFocus
-                value={workName}
-                onChangeText={setWorkName}
-                onSubmitEditing={() => workName.trim() && setStepIndex(1)}
-                blurOnSubmit={false}
+        <StepFrame
+          title={branch.title}
+          prompt={t("Where will it live from now on? (optional)")}
+          onBack={back}
+          next={{
+            label: t("Hand it off"),
+            disabled: busy,
+            onPress: () => void convert(),
+          }}
+        >
+          <Hint numberOfLines={2}>{t("It becomes real work and leaves your head.")}</Hint>
+          <View style={rowStyles.tagRow}>
+            {WORK_HOMES.map((h) => (
+              <Tag
+                key={h}
+                label={t(h)}
+                pressed={workHome === h}
+                onPress={() => setWorkHome(workHome === h ? "" : h)}
               />
-              <Hint style={{ marginTop: 6, marginBottom: 0 }}>
-                {t("It becomes real work and leaves your head.")}
-              </Hint>
-            </StepFrame>
-          )}
-          {stepIndex === 1 && (
-            <StepFrame
-              title={branch.title}
-              prompt={t("Where will it live from now on?")}
-              stepIndex={1}
-              totalSteps={3}
-              onBack={back}
-              next={{ label: t("Next"), onPress: () => setStepIndex(2) }}
-            >
-              <AppTextInput
-                autoFocus
-                value={workHome}
-                onChangeText={setWorkHome}
-                placeholder={t("e.g. my task list, the team board")}
-                onSubmitEditing={() => setStepIndex(2)}
-                blurOnSubmit={false}
-              />
-            </StepFrame>
-          )}
-          {stepIndex === 2 && (
-            <StepFrame
-              title={branch.title}
-              prompt={t("What is the first concrete task?")}
-              stepIndex={2}
-              totalSteps={3}
-              onBack={back}
-              next={{
-                label: t("Hand it off"),
-                disabled: !workName.trim() || busy,
-                onPress: () => void convert(),
-              }}
-            >
-              <AppTextInput
-                autoFocus
-                value={firstTask}
-                onChangeText={setFirstTask}
-                onSubmitEditing={() => void convert()}
-              />
-            </StepFrame>
-          )}
-        </StepTransition>
+            ))}
+          </View>
+        </StepFrame>
       </Panel>
     );
   }

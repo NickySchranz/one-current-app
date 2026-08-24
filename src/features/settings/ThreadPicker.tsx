@@ -4,19 +4,18 @@ import type { PsychologicalBranch } from "@/domain/branches/types";
 import { effectiveLoudness, isOpen } from "@/domain/branches/logic";
 import { appNow } from "@/domain/time/clock";
 import { useT } from "@/i18n/i18n";
-import { AppTextInput, Button, Hint, T } from "@/ui/primitives";
+import { Button, Hint, T } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
 
 /**
  * Thread selection for sharing. Built to stay usable with hundreds of
- * threads: a search box, open/closed sections (closed collapsed by default),
- * per-section All/None, and a virtualized list instead of a chip cloud.
+ * threads: open/closed sections (closed collapsed by default), per-section
+ * All/None, and a virtualized list instead of a chip cloud.
  */
 
 const ROW_HEIGHT = 40;
 const HEADER_HEIGHT = 40;
-const SEARCH_THRESHOLD = 8;
 
 type Section = "open" | "closed";
 
@@ -35,25 +34,21 @@ export function ThreadPicker({
 }) {
   const tk = useTheme();
   const t = useT();
-  const [query, setQuery] = useState("");
   const [closedExpanded, setClosedExpanded] = useState(false);
-  const searching = query.trim() !== "";
+  const searching = false;
 
   const { items, openIds, closedIds } = useMemo(() => {
     const now = appNow();
-    const q = query.trim().toLowerCase();
-    const matches = (b: PsychologicalBranch) =>
-      q === "" || b.title.toLowerCase().includes(q);
 
     const open = branches
-      .filter((b) => isOpen(b) && matches(b))
+      .filter((b) => isOpen(b))
       .sort(
         (a, b) =>
           effectiveLoudness(b, now) - effectiveLoudness(a, now) ||
           b.lastActivatedAt.localeCompare(a.lastActivatedAt),
       );
     const closed = branches
-      .filter((b) => !isOpen(b) && matches(b))
+      .filter((b) => !isOpen(b))
       .sort((a, b) =>
         (b.mergeDate ?? b.lastActivatedAt).localeCompare(a.mergeDate ?? a.lastActivatedAt),
       );
@@ -65,7 +60,7 @@ export function ThreadPicker({
     }
     if (closed.length > 0) {
       list.push({ kind: "header", section: "closed", count: closed.length });
-      if (closedExpanded || searching) {
+      if (closedExpanded) {
         for (const branch of closed) list.push({ kind: "row", section: "closed", branch });
       }
     }
@@ -74,7 +69,7 @@ export function ThreadPicker({
       openIds: open.map((b) => b.id),
       closedIds: closed.map((b) => b.id),
     };
-  }, [branches, query, closedExpanded, searching]);
+  }, [branches, closedExpanded]);
 
   const toggle = (id: string) => {
     const next = new Set(selected);
@@ -191,18 +186,8 @@ export function ThreadPicker({
 
   return (
     <View style={{ marginTop: 8 }} accessibilityLabel={t("Which threads")}>
-      {total > SEARCH_THRESHOLD && (
-        <AppTextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder={t("Find a thread…")}
-          accessibilityLabel={t("Find a thread…")}
-          autoCapitalize="none"
-          style={{ marginBottom: 6 }}
-        />
-      )}
       {items.length === 0 ? (
-        <Hint style={{ marginBottom: 0 }}>{t("No threads match your search.")}</Hint>
+        <Hint style={{ marginBottom: 0 }}>{t("Nothing to share yet — start a thread first.")}</Hint>
       ) : (
         <FlatList
           data={items}

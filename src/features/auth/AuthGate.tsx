@@ -28,7 +28,6 @@ export function AuthGate() {
   const verifyEmailApi = useAppStore((s) => s.verifyEmailApi);
 
   const [screen, setScreen] = useState<Screen>("login");
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -81,18 +80,20 @@ export function AuthGate() {
   }
 
   async function submitRegister() {
-    if (name.trim() === "") return setError(t("What should we call you?"));
     if (!looksLikeEmail(email)) return setError(t("That does not look like an email address."));
     if (password.length < 4) return setError(t("The password needs at least 4 characters."));
+    // No name field to type: the part before the @ stands in, and the
+    // account page shows it alongside the full address anyway.
+    const name = email.trim().split("@")[0];
     setBusy(true);
     setError("");
     try {
-      const dev = await registerApi(email.trim(), password, name.trim());
+      const dev = await registerApi(email.trim(), password, name);
       go("verify");
       if (dev) setDevCode(dev);
     } catch (e) {
       if (e instanceof ApiOfflineError) {
-        signIn({ name: name.trim(), email: email.trim() });
+        signIn({ name, email: email.trim() });
       } else if (e instanceof ApiHttpError && e.code === "email_taken") {
         setError(t("An account with that email already exists."));
       } else if (e instanceof ApiHttpError && e.code === "rate_limited") {
@@ -255,13 +256,6 @@ export function AuthGate() {
           <Card>
             <H2 style={{ marginTop: 0 }}>{t("Create an account")}</H2>
             <View style={{ gap: 10 }}>
-              <AppTextInput
-                value={name}
-                onChangeText={setName}
-                placeholder={t("Your name")}
-                accessibilityLabel={t("Your name")}
-                autoComplete="name"
-              />
               {emailField}
               {passwordField}
               {error !== "" && <T style={{ color: tk.danger, fontSize: 13.6 }}>{error}</T>}

@@ -19,14 +19,24 @@ const MOMENT_TYPES: { id: MomentType; label: string }[] = [
 
 type Props = { branchId: string; onDone?: () => void };
 
+// A rough anchor is all a moment needs — picked by tap, never typed.
+const DAY_CHOICES = [
+  { label: "Today", days: 0 },
+  { label: "Yesterday", days: 1 },
+  { label: "Last week", days: 7 },
+  { label: "A month ago", days: 30 },
+];
+
+const isoDaysAgo = (days: number) =>
+  new Date(appNow().getTime() - days * 86_400_000).toISOString().slice(0, 10);
+
 /** Quick moment capture: what happened, when, what it changed. */
 export function MomentEditor({ branchId, onDone }: Props) {
   const t = useT();
   const addMoment = useAppStore((s) => s.addMoment);
   const [title, setTitle] = useState("");
-  const [date, setDate] = useState(appNow().toISOString().slice(0, 10));
+  const [date, setDate] = useState(isoDaysAgo(0));
   const [type, setType] = useState<MomentType>("event");
-  const [belief, setBelief] = useState("");
   const [effect, setEffect] = useState<"stronger" | "lighter" | "different" | undefined>();
   const [busy, setBusy] = useState(false);
 
@@ -38,11 +48,11 @@ export function MomentEditor({ branchId, onDone }: Props) {
       title,
       date,
       type,
-      beliefAdded: belief.trim() || undefined,
+      // For "A belief formed", what happened IS the belief — no second field.
+      beliefAdded: type === "belief" ? title.trim() : undefined,
       effect,
     });
     setTitle("");
-    setBelief("");
     setEffect(undefined);
     setBusy(false);
     onDone?.();
@@ -59,12 +69,16 @@ export function MomentEditor({ branchId, onDone }: Props) {
         />
       </Field>
       <Field label={t("When?")}>
-        <AppTextInput
-          value={date}
-          onChangeText={setDate}
-          placeholder="YYYY-MM-DD"
-          accessibilityLabel={t("When?")}
-        />
+        <View style={rowStyles.tagRow} accessibilityRole="radiogroup">
+          {DAY_CHOICES.map((d) => (
+            <Tag
+              key={d.label}
+              label={t(d.label)}
+              pressed={date === isoDaysAgo(d.days)}
+              onPress={() => setDate(isoDaysAgo(d.days))}
+            />
+          ))}
+        </View>
       </Field>
       <Field label={t("What kind of moment?")}>
         <View style={rowStyles.tagRow} accessibilityRole="radiogroup">
@@ -78,9 +92,6 @@ export function MomentEditor({ branchId, onDone }: Props) {
             />
           ))}
         </View>
-      </Field>
-      <Field label={t("What did you begin believing after this? (optional)")}>
-        <AppTextInput value={belief} onChangeText={setBelief} />
       </Field>
       <Field label={t("Did this make the thread stronger, lighter, or simply different?")}>
         <View style={rowStyles.tagRow} accessibilityRole="radiogroup">

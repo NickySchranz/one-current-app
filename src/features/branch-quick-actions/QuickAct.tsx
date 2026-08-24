@@ -14,7 +14,6 @@ import {
   rowStyles,
   useInTray,
 } from "@/ui/primitives";
-import { IconClock } from "@/ui/icons";
 import { StepFrame, StepTransition } from "./QuickFlow";
 
 type Props = { branchId: string };
@@ -26,7 +25,7 @@ const STEP_SUGGESTIONS = [
   "Ask the one question you keep avoiding",
 ];
 
-const WHEN_OPTIONS = ["Now", "In ten minutes", "Later today", "Choose a time"];
+const WHEN_OPTIONS = ["Now", "In ten minutes", "Later today", "This evening"];
 
 /** One small honest step, placed on the main line today — asked in two steps. */
 export function QuickAct({ branchId }: Props) {
@@ -39,7 +38,6 @@ export function QuickAct({ branchId }: Props) {
   const [stage, setStage] = useState(0);
   const [step, setStep] = useState("");
   const [when, setWhen] = useState("Now");
-  const [time, setTime] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -49,12 +47,7 @@ export function QuickAct({ branchId }: Props) {
     if (!step.trim() || busy) return;
     setBusy(true);
     try {
-      const suffix =
-        when === "Choose a time" && time
-          ? ` (${t("at {time}", { time })})`
-          : when !== "Now"
-            ? ` (${t(when).toLowerCase()})`
-            : "";
+      const suffix = when !== "Now" ? ` (${t(when).toLowerCase()})` : "";
       await createTodayAction(branchId, `${step.trim()}${suffix}`);
       setDone(true);
     } finally {
@@ -129,24 +122,9 @@ export function QuickAct({ branchId }: Props) {
               accessibilityLabel={t("When to begin")}
             >
               {WHEN_OPTIONS.map((w) => (
-                <Choice
-                  key={w}
-                  title={t(w)}
-                  icon={w === "Choose a time" ? IconClock : undefined}
-                  selected={when === w}
-                  onPress={() => setWhen(w)}
-                />
+                <Choice key={w} title={t(w)} selected={when === w} onPress={() => setWhen(w)} />
               ))}
             </View>
-            {when === "Choose a time" && (
-              <AppTextInput
-                autoFocus
-                value={time}
-                onChangeText={setTime}
-                placeholder="HH:MM"
-                accessibilityLabel={t("Time to begin")}
-              />
-            )}
           </StepFrame>
         )}
       </StepTransition>
