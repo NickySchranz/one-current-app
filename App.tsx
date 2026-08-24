@@ -112,6 +112,19 @@ function AppShell() {
     );
   }
 
+  // Creating a thread is an entirely separate screen: the whole shell —
+  // header, map, tabs — is unmounted while it's up, so no state is shared
+  // and nothing can ever show through. The store carries the result back;
+  // the map animates it in when it remounts.
+  if (creating) {
+    return (
+      <View style={{ flex: 1, backgroundColor: tk.bg }}>
+        <StatusBar style={tk.mode === "dark" ? "light" : "dark"} />
+        <CreationScreen />
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: tk.bg }}>
       <StatusBar style={tk.mode === "dark" ? "light" : "dark"} />
@@ -169,10 +182,7 @@ function AppShell() {
         {view.kind === "merge-review" && <MergeReview mergeId={view.mergeId} />}
         {view.kind === "more" && <MorePage />}
       </View>
-      {compactNav && !keyboard.open && !creating && <PrimaryNavigation variant="bottom" />}
-      {/* A page of its own, over everything — header and map included. The
-          screen underneath stays exactly as it was until the thread is real. */}
-      {creating && <CreationScreen />}
+      {compactNav && !keyboard.open && <PrimaryNavigation variant="bottom" />}
       {ready && authUser && tutorial.active && tutorial.currentStep && (
         <TutorialOverlay
           step={tutorial.currentStep}

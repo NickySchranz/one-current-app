@@ -174,6 +174,10 @@ function easeInOut(t: number): number {
   return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 }
 
+// One greeting per app session, across remounts (the timeline unmounts and
+// remounts around the creation screen) and across hook instances.
+let greetedThisSession = false;
+
 // ─── Mascot type selection ────────────────────────────────────────────────────
 
 function pickMascotType(): MascotType {
@@ -601,7 +605,6 @@ export function useMascot(
   focusBranchRef.current = focusBranch;
 
   // ── Bootstrap ──
-  const hasGreeted = useRef(false);
   useEffect(() => {
     if (initialised.current) return;
     const geoMap = new Map(geometries.map(g => [g.branchId, g]));
@@ -629,8 +632,8 @@ export function useMascot(
     setInspectedIdState(best.id);
 
     // Greet on first appearance
-    if (!hasGreeted.current) {
-      hasGreeted.current = true;
+    if (!greetedThisSession) {
+      greetedThisSession = true;
       timerRef.current = setTimeout(() => {
         setBubbleText(randomFrom(lang.greet));
         fadeBubble(1, 250);

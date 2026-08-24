@@ -85,6 +85,25 @@ export function CreationScreen() {
 
   const noop = () => {};
 
+  // The tray isn't mounted on this screen, so Escape lives here: it leaves a
+  // focused field first, and only then cancels the creation (web only).
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof window === "undefined") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))) {
+        el.blur();
+        return;
+      }
+      const store = useAppStore.getState();
+      store.cancelDraftBranch();
+      store.setOperation({ kind: "idle" });
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
   return (
     <View
       style={{
@@ -167,8 +186,9 @@ export function CreationScreen() {
                   frame={mascot.frame}
                   flip={mascot.flip}
                   mascotType={mascot.mascotType}
-                  bubbleOpacity={mascot.bubbleOpacity}
-                  bubbleText={mascot.bubbleText}
+                  // He watches the line take shape, quietly — no speech here.
+                  bubbleOpacity={0}
+                  bubbleText=""
                   showTapHint={false}
                   theme={tk}
                   onPress={noop}
