@@ -4,6 +4,7 @@ import Svg, { Path, Text as SvgText } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppStore } from "@/stores/app-store";
 import { buildTimelineLayout } from "@/visualization/main-line/layout";
+import { weekWindow } from "@/visualization/zoom/time-scale";
 import { BranchLine } from "@/features/life-timeline/BranchLine";
 import { Mascot } from "@/features/life-timeline/Mascot";
 import { useMascot } from "@/features/life-timeline/useMascot";
@@ -25,7 +26,6 @@ import { useT } from "@/i18n/i18n";
 export function CreationScreen() {
   const branches = useAppStore((s) => s.branches);
   const draftBranchId = useAppStore((s) => s.draftBranchId);
-  const window_ = useAppStore((s) => s.window);
   const nowTick = useAppStore((s) => s.nowTick);
   const theme = useAppStore((s) => s.theme);
   const reducedMotion = useAppStore((s) => s.reducedMotion);
@@ -42,6 +42,9 @@ export function CreationScreen() {
   const draft = branches.find((b) => b.id === draftBranchId);
   const drafts = useMemo(() => (draft ? [draft] : []), [draft]);
   const now = useMemo(() => new Date(nowTick), [nowTick]);
+  // This stage keeps its own week around Now — however far the map is panned,
+  // the map's window is never touched by (or for) the creation.
+  const window_ = useMemo(() => weekWindow(now), [now]);
   const layout = useMemo(
     () =>
       buildTimelineLayout(drafts, {

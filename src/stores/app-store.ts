@@ -429,13 +429,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       { title: "", kindChoiceId: "unnamed", period: { kind: "today" } },
       appNow(),
     );
+    // The draft lives only on the creation screen: the map neither shows it
+    // nor moves for it. Its window/view reset and born draw-in happen at
+    // commit, when the finished line joins the real timeline.
     set((s) => ({
       branches: [...s.branches, branch],
       draftBranchId: branch.id,
       pinnedBranchIds: [...s.pinnedBranchIds, branch.id],
-      window: weekWindow(appNow()),
-      view: nowView(s.view),
-      born: { key: Date.now(), branchId: branch.id },
     }));
   },
 

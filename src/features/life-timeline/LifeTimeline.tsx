@@ -255,17 +255,13 @@ export function LifeTimeline() {
     trayHeight > 0 && !traySide ? Math.min(trayHeight, size.height - 130) : 0;
   const bottomInset = useEased(insetTarget, reducedMotion);
 
-  // While the create form is open, the map holds only the line being born —
-  // the whole current steps aside so the new thread has the stage to itself.
-  const soloDraftId =
-    operation.kind === "creating-branch" && draftBranchId ? draftBranchId : null;
+  // The draft being created lives on its own screen (CreationScreen) — the
+  // map never shows it and never moves for it. It appears here only once
+  // committed, as a real branch with its born draw-in.
   const visible = useMemo(() => {
-    if (soloDraftId) return branches.filter((b) => b.id === soloDraftId);
-    // Dismissals flip the operation to idle a frame before the unmount
-    // cleanup removes the draft — never show that stale draft on the full map.
     const base = draftBranchId ? branches.filter((b) => b.id !== draftBranchId) : branches;
     return filterBranches(base, typeFilter, statusFilter);
-  }, [branches, soloDraftId, draftBranchId, typeFilter, statusFilter]);
+  }, [branches, draftBranchId, typeFilter, statusFilter]);
 
   const compact = size.width < 640;
   // When the bottom nav shows, its central + takes over — no second one here.
@@ -340,9 +336,7 @@ export function LifeTimeline() {
   // follows the sheet as it slides in.
   useEffect(() => {
     if (scrollH <= 0) return;
-    // The draft being created anchors the view like a focused thread does,
-    // so the new line (and Pip at it) stays in sight through every step.
-    const anchorId = focusedBranchId ?? soloDraftId;
+    const anchorId = focusedBranchId;
     if (!anchorId && bottomInset <= 0) return;
     const usable = Math.max(130, scrollH - bottomInset);
     const maxScroll = Math.max(0, layout.height + Math.round(bottomInset) - scrollH);
@@ -358,7 +352,7 @@ export function LifeTimeline() {
     }
     const y = Math.max(0, Math.min(scrollCap, anchor - usable / 2));
     scrollRef.current?.scrollTo({ y, animated: false });
-  }, [focusedBranchId, soloDraftId, layout, bottomInset, topInset, scrollH]);
+  }, [focusedBranchId, layout, bottomInset, topInset, scrollH]);
 
   // ---- gestures: tap / horizontal time-pan / vertical loudness dial --------
 
@@ -560,14 +554,11 @@ export function LifeTimeline() {
   // How split the present is: open lines pull apart, decisions gather them.
   const activeLines = visible.filter((b) => !isClosed(b));
 
-  // The thread the user is holding: the one an open panel concerns, the one
-  // armed for a bonk, or the draft being created. While held, its line stays
-  // lit and Pip stays planted at it — bonks land on it until the panel closes
-  // or another interaction moves the focus.
-  const heldBranchId =
-    focusedBranchId ??
-    armedBranchId ??
-    (operation.kind === "creating-branch" ? draftBranchId : null);
+  // The thread the user is holding: the one an open panel concerns, or the
+  // one armed for a bonk. While held, its line stays lit and Pip stays
+  // planted at it — bonks land on it until the panel closes or another
+  // interaction moves the focus.
+  const heldBranchId = focusedBranchId ?? armedBranchId ?? null;
 
   // An armed thread whose line vanished (burned away, closed) releases its
   // hold; so does opening a panel about a different thread.
@@ -1096,7 +1087,7 @@ export function LifeTimeline() {
         </View>
 
         {/* One round +, unmistakable and wordless, floating on the water. */}
-        {showFab && !soloDraftId && (
+        {showFab && (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("New thread")}
@@ -1132,7 +1123,7 @@ export function LifeTimeline() {
           onClose={() => setPaywalled(false)}
         />
 
-        {!soloDraftId && <TimelineHelp />}
+        <TimelineHelp />
 
         {/* First tap on a thread sends Pip over and arms this bar: Bonk fires
             instantly (and again, and again), Reflect opens the full panel. It
@@ -1219,14 +1210,11 @@ export function LifeTimeline() {
           );
         })()}
         {/* how split the present is: strands fan out per undecided line and
-            come home as decisions are taken — tap it for the day's forecast.
-            During creation the stage is the new line's alone: chip steps away. */}
-        {!soloDraftId && (
-          <WholenessIndicator
-            activeLines={activeLines}
-            onChipHeight={(h) => setTopInset(Math.max(0, Math.round(9.6 + h) + 8))}
-          />
-        )}
+            come home as decisions are taken — tap it for the day's forecast */}
+        <WholenessIndicator
+          activeLines={activeLines}
+          onChipHeight={(h) => setTopInset(Math.max(0, Math.round(9.6 + h) + 8))}
+        />
 
         {/* while the thumb dials a thread's loudness: its name and level, live */}
         {preview && previewBranch && (

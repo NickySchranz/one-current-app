@@ -115,7 +115,6 @@ function AppShell() {
   return (
     <View style={{ flex: 1, backgroundColor: tk.bg }}>
       <StatusBar style={tk.mode === "dark" ? "light" : "dark"} />
-      {!creating && (
       <View
         style={{
           flexDirection: "row",
@@ -159,14 +158,11 @@ function AppShell() {
         )}
         {!compactNav && <PrimaryNavigation variant="header" />}
       </View>
-      )}
       <View style={{ flex: 1, minHeight: 0 }}>
         {view.kind === "now" && (
           <View style={{ flex: 1, minHeight: 0 }}>
             <LifeTimeline />
             <OperationTray />
-            {/* An opaque stage of its own: the map waits underneath. */}
-            {creating && <CreationScreen />}
           </View>
         )}
         {view.kind === "history" && <HistoryView />}
@@ -174,6 +170,9 @@ function AppShell() {
         {view.kind === "more" && <MorePage />}
       </View>
       {compactNav && !keyboard.open && !creating && <PrimaryNavigation variant="bottom" />}
+      {/* A page of its own, over everything — header and map included. The
+          screen underneath stays exactly as it was until the thread is real. */}
+      {creating && <CreationScreen />}
       {ready && authUser && tutorial.active && tutorial.currentStep && (
         <TutorialOverlay
           step={tutorial.currentStep}
