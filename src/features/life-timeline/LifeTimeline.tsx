@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   PanResponder,
   Platform,
@@ -97,43 +97,6 @@ function useEased(target: number, reducedMotion: boolean): number {
 
 type LoudnessPreview = { branchId: string; level: number };
 
-/**
- * The small note that pops by a just-added line: rises in, holds, fades on
- * its own. It carries information, so reduced motion shows it statically —
- * the parent unmounts it when the `added` event clears.
- */
-function AddedPop({
-  reducedMotion,
-  children,
-  style,
-}: {
-  reducedMotion: boolean;
-  children: ReactNode;
-  style?: object;
-}) {
-  const op = useSharedValue(reducedMotion ? 1 : 0);
-  const ty = useSharedValue(reducedMotion ? 0 : 6);
-  useEffect(() => {
-    if (reducedMotion) return;
-    op.value = withTiming(1, { duration: 180, easing: Easing.out(Easing.cubic) });
-    ty.value = withTiming(0, { duration: 180, easing: Easing.out(Easing.cubic) });
-    const fade = setTimeout(() => {
-      op.value = withTiming(0, { duration: 400, easing: Easing.ease });
-    }, 2100);
-    return () => clearTimeout(fade);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one life per mount
-  }, []);
-  const anim = useAnimatedStyle(() => ({
-    opacity: op.value,
-    transform: [{ translateY: ty.value }],
-  }));
-  return (
-    <Animated.View pointerEvents="none" style={[style, anim]}>
-      {children}
-    </Animated.View>
-  );
-}
-
 export function LifeTimeline() {
   const branches = useAppStore((s) => s.branches);
   const pinnedBranchIds = useAppStore((s) => s.pinnedBranchIds);
@@ -231,13 +194,13 @@ export function LifeTimeline() {
     return () => clearTimeout(timer);
   }, [born, clearBorn, reducedMotion]);
 
-  // The small "thread added" note by the new line: holds, then fades. It
-  // carries information, so under reduced motion it still shows (statically).
+  // The added event only sends Pip to the new thread now (no popup): consume
+  // it shortly after so it never refires.
   useEffect(() => {
     if (!added) return;
-    const timer = setTimeout(clearAdded, reducedMotion ? 2000 : 2600);
+    const timer = setTimeout(clearAdded, 800);
     return () => clearTimeout(timer);
-  }, [added, clearAdded, reducedMotion]);
+  }, [added, clearAdded]);
 
   const stageRef = useRef<View>(null);
   const scrollRef = useRef<ScrollView>(null);
@@ -1021,33 +984,6 @@ export function LifeTimeline() {
                 </LungeG>
               )}
             </Svg>
-            {/* the small "thread added" note, anchored by the new line's
-                endpoint — inside the scrolled canvas, so it stays with it */}
-            {added &&
-              (() => {
-                const g = layout.geometries.find((x) => x.branchId === added.branchId);
-                if (!g) return null;
-                return (
-                  <AddedPop
-                    key={added.key}
-                    reducedMotion={reducedMotion}
-                    style={{
-                      position: "absolute",
-                      right: Math.max(8, size.width - g.endX + 12),
-                      top: Math.max(8, g.endY - 48),
-                      paddingVertical: 4,
-                      paddingHorizontal: 10,
-                      borderRadius: 6,
-                      backgroundColor: tk.bgRaised,
-                      borderWidth: 1,
-                      borderColor: alpha(tk.lineAxis, 0.55),
-                      ...(tk.shadows ? shadow(tk) : null),
-                    }}
-                  >
-                    <T style={{ fontSize: 12.8 }}>{t("Thread added to your timeline.")}</T>
-                  </AddedPop>
-                );
-              })()}
           </View>
         </ScrollView>
 

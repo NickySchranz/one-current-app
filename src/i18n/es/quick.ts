@@ -25,7 +25,6 @@ export const quick: Record<string, string> = {
   "How loud is it right now?": "¿Cómo de fuerte suena ahora mismo?",
   Cancel: "Cancelar",
   "Start the thread": "Abrir el hilo",
-  "Thread added to your timeline.": "Hilo añadido a tu línea de tiempo.",
   "Return to timeline": "Volver a la línea de tiempo",
 
   // ---- RecurrenceCheck ----
