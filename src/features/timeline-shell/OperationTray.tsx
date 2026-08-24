@@ -217,10 +217,9 @@ export function OperationTray() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [operation.kind, setOperation]);
 
-  // Creating a thread takes over the screen: the visible timeline is part of
-  // the experience, so stray taps on it must never throw the draft away.
-  // Cancel is explicit (the Cancel button, or Escape).
-  const takeover = operation.kind === "creating-branch";
+  // Creating a thread lives on its own screen (CreationScreen); this tray
+  // renders nothing then, but its Escape handler stays live for cancelling —
+  // so the outside-tap dismissal below must stay off (no tray to be inside).
 
   // A tap anywhere outside the quick tray only sets it down — nothing
   // underneath activates on that same tap. A drag is a pan, not a dismissal.
@@ -257,7 +256,7 @@ export function OperationTray() {
     };
   }, [depth, operation.kind, setOperation]);
 
-  if (depth === "none") return null;
+  if (depth === "none" || operation.kind === "creating-branch") return null;
 
   const grip = (
     <View
@@ -290,7 +289,7 @@ export function OperationTray() {
     return (
       <>
         {/* Native: a tap outside sets the tray down (web handles this above). */}
-        {Platform.OS !== "web" && !takeover && (
+        {Platform.OS !== "web" && (
           <Pressable
             onPress={() => setOperation({ kind: "idle" })}
             style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0, zIndex: 38 }}
@@ -345,26 +344,23 @@ export function OperationTray() {
               onHeight={reportHeight}
               label={t(trayLabel(operation))}
               style={{
-                // Takeover (creating): flush to the screen edges — a screen
-                // of its own, not a floating sheet.
-                width: takeover ? winW : Math.min(560, winW),
+                width: Math.min(560, winW),
                 // 0.52: the choice lists fit unscrolled with the timeline
                 // still holding the upper half of the screen.
                 maxHeight: sheetMax(0.52),
                 backgroundColor: tk.bgRaised,
-                borderWidth: takeover ? 0 : 1,
-                borderTopWidth: 1,
+                borderWidth: 1,
                 borderBottomWidth: 0,
                 borderColor: alpha(tk.lineAxis, 0.55),
-                borderTopLeftRadius: takeover ? 0 : tk.radiusLg,
-                borderTopRightRadius: takeover ? 0 : tk.radiusLg,
-                paddingTop: takeover ? 10 : 5.6,
+                borderTopLeftRadius: tk.radiusLg,
+                borderTopRightRadius: tk.radiusLg,
+                paddingTop: 5.6,
                 paddingHorizontal: 16,
                 paddingBottom: 13.6 + (kbOpen ? 0 : insets.bottom),
                 ...trayShadow(tk, 24),
               }}
             >
-              {takeover ? null : grip}
+              {grip}
               {body}
             </TrayShell>
           </View>

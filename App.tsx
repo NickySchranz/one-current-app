@@ -9,6 +9,7 @@ import { PrimaryNavigation } from "@/features/navigation/PrimaryNavigation";
 import { Logo } from "@/features/navigation/Logo";
 import { LifeTimeline } from "@/features/life-timeline/LifeTimeline";
 import { OperationTray } from "@/features/timeline-shell/OperationTray";
+import { CreationScreen } from "@/features/branch-creation/CreationScreen";
 import { HistoryView } from "@/features/history/HistoryView";
 import { MergeReview } from "@/features/history/MergeReview";
 import { MorePage } from "@/features/more/MorePage";
@@ -164,6 +165,8 @@ function AppShell() {
           <View style={{ flex: 1, minHeight: 0 }}>
             <LifeTimeline />
             <OperationTray />
+            {/* An opaque stage of its own: the map waits underneath. */}
+            {creating && <CreationScreen />}
           </View>
         )}
         {view.kind === "history" && <HistoryView />}

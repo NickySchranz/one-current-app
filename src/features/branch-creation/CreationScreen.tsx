@@ -1,0 +1,208 @@
+import { useEffect, useMemo, useState } from "react";
+import { View } from "react-native";
+import Svg, { Path, Text as SvgText } from "react-native-svg";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAppStore } from "@/stores/app-store";
+import { buildTimelineLayout } from "@/visualization/main-line/layout";
+import { BranchLine } from "@/features/life-timeline/BranchLine";
+import { Mascot } from "@/features/life-timeline/Mascot";
+import { useMascot } from "@/features/life-timeline/useMascot";
+import { CreateBranch } from "./CreateBranch";
+import { InTrayContext, Tag } from "@/ui/primitives";
+import { useTheme } from "@/ui/theme";
+import { alpha } from "@/ui/color";
+import { useKeyboard } from "@/ui/keyboard";
+import { useT } from "@/i18n/i18n";
+
+/**
+ * Creating a thread happens on a screen of its own: a bare stage — no map,
+ * no dates, no other lines — where the new timeline takes shape as the
+ * questions are answered. Naming writes its label, "since when" stretches it
+ * back, feelings gather under it, loudness thickens it. Pip stands at its
+ * end the whole time. Finishing closes this screen; the line then draws
+ * itself into the real map.
+ */
+export function CreationScreen() {
+  const branches = useAppStore((s) => s.branches);
+  const draftBranchId = useAppStore((s) => s.draftBranchId);
+  const window_ = useAppStore((s) => s.window);
+  const nowTick = useAppStore((s) => s.nowTick);
+  const theme = useAppStore((s) => s.theme);
+  const reducedMotion = useAppStore((s) => s.reducedMotion);
+  const mascotTypePref = useAppStore((s) => s.mascotType);
+  const language = useAppStore((s) => s.language);
+  const t = useT();
+  const tk = useTheme();
+  const insets = useSafeAreaInsets();
+  const { inset: kbInset, open: kbOpen } = useKeyboard();
+  const [size, setSize] = useState({ width: 390, height: 320 });
+
+  const draft = branches.find((b) => b.id === draftBranchId);
+  const drafts = useMemo(() => (draft ? [draft] : []), [draft]);
+  const now = useMemo(() => new Date(nowTick), [nowTick]);
+  const layout = useMemo(
+    () =>
+      buildTimelineLayout(drafts, {
+        width: size.width,
+        height: size.height,
+        window: window_,
+        compact: size.width < 640,
+        now,
+        mainShift: 0,
+        pinnedBranchIds: draft ? [draft.id] : [],
+      }),
+    [drafts, size, window_, now, draft],
+  );
+  const g = layout.geometries[0];
+
+  // The line draws itself in when the stage opens, then settles.
+  const [justBorn, setJustBorn] = useState(true);
+  useEffect(() => {
+    const timer = setTimeout(() => setJustBorn(false), reducedMotion ? 0 : 1700);
+    return () => clearTimeout(timer);
+  }, [reducedMotion]);
+
+  // Pip lives on this stage too: held to the draft, so he stays at its end,
+  // tracking it as the answers reshape the line.
+  const showMascot = !reducedMotion;
+  const mascot = useMascot(
+    drafts,
+    layout.geometries,
+    layout.nowX,
+    () => {},
+    mascotTypePref,
+    false,
+    false,
+    language,
+    draft?.id ?? null,
+    null,
+  );
+
+  const noop = () => {};
+
+  return (
+    <View
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
+        zIndex: 50,
+        backgroundColor: tk.bg,
+        paddingTop: insets.top,
+      }}
+    >
+      <View
+        style={{ flex: 1, minHeight: 0 }}
+        onLayout={(e) => {
+          const { width, height } = e.nativeEvent.layout;
+          setSize({ width: Math.max(320, width), height: Math.max(200, height) });
+        }}
+      >
+        {draft && g && (
+          <>
+            <Svg width={size.width} height={size.height} accessibilityLabel={t("The new thread taking shape")}>
+              {/* the one current, on its own: the spine the new line stems from */}
+              <Path
+                d={`M 0 ${layout.mainY} L ${layout.nowX} ${layout.mainY}`}
+                stroke={tk.lineMain}
+                strokeWidth={3.25}
+                fill="none"
+              />
+              <Path
+                d={`M ${layout.nowX - 12} ${layout.mainY - 6} L ${layout.nowX} ${layout.mainY} L ${layout.nowX - 12} ${layout.mainY + 6}`}
+                stroke={tk.lineMain}
+                strokeWidth={3.25}
+                fill="none"
+              />
+              {size.width - layout.nowX > 4 && (
+                <Path
+                  d={`M ${layout.nowX} ${layout.mainY} L ${size.width} ${layout.mainY}`}
+                  stroke={tk.lineMain}
+                  strokeWidth={2}
+                  fill="none"
+                  strokeDasharray={[2, 6]}
+                  opacity={0.4}
+                />
+              )}
+              <SvgText
+                x={layout.nowX - 8}
+                y={layout.mainY - 12}
+                textAnchor="end"
+                fontSize={12.8}
+                fontWeight="600"
+                fontFamily={tk.fontBody}
+                fill={tk.ink}
+              >
+                {t("Now")}
+              </SvgText>
+              <BranchLine
+                branch={draft}
+                geometry={g}
+                theme={theme}
+                nowMs={nowTick}
+                focused={false}
+                highlighted
+                born={!reducedMotion && justBorn}
+                reducedMotion={reducedMotion}
+                onSelect={noop}
+                onSelectMoment={noop}
+                onSelectMergePoint={noop}
+              />
+              {showMascot && mascot.visible && (
+                <Mascot
+                  x={mascot.pos.x}
+                  y={mascot.pos.y}
+                  frame={mascot.frame}
+                  flip={mascot.flip}
+                  mascotType={mascot.mascotType}
+                  bubbleOpacity={mascot.bubbleOpacity}
+                  bubbleText={mascot.bubbleText}
+                  showTapHint={false}
+                  theme={tk}
+                  onPress={noop}
+                />
+              )}
+            </Svg>
+            {/* what it holds gathers beneath the line as feelings are chosen */}
+            {(draft.anxieties?.length ?? 0) > 0 && (
+              <View
+                pointerEvents="none"
+                style={{
+                  position: "absolute",
+                  left: Math.max(12, g.forkVisible ? g.forkX : 12),
+                  top: Math.min(size.height - 40, g.laneY + 16),
+                  right: 12,
+                  flexDirection: "row",
+                  flexWrap: "wrap",
+                  gap: 4.8,
+                }}
+              >
+                {(draft.anxieties ?? []).map((f) => (
+                  <Tag key={f} label={t(f)} quality />
+                ))}
+              </View>
+            )}
+          </>
+        )}
+      </View>
+      {/* the four questions, flush to the bottom edge; rides the keyboard */}
+      <View
+        style={{
+          marginBottom: kbInset,
+          borderTopWidth: 1,
+          borderTopColor: alpha(tk.lineAxis, 0.55),
+          backgroundColor: tk.bgRaised,
+          paddingTop: 10,
+          paddingHorizontal: 16,
+          paddingBottom: 13.6 + (kbOpen ? 0 : insets.bottom),
+        }}
+      >
+        <InTrayContext.Provider value={true}>
+          <CreateBranch />
+        </InTrayContext.Provider>
+      </View>
+    </View>
+  );
+}

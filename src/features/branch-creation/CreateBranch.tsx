@@ -248,9 +248,14 @@ export function CreateBranch() {
               options={ANXIETIES}
               selected={anxieties}
               onToggle={(f: string) =>
-                setAnxieties((prev) =>
-                  prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f],
-                )
+                setAnxieties((prev) => {
+                  const next = prev.includes(f)
+                    ? prev.filter((x) => x !== f)
+                    : [...prev, f];
+                  // the stage shows what the line holds as it is chosen
+                  updateDraftBranch({ anxieties: next });
+                  return next;
+                })
               }
             />
             {anxieties.length > 0 && (
