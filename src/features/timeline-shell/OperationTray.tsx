@@ -77,6 +77,7 @@ function operationBody(op: TimelineOperation) {
           key={op.branchId}
           branchId={op.branchId}
           startExpanded={op.expanded}
+          dialOnly={op.dialOnly}
         />
       );
     case "quick-act":

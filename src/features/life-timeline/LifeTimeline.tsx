@@ -12,9 +12,11 @@ import {
 import Animated, {
   cancelAnimation,
   runOnJS,
+  useAnimatedProps,
   useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
   withTiming,
   Easing,
 } from "react-native-reanimated";
@@ -35,14 +37,159 @@ import { branchColor } from "@/visualization/branch-lines/style";
 import { mergePreviewPath } from "@/visualization/branch-lines/paths";
 import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
-import { alpha } from "@/ui/color";
+import { alpha, mix } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
 import { loudnessWord } from "@/ui/LoudnessSlider";
 import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, useDashFlow } from "./timeline-fx";
 import { Mascot } from "./Mascot";
+import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
 
 const DAY = 24 * 60 * 60 * 1000;
+
+const AnimatedOptionG = Animated.createAnimatedComponent(G);
+
+// Pip's offer bubble: one padded speech bubble holding two rounded rows —
+// kept compact so it fits to his right almost anywhere on the map.
+const BUBBLE_PAD = 4;
+const ROW_W = 100;
+const ROW_H = 27;
+const ROW_GAP = 3;
+const BUBBLE_W = ROW_W + BUBBLE_PAD * 2;
+const BUBBLE_H = ROW_H * 2 + ROW_GAP + BUBBLE_PAD * 2;
+const BUBBLE_R = 15;
+
+/**
+ * The offer Pip makes when he reaches a thread: ONE speech bubble with a
+ * tail pointing back at him, holding two rows of the same gesture — reflect
+ * fully (accent row) or just dial the loudness (quiet row). It springs out
+ * of his side, growing from the tail with a soft overshoot.
+ */
+function MascotOptionsBubble({
+  originX,
+  cy,
+  dir,
+  tailDy,
+  labels,
+  onReflect,
+  onDial,
+  tk,
+  reducedMotion,
+}: {
+  /** Where the tail's tip sits — right at Pip's side. */
+  originX: number;
+  /** Vertical center of the TOP row (his shoulder line). */
+  cy: number;
+  /** 1 = bubble extends to Pip's right, -1 = to his left (near the edge). */
+  dir: 1 | -1;
+  /** Vertical offset of the tail's tip, aimed at Pip's middle. */
+  tailDy: number;
+  labels: { reflect: string; dial: string };
+  onReflect: () => void;
+  onDial: () => void;
+  tk: ReturnType<typeof useTheme>;
+  reducedMotion: boolean;
+}) {
+  const p = useSharedValue(reducedMotion ? 1 : 0);
+  useEffect(() => {
+    if (reducedMotion) {
+      p.value = 1;
+      return;
+    }
+    p.value = 0;
+    p.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.back(1.6)) });
+  }, [p, reducedMotion]);
+  // Scale grows from the group origin — the tail tip at Pip's side — so the
+  // whole bubble visibly emerges from him with a fluid overshoot.
+  const animatedProps = useAnimatedProps(() => ({
+    opacity: Math.min(1, Math.max(0, p.value * 1.5)),
+    scale: 0.4 + 0.6 * p.value,
+  }));
+  const left = dir === 1 ? 8 : -8 - BUBBLE_W;
+  const rowLeft = left + BUBBLE_PAD;
+  // Local origin (0,0) stays at the TOP row's center.
+  const top = -(BUBBLE_PAD + ROW_H / 2);
+  const row2C = ROW_H + ROW_GAP; // second row's vertical center
+  const midY = top + BUBBLE_H / 2; // the bubble's own middle — where the tail roots
+  const stroke = alpha(tk.lineAxis, 0.9);
+  // A whisper of accent, not a shout — the row stays clearly the fuller move.
+  const softAccent = mix(tk.accent, tk.bgRaised, 20);
+  const strokeOn = (color: string) => ({
+    stroke: color,
+    strokeWidth: 1.9,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    fill: "none" as const,
+  });
+  return (
+    <G x={originX} y={cy}>
+      <AnimatedOptionG animatedProps={animatedProps}>
+        {/* the shared tail first: neutral (neither row's color) and rooted at
+            the bubble's own middle, so it reads as the bubble's voice — not
+            a header for either option. The card drawn after hides its base. */}
+        <Path
+          d={`M 0 ${tailDy} L ${dir * 10.5} ${midY - 5.5} L ${dir * 10.5} ${midY + 5.5} Z`}
+          fill={alpha(tk.bgRaised, 0.97)}
+          stroke={stroke}
+          strokeWidth={1}
+        />
+        {/* the padded card that holds both options */}
+        <Rect
+          x={left}
+          y={top}
+          width={BUBBLE_W}
+          height={BUBBLE_H}
+          rx={BUBBLE_R}
+          fill={alpha(tk.bgRaised, 0.97)}
+          stroke={stroke}
+          strokeWidth={1}
+        />
+        {/* row 1: Reflect — its own rounded pill inside the card */}
+        <G onPress={onReflect}>
+          <Rect x={left - 8} y={top - 6} width={BUBBLE_W + 16} height={BUBBLE_PAD + ROW_H + 6 + ROW_GAP / 2} fill="transparent" />
+          <Rect
+            x={rowLeft}
+            y={-ROW_H / 2}
+            width={ROW_W}
+            height={ROW_H}
+            rx={ROW_H / 2}
+            fill={softAccent}
+          />
+          <G x={rowLeft + 9} y={-7.5} scale={15 / 24}>
+            <Path
+              d="M3 12 C6.5 6.8, 17.5 6.6, 21 12 C17.5 17.3, 6.5 17.4, 3 12 Z"
+              {...strokeOn(tk.accent)}
+            />
+            <Circle cx={12} cy={12} r={2.6} {...strokeOn(tk.accent)} />
+          </G>
+          <SvgText x={rowLeft + 28} y={4.1} fontSize={11.5} fontWeight="600" fill={tk.ink}>
+            {labels.reflect}
+          </SvgText>
+        </G>
+        {/* row 2: the loudness dial — its own rounded pill, quieter tint */}
+        <G onPress={onDial}>
+          <Rect x={left - 8} y={ROW_H / 2 + ROW_GAP / 2} width={BUBBLE_W + 16} height={ROW_H + BUBBLE_PAD + 6 + ROW_GAP / 2} fill="transparent" />
+          <Rect
+            x={rowLeft}
+            y={row2C - ROW_H / 2}
+            width={ROW_W}
+            height={ROW_H}
+            rx={ROW_H / 2}
+            fill={mix(tk.bgSunken, tk.bgRaised, 55)}
+          />
+          <G x={rowLeft + 9} y={row2C - 7.5} scale={15 / 24}>
+            <Circle cx={5} cy={12} r={1.9} fill={tk.accent} />
+            <Path d="M9.5 8 C11.8 10, 11.8 14, 9.5 16" {...strokeOn(tk.accent)} />
+            <Path d="M13.5 5.5 C17.3 8.6, 17.3 15.4, 13.5 18.5" {...strokeOn(tk.accent)} />
+          </G>
+          <SvgText x={rowLeft + 28} y={row2C + 4.1} fontSize={11.5} fontWeight="600" fill={tk.ink}>
+            {labels.dial}
+          </SvgText>
+        </G>
+      </AnimatedOptionG>
+    </G>
+  );
+}
 
 /** Movement below this is still a tap; beyond it the gesture picks an axis. */
 const DECIDE_PX = 8;
@@ -984,6 +1131,57 @@ export function LifeTimeline() {
                 />
                 </LungeG>
               )}
+
+              {/* Once Pip is standing at a thread — never while he travels —
+                  his two offers spring out of his side as little speech
+                  pills: reflect (the full decision sheet) or the loudness
+                  dial. They start under his head, so his real speech bubble
+                  (which lives above him) never collides with them. */}
+              {showMascot && mascot.visible && operation.kind === "idle" &&
+                (() => {
+                  const optId = mascot.arrivedBranchId;
+                  if (!optId) return null;
+                  const b = branches.find((x) => x.id === optId);
+                  if (!b || isClosed(b)) return null;
+                  const spriteW = PX * 12;
+                  const spriteH = PX * 16;
+                  // To his right; near the right edge they come out his left.
+                  const dir: 1 | -1 =
+                    mascot.pos.x + spriteW + 14 + BUBBLE_W + 10 > layout.metrics.width ? -1 : 1;
+                  const originX = dir === 1 ? mascot.pos.x + spriteW + 5 : mascot.pos.x - 5;
+                  // The bubble's top row sits at his shoulder line — always
+                  // under his head, clear of the speech bubble above him —
+                  // and the whole thing lifts just enough to clear the strip.
+                  const desired = mascot.pos.y + spriteH * 0.55;
+                  const maxCy =
+                    layout.height - 26 - (ROW_H * 1.5 + ROW_GAP + BUBBLE_PAD);
+                  const cy = Math.max(20, Math.min(desired, maxCy));
+                  // The tail aims back at Pip's middle (capped to stay a beak).
+                  const pipMidY = mascot.pos.y + spriteH / 2;
+                  const tailDy = Math.max(-12, Math.min(12, pipMidY - cy));
+                  const open = (dialOnly: boolean) => {
+                    setArmedBranchId(null);
+                    setOperation(
+                      dialOnly
+                        ? { kind: "quick-touch", branchId: optId, dialOnly: true }
+                        : { kind: "quick-touch", branchId: optId, expanded: true },
+                    );
+                  };
+                  return (
+                    <MascotOptionsBubble
+                      key={optId}
+                      originX={originX}
+                      cy={cy}
+                      dir={dir}
+                      tailDy={tailDy}
+                      labels={{ reflect: t("Reflect"), dial: t("How loud?") }}
+                      onReflect={() => open(false)}
+                      onDial={() => open(true)}
+                      tk={tk}
+                      reducedMotion={reducedMotion}
+                    />
+                  );
+                })()}
             </Svg>
           </View>
         </ScrollView>
@@ -1063,8 +1261,9 @@ export function LifeTimeline() {
         <TimelineHelp />
 
         {/* First tap on a thread sends Pip over and arms this bar: Bonk fires
-            instantly (and again, and again), Reflect opens the full panel. It
-            rests on the date strip — the one band no thread can enter. */}
+            instantly (and again, and again). Reflect and the dial live under
+            Pip himself. It rests on the date strip — the one band no thread
+            can enter. */}
         {(() => {
           // Bonk always has a target: the thread you armed, or wherever Pip
           // is right now on his own patrol.
@@ -1125,23 +1324,6 @@ export function LifeTimeline() {
                 }}
               >
                 <T style={{ color: tk.accentInk, fontWeight: "700", fontSize: 14 }}>{t(verb)}</T>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t("Reflect on this thread")}
-                disabled={!usable}
-                onPress={() => {
-                  if (!target) return;
-                  setArmedBranchId(null);
-                  setOperation({ kind: "quick-touch", branchId: target.id });
-                }}
-                style={{
-                  borderRadius: 999,
-                  paddingHorizontal: 12,
-                  paddingVertical: 9,
-                }}
-              >
-                <T style={{ color: tk.inkSoft, fontWeight: "600", fontSize: 13 }}>{t("Reflect")}</T>
               </Pressable>
             </View>
           );

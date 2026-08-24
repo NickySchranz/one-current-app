@@ -39,7 +39,7 @@ import {
 
 type PressState = PressableStateCallbackType & { hovered?: boolean };
 
-type Props = { branchId: string; startExpanded?: boolean };
+type Props = { branchId: string; startExpanded?: boolean; dialOnly?: boolean };
 
 const ACTIONS: {
   key: string;
@@ -84,7 +84,7 @@ function SheetTitle({ title }: { title: string }) {
 }
 
 /** One question at the endpoint: what does this thread need from you now? */
-export function QuickBranchMenu({ branchId, startExpanded = false }: Props) {
+export function QuickBranchMenu({ branchId, startExpanded = false, dialOnly = false }: Props) {
   const branch = useAppStore((s) => s.branches.find((b) => b.id === branchId));
   const setOperation = useAppStore((s) => s.setOperation);
   const reopenBranch = useAppStore((s) => s.reopenBranch);
@@ -182,6 +182,38 @@ export function QuickBranchMenu({ branchId, startExpanded = false }: Props) {
         <PaywallPrompt
           reason={paywalled ? "thread-limit" : null}
           onClose={() => setPaywalled(false)}
+        />
+      </Panel>
+    );
+  }
+
+  // Asked for from under Pip: only the dial, nothing else on the sheet.
+  if (dialOnly) {
+    const feltNow = effectiveLoudness(branch, appNow());
+    return (
+      <Panel inTray={inTray}>
+        <SheetTitle title={branch.title} />
+        <View style={{ flexDirection: "column", gap: 4, marginTop: 8 }}>
+          <Hint style={{ marginBottom: 0 }}>{t("How loud is this thread right now?")}</Hint>
+          <LoudnessSlider
+            value={feltNow}
+            accessibilityText={t("{word} — {level} of 5", {
+              word: t(loudnessWord(feltNow)),
+              level: Math.round(feltNow),
+            })}
+            onChange={(v) => void dialLoudness(branchId, v as Loudness)}
+          />
+          {feltNow > branch.loudness && (
+            <Hint style={{ marginBottom: 0 }}>
+              {t("Days without an answer make it ask louder.")}
+            </Hint>
+          )}
+        </View>
+        <Button
+          variant="quiet"
+          label={t("Return to timeline")}
+          onPress={() => setOperation({ kind: "idle" })}
+          style={{ alignSelf: "flex-start", marginTop: 8 }}
         />
       </Panel>
     );

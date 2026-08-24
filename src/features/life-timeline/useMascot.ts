@@ -30,6 +30,8 @@ export type MascotState = {
   mascotType: MascotType;
   inspectedBranchId: string | null;
   pendingBranchId: string | null;
+  /** Set only once Pip is actually standing at the thread — not while travelling. */
+  arrivedBranchId: string | null;
   onPress: () => void;
   showReaction: (text: string) => void;
   focusBranch: (branchId: string) => void;
@@ -246,6 +248,7 @@ export function useMascot(
   const [bubbleText, setBubbleText] = useState('');
   const [inspectedIdState, setInspectedIdState] = useState<string | null>(null);
   const [pendingIdState, setPendingIdState] = useState<string | null>(null);
+  const [arrivedIdState, setArrivedIdState] = useState<string | null>(null);
 
   const clearTimer = () => {
     if (timerRef.current !== null) { clearTimeout(timerRef.current); timerRef.current = null; }
@@ -381,6 +384,7 @@ export function useMascot(
       if (heldRef.current === id) return; // stale hold — the caller clears it
       inspectedId.current = null;
       setInspectedIdState(null);
+      setArrivedIdState(null);
       clearTimer(); cancelRaf();
       scheduleJump(400); // parks as pendingPatrol when a panel is open
       return;
@@ -454,6 +458,7 @@ export function useMascot(
     phase.current = 'landing';
     inspectedId.current = branchId;
     setInspectedIdState(branchId);
+    setArrivedIdState(branchId);
     setFrame('LAND_A');
     timerRef.current = setTimeout(() => {
       phase.current = 'inspecting';
@@ -496,6 +501,7 @@ export function useMascot(
     // Pip starts running so the user sees which timeline he's heading to.
     setPendingIdState(targetId);
     setInspectedIdState(targetId);
+    setArrivedIdState(null); // his options fold away the moment he leaves
 
     timerRef.current = setTimeout(() => {
       const cur = posRef.current;
@@ -564,6 +570,7 @@ export function useMascot(
     if (inspectedId.current === branchId && phase.current !== 'jumping') {
       inspectedId.current = branchId;
       setInspectedIdState(branchId);
+      setArrivedIdState(branchId);
       return;
     }
 
@@ -571,6 +578,7 @@ export function useMascot(
     reroutingRef.current = false;
     inspectedId.current = branchId;
     setInspectedIdState(branchId);
+    setArrivedIdState(null);
     jumpDestRef.current = { x: toX, y: toY, branchId };
 
     const cur = posRef.current;
@@ -589,6 +597,7 @@ export function useMascot(
       reroutingRef.current = false;
       setFrame('INSPECT_A');
       phase.current = 'inspecting';
+      setArrivedIdState(branchId);
       setBubbleText(randomFrom(lang.focus));
       fadeBubble(1, 150);
       timerRef.current = setTimeout(() => {
@@ -630,6 +639,7 @@ export function useMascot(
     setPos(startPos);
     inspectedId.current = best.id;
     setInspectedIdState(best.id);
+    setArrivedIdState(best.id); // he starts the session standing at it
 
     // Greet on first appearance
     if (!greetedThisSession) {
@@ -694,6 +704,7 @@ export function useMascot(
     mascotType,
     inspectedBranchId: inspectedIdState,
     pendingBranchId: pendingIdState,
+    arrivedBranchId: arrivedIdState,
     onPress, showReaction, focusBranch, phrases: lang, visible,
   };
 }
