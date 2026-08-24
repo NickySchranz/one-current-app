@@ -92,6 +92,8 @@ export const quick: Record<string, string> = {
   "Time to begin": "Hora de empezar",
   "at {time}": "a las {time}",
   Back: "Atrás",
+  Next: "Siguiente",
+  "Step {n} of {m}": "Paso {n} de {m}",
   "Place it on today": "Ponerlo en hoy",
   "Action added to your main line.": "Acción añadida a tu línea principal.",
 
@@ -148,6 +150,7 @@ export const quick: Record<string, string> = {
   "Write down what burns with it. The fire keeps nothing.":
     "Escribe lo que arde con ella. El fuego no guarda nada.",
   "What burns with it": "Qué arde con ella",
+  "What burns with it?": "¿Qué arde con ella?",
   "Burn {item}": "Quemar {item}",
   "Take {item} back out": "Sacar {item} del fuego",
   "a fear, a story, a should…": "un miedo, una historia, un «debería»…",

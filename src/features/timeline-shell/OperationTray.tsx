@@ -71,7 +71,13 @@ function operationBody(op: TimelineOperation) {
     case "checking-recurrence":
       return <RecurrenceCheck matchedBranchId={op.matchedBranchId} pending={op.pending} />;
     case "quick-touch":
-      return <QuickBranchMenu key={op.branchId} branchId={op.branchId} />;
+      return (
+        <QuickBranchMenu
+          key={op.branchId}
+          branchId={op.branchId}
+          startExpanded={op.expanded}
+        />
+      );
     case "quick-act":
       return <QuickAct key={op.branchId} branchId={op.branchId} />;
     case "quick-merge":
@@ -136,13 +142,13 @@ function TrayShell({
   );
 }
 
-function trayShadow(t: ThemeTokens, up: number) {
+function trayShadow(t: ThemeTokens, up: number, direction: "up" | "down" = "up") {
   if (!t.shadows) return null;
   return {
     shadowColor: "#000",
     shadowOpacity: 0.09,
     shadowRadius: up,
-    shadowOffset: { width: 0, height: -up / 3.5 },
+    shadowOffset: { width: 0, height: (direction === "up" ? -up : up) / 3.5 },
     elevation: 8,
   };
 }
@@ -157,6 +163,7 @@ export function OperationTray() {
   const operation = useAppStore((s) => s.operation);
   const setOperation = useAppStore((s) => s.setOperation);
   const reducedMotion = useAppStore((s) => s.reducedMotion);
+  const focusStep = useLayoutStore((s) => s.focusStep);
   const depth = operationDepth(operation);
   const t = useT();
   const tk = useTheme();
@@ -166,13 +173,17 @@ export function OperationTray() {
   const touchStartY = useRef<number | null>(null);
   // Desktop: the quick tray docks to the right, beside the timeline — never over Now.
   const side = depth === "quick" && winW >= 900;
+  // Typing steps on narrow screens: the tray anchors to the top of the
+  // screen, where the software keyboard can never cover it or the input.
+  const top = depth === "quick" && !side && focusStep;
 
   // The timeline reads the tray's height to keep the selected line in view.
   useEffect(() => {
     if (depth === "none") useLayoutStore.getState().clearTray();
   }, [depth, operation]);
   useEffect(() => () => useLayoutStore.getState().clearTray(), []);
-  const reportHeight = (h: number) => useLayoutStore.getState().setTray(h, side);
+  // Top mode reports as "side" so the timeline keeps its bottom inset at 0.
+  const reportHeight = (h: number) => useLayoutStore.getState().setTray(h, side || top);
 
   // Escape sets the operation down; the timeline is still right there.
   // While typing, Escape only leaves the field — it never discards the tray.
@@ -296,13 +307,15 @@ export function OperationTray() {
             {body}
           </TrayShell>
         ) : (
+          // One shell for both anchors: switching bottom↔top on a typing
+          // step only restyles it — a remount would wipe the flow's state.
           <View
             pointerEvents="box-none"
             style={{
               position: "absolute",
               left: 0,
               right: 0,
-              bottom: 0,
+              ...(top ? { top: 0 } : { bottom: 0 }),
               zIndex: 40,
               alignItems: "center",
             }}
@@ -315,22 +328,43 @@ export function OperationTray() {
               reducedMotion={reducedMotion}
               onHeight={reportHeight}
               label={t(trayLabel(operation))}
-              style={{
-                width: Math.min(560, winW),
-                maxHeight: 0.45 * winH,
-                backgroundColor: tk.bgRaised,
-                borderWidth: 1,
-                borderBottomWidth: 0,
-                borderColor: alpha(tk.lineAxis, 0.55),
-                borderTopLeftRadius: tk.radiusLg,
-                borderTopRightRadius: tk.radiusLg,
-                paddingTop: 5.6,
-                paddingHorizontal: 16,
-                paddingBottom: 13.6 + insets.bottom,
-                ...trayShadow(tk, 24),
-              }}
+              style={
+                top
+                  ? {
+                      width: Math.min(560, winW),
+                      // More generous than the bottom sheet: on Android the
+                      // window resizes under the keyboard, shrinking winH.
+                      maxHeight: 0.6 * winH,
+                      backgroundColor: tk.bgRaised,
+                      borderWidth: 1,
+                      borderTopWidth: 0,
+                      borderColor: alpha(tk.lineAxis, 0.55),
+                      borderBottomLeftRadius: tk.radiusLg,
+                      borderBottomRightRadius: tk.radiusLg,
+                      paddingTop: insets.top + 8,
+                      paddingHorizontal: 16,
+                      paddingBottom: 13.6,
+                      ...trayShadow(tk, 24, "down"),
+                    }
+                  : {
+                      width: Math.min(560, winW),
+                      // 0.52: the choice lists fit unscrolled with the
+                      // timeline still holding the upper half of the screen.
+                      maxHeight: 0.52 * winH,
+                      backgroundColor: tk.bgRaised,
+                      borderWidth: 1,
+                      borderBottomWidth: 0,
+                      borderColor: alpha(tk.lineAxis, 0.55),
+                      borderTopLeftRadius: tk.radiusLg,
+                      borderTopRightRadius: tk.radiusLg,
+                      paddingTop: 5.6,
+                      paddingHorizontal: 16,
+                      paddingBottom: 13.6 + insets.bottom,
+                      ...trayShadow(tk, 24),
+                    }
+              }
             >
-              {grip}
+              {top ? null : grip}
               {body}
             </TrayShell>
           </View>

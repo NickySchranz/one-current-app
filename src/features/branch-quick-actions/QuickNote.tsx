@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { View } from "react-native";
 import { useAppStore } from "@/stores/app-store";
 import { useT } from "@/i18n/i18n";
 import { appNow } from "@/domain/time/clock";
@@ -9,11 +8,10 @@ import {
   CalmNote,
   Field,
   Panel,
-  Prompt,
   T,
-  rowStyles,
   useInTray,
 } from "@/ui/primitives";
+import { StepFrame, useFocusStep } from "./QuickFlow";
 
 type Props = { branchId: string };
 
@@ -28,6 +26,9 @@ export function QuickNote({ branchId }: Props) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+
+  // One typing step: on phones the tray rides at the top, above the keyboard.
+  useFocusStep(!done);
 
   if (!branch) return null;
 
@@ -65,32 +66,24 @@ export function QuickNote({ branchId }: Props) {
 
   return (
     <Panel inTray={inTray}>
-      <T style={{ fontSize: 16.8, fontWeight: "600" }}>{branch.title}</T>
-      <Prompt>{t("Add what just happened.")}</Prompt>
-      <Field>
-        <AppTextInput
-          autoFocus
-          value={text}
-          onChangeText={setText}
-          placeholder={t("What happened, in a few words")}
-          accessibilityLabel={t("What just happened")}
-          onSubmitEditing={() => void save()}
-          blurOnSubmit={false}
-        />
-      </Field>
-      <View style={rowStyles.stageNav}>
-        <Button
-          variant="quiet"
-          label={t("Back")}
-          onPress={() => setOperation({ kind: "quick-touch", branchId })}
-        />
-        <Button
-          variant="primary"
-          label={t("Note it")}
-          disabled={!text.trim() || busy}
-          onPress={() => void save()}
-        />
-      </View>
+      <StepFrame
+        title={branch.title}
+        prompt={t("Add what just happened.")}
+        onBack={() => setOperation({ kind: "quick-touch", branchId, expanded: true })}
+        next={{ label: t("Note it"), disabled: !text.trim() || busy, onPress: () => void save() }}
+      >
+        <Field>
+          <AppTextInput
+            autoFocus
+            value={text}
+            onChangeText={setText}
+            placeholder={t("What happened, in a few words")}
+            accessibilityLabel={t("What just happened")}
+            onSubmitEditing={() => void save()}
+            blurOnSubmit={false}
+          />
+        </Field>
+      </StepFrame>
     </Panel>
   );
 }

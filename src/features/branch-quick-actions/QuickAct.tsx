@@ -6,14 +6,16 @@ import {
   AppTextInput,
   Button,
   CalmNote,
+  Choice,
   Field,
   Panel,
-  Prompt,
   T,
   Tag,
   rowStyles,
   useInTray,
 } from "@/ui/primitives";
+import { IconClock } from "@/ui/icons";
+import { StepFrame, StepTransition, useFocusStep } from "./QuickFlow";
 
 type Props = { branchId: string };
 
@@ -26,7 +28,7 @@ const STEP_SUGGESTIONS = [
 
 const WHEN_OPTIONS = ["Now", "In ten minutes", "Later today", "Choose a time"];
 
-/** One small honest step, placed on the main line today. */
+/** One small honest step, placed on the main line today — asked in two steps. */
 export function QuickAct({ branchId }: Props) {
   const branch = useAppStore((s) => s.branches.find((b) => b.id === branchId));
   const createTodayAction = useAppStore((s) => s.createTodayAction);
@@ -34,11 +36,15 @@ export function QuickAct({ branchId }: Props) {
   const t = useT();
   const inTray = useInTray();
 
+  const [stage, setStage] = useState(0);
   const [step, setStep] = useState("");
   const [when, setWhen] = useState("Now");
   const [time, setTime] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+
+  // Step 1 is typing; step 2 only if "Choose a time" opens its input.
+  useFocusStep(!done && (stage === 0 || when === "Choose a time"));
 
   if (!branch) return null;
 
@@ -77,52 +83,76 @@ export function QuickAct({ branchId }: Props) {
 
   return (
     <Panel inTray={inTray}>
-      <T style={{ fontSize: 16.8, fontWeight: "600" }}>{branch.title}</T>
-      <Prompt>{t("What is the smallest honest step?")}</Prompt>
-      <Field>
-        <AppTextInput
-          autoFocus
-          value={step}
-          onChangeText={setStep}
-          placeholder={t("One small step")}
-          accessibilityLabel={t("The smallest honest step")}
-          onSubmitEditing={() => void save()}
-          blurOnSubmit={false}
-        />
-      </Field>
-      <View style={rowStyles.tagRow} accessibilityLabel={t("Step suggestions")}>
-        {STEP_SUGGESTIONS.map((s) => (
-          <Tag key={s} label={t(s)} onPress={() => setStep(t(s))} />
-        ))}
-      </View>
-      <Field label={t("When will you begin?")}>
-        <View style={rowStyles.tagRow} accessibilityLabel={t("When to begin")}>
-          {WHEN_OPTIONS.map((w) => (
-            <Tag key={w} label={t(w)} pressed={when === w} onPress={() => setWhen(w)} />
-          ))}
-        </View>
-        {when === "Choose a time" && (
-          <AppTextInput
-            value={time}
-            onChangeText={setTime}
-            placeholder="HH:MM"
-            accessibilityLabel={t("Time to begin")}
-          />
+      <StepTransition stepKey={stage}>
+        {stage === 0 ? (
+          <StepFrame
+            title={branch.title}
+            prompt={t("What is the smallest honest step?")}
+            stepIndex={0}
+            totalSteps={2}
+            onBack={() => setOperation({ kind: "quick-touch", branchId, expanded: true })}
+            next={{
+              label: t("Next"),
+              disabled: !step.trim(),
+              onPress: () => setStage(1),
+            }}
+          >
+            <Field>
+              <AppTextInput
+                autoFocus
+                value={step}
+                onChangeText={setStep}
+                placeholder={t("One small step")}
+                accessibilityLabel={t("The smallest honest step")}
+                onSubmitEditing={() => step.trim() && setStage(1)}
+                blurOnSubmit={false}
+              />
+            </Field>
+            <View style={rowStyles.tagRow} accessibilityLabel={t("Step suggestions")}>
+              {STEP_SUGGESTIONS.map((s) => (
+                <Tag key={s} label={t(s)} onPress={() => setStep(t(s))} />
+              ))}
+            </View>
+          </StepFrame>
+        ) : (
+          <StepFrame
+            title={branch.title}
+            prompt={t("When will you begin?")}
+            stepIndex={1}
+            totalSteps={2}
+            onBack={() => setStage(0)}
+            next={{
+              label: t("Place it on today"),
+              disabled: !step.trim() || busy,
+              onPress: () => void save(),
+            }}
+          >
+            <View
+              style={{ flexDirection: "column", gap: 6.4, marginVertical: 6.4 }}
+              accessibilityLabel={t("When to begin")}
+            >
+              {WHEN_OPTIONS.map((w) => (
+                <Choice
+                  key={w}
+                  title={t(w)}
+                  icon={w === "Choose a time" ? IconClock : undefined}
+                  selected={when === w}
+                  onPress={() => setWhen(w)}
+                />
+              ))}
+            </View>
+            {when === "Choose a time" && (
+              <AppTextInput
+                autoFocus
+                value={time}
+                onChangeText={setTime}
+                placeholder="HH:MM"
+                accessibilityLabel={t("Time to begin")}
+              />
+            )}
+          </StepFrame>
         )}
-      </Field>
-      <View style={rowStyles.stageNav}>
-        <Button
-          variant="quiet"
-          label={t("Back")}
-          onPress={() => setOperation({ kind: "quick-touch", branchId })}
-        />
-        <Button
-          variant="primary"
-          label={t("Place it on today")}
-          disabled={!step.trim() || busy}
-          onPress={() => void save()}
-        />
-      </View>
+      </StepTransition>
     </Panel>
   );
 }

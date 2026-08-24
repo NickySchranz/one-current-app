@@ -43,8 +43,9 @@ export type TimelineOperation =
   | { kind: "idle" }
   | { kind: "creating-branch" }
   | { kind: "checking-recurrence"; matchedBranchId: string; pending: CreateBranchInput }
-  /** "What does this branch need from you now?" — the small menu at an endpoint. */
-  | { kind: "quick-touch"; branchId: string }
+  /** "What does this branch need from you now?" — the small menu at an endpoint.
+   *  `expanded` opens straight onto the choices (Back from a sub-panel). */
+  | { kind: "quick-touch"; branchId: string; expanded?: boolean }
   | { kind: "quick-act"; branchId: string }
   | { kind: "quick-merge"; branchId: string }
   | { kind: "quick-note"; branchId: string }

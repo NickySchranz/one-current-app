@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import {
   Platform,
   Pressable,
@@ -16,6 +16,7 @@ import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
 import {
   Button,
   CalmNote,
+  Choice,
   Hint,
   Panel,
   Prompt,
@@ -25,25 +26,42 @@ import {
 } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
+import {
+  IconEye,
+  IconHeart,
+  IconMerge,
+  IconNote,
+  IconSetDown,
+  IconStep,
+  type IconProps,
+} from "@/ui/icons";
 
 type PressState = PressableStateCallbackType & { hovered?: boolean };
 
-type Props = { branchId: string };
+type Props = { branchId: string; startExpanded?: boolean };
 
 const ACTIONS: {
   key: string;
   kind: "quick-act" | "quick-merge" | "quick-note";
   label: string;
   hint: string;
+  icon: ComponentType<IconProps>;
 }[] = [
-  { key: "a", kind: "quick-act", label: "Act", hint: "Take one small step." },
+  { key: "a", kind: "quick-act", label: "Act", hint: "Take one small step.", icon: IconStep },
   {
     key: "m",
     kind: "quick-merge",
     label: "Integrate",
     hint: "Fold what it gave you back into your one line.",
+    icon: IconMerge,
   },
-  { key: "t", kind: "quick-note", label: "Note", hint: "Add what just happened." },
+  {
+    key: "t",
+    kind: "quick-note",
+    label: "Note",
+    hint: "Add what just happened.",
+    icon: IconNote,
+  },
 ];
 
 function isEditableTarget(e: KeyboardEvent): boolean {
@@ -136,43 +154,8 @@ function LoudnessSlider({
   );
 }
 
-/** A cell of the quick menu (.quick-menu-item). */
-function QuickMenuItem({
-  title,
-  hint,
-  onPress,
-}: {
-  title: string;
-  hint: string;
-  onPress: () => void;
-}) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={(s) => ({
-        width: "48%",
-        flexGrow: 1,
-        flexDirection: "column",
-        alignItems: "flex-start",
-        gap: 2.4,
-        paddingVertical: 8,
-        paddingHorizontal: 10.4,
-        borderWidth: 1,
-        borderColor: (s as PressState).hovered ? theme.lineAxis : alpha(theme.lineAxis, 0.55),
-        borderRadius: theme.radius,
-        backgroundColor: theme.bgRaised,
-      })}
-    >
-      <T style={{ fontWeight: "600" }}>{title}</T>
-      <Hint style={{ marginBottom: 0, fontSize: 12.8, lineHeight: 18 }}>{hint}</Hint>
-    </Pressable>
-  );
-}
-
 /** One question at the endpoint: what does this thread need from you now? */
-export function QuickBranchMenu({ branchId }: Props) {
+export function QuickBranchMenu({ branchId, startExpanded = false }: Props) {
   const branch = useAppStore((s) => s.branches.find((b) => b.id === branchId));
   const setOperation = useAppStore((s) => s.setOperation);
   const reopenBranch = useAppStore((s) => s.reopenBranch);
@@ -183,8 +166,9 @@ export function QuickBranchMenu({ branchId }: Props) {
   const canOpenThread = useThreadGate();
   const [paywalled, setPaywalled] = useState(false);
   // The sheet opens as a peek: the thread's name and its loudness dial only.
-  // Pulling it up (or tapping the question) reveals the decisions.
-  const [expanded, setExpanded] = useState(false);
+  // Pulling it up (or tapping the question) reveals the decisions. Coming
+  // Back from a sub-panel reopens straight onto them.
+  const [expanded, setExpanded] = useState(startExpanded);
   const touchRef = useRef<{ x: number; y: number } | null>(null);
   const t = useT();
   const theme = useTheme();
@@ -308,7 +292,9 @@ export function QuickBranchMenu({ branchId }: Props) {
           Setting it is a touch, not a decision — it never quiets the day
           counter. Once a decision has been taken today, the line rests and
           the dial steps away until tomorrow (or until the thread reopens). */}
-      {!decided && (
+      {/* The dial belongs to the peek; once the choices unfold it steps
+          aside so the whole decision fits on screen without scrolling. */}
+      {!decided && !showAll && (
         <View style={{ flexDirection: "column", gap: 4, marginTop: 8 }}>
           <Hint style={{ marginBottom: 0 }}>{t("How loud is this thread right now?")}</Hint>
           <LoudnessSlider
@@ -360,36 +346,40 @@ export function QuickBranchMenu({ branchId }: Props) {
         </Pressable>
       ) : (
         <>
-          <Prompt>{t("What does this thread need from you now?")}</Prompt>
-          <View
-            style={{ flexDirection: "row", flexWrap: "wrap", gap: 6.4, marginVertical: 6.4 }}
-          >
+          <Prompt style={{ marginTop: 8 }}>{t("What does this thread need from you now?")}</Prompt>
+          {/* Verbs and icons only — each choice explains itself on its own
+              screen, so no hint paragraph needs to crowd this one. */}
+          <View style={{ flexDirection: "column", gap: 6.4, marginVertical: 6.4 }}>
             {ACTIONS.map((a) => (
-              <QuickMenuItem
+              <Choice
                 key={a.kind}
+                icon={a.icon}
                 title={t(a.label)}
-                hint={t(a.hint)}
+                accessibilityHint={t(a.hint)}
                 onPress={() => setOperation({ kind: a.kind, branchId })}
               />
             ))}
-            <QuickMenuItem
+            <Choice
+              icon={IconSetDown}
               title={t("Can't do anything about it now")}
-              hint={t("Set it down. It stays on the line without pulling at you.")}
+              accessibilityHint={t("Set it down. It stays on the line without pulling at you.")}
               onPress={leaveForToday}
             />
           </View>
-          <Button
-            variant="quiet"
-            label={t("Understand this thread")}
-            onPress={() => setOperation({ kind: "understanding", branchId })}
-            style={{ marginTop: 3.2, alignSelf: "flex-start" }}
-          />
-          <Button
-            variant="quiet"
-            label={t("Too heavy to carry alone")}
-            onPress={() => setOperation({ kind: "seeking-support", branchId })}
-            style={{ marginTop: 3.2, alignSelf: "flex-start" }}
-          />
+          <View style={{ flexDirection: "column", alignItems: "flex-start", gap: 3.2, marginTop: 3.2 }}>
+            <Button
+              variant="quiet"
+              icon={<IconEye size={16} color={theme.inkSoft} />}
+              label={t("Understand this thread")}
+              onPress={() => setOperation({ kind: "understanding", branchId })}
+            />
+            <Button
+              variant="quiet"
+              icon={<IconHeart size={16} color={theme.inkSoft} />}
+              label={t("Too heavy to carry alone")}
+              onPress={() => setOperation({ kind: "seeking-support", branchId })}
+            />
+          </View>
         </>
       )}
       </View>

@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { alpha, mix } from "./color";
 import { useTheme, type ThemeTokens } from "./theme";
+import type { IconProps } from "./icons";
 
 /** Web adds `hovered` to Pressable's style-state; native never sets it. */
 type PressState = PressableStateCallbackType & { hovered?: boolean };
@@ -247,6 +248,7 @@ export function Button({
   large = false,
   disabled = false,
   selected,
+  icon,
   style,
   textStyle,
   accessibilityLabel,
@@ -258,6 +260,8 @@ export function Button({
   disabled?: boolean;
   /** aria-pressed styling for filter/toggle buttons. */
   selected?: boolean;
+  /** Leading glyph — an Svg can't live inside the label Text on native. */
+  icon?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
   accessibilityLabel?: string;
@@ -299,6 +303,8 @@ export function Button({
         const s = buttonSurface(t, variant, state as PressState);
         if (selected) s.text.color = t.ink;
         return (
+          <>
+          {icon}
           <Text
             style={[
               {
@@ -315,6 +321,7 @@ export function Button({
           >
             {label}
           </Text>
+          </>
         );
       }}
     </Pressable>
@@ -553,22 +560,40 @@ export function Choice({
   hint,
   selected = false,
   onPress,
+  icon: Icon,
+  tone = "default",
+  hintLines,
+  accessibilityHint,
   style,
 }: {
   title: string;
   hint?: string;
   selected?: boolean;
   onPress?: () => void;
+  /** Leading stroke icon, colored by selection state (accent) or ink. */
+  icon?: React.ComponentType<IconProps>;
+  /** "danger" tints the icon and title — for choices that destroy. */
+  tone?: "default" | "danger";
+  /** Cap the hint's lines where vertical space is tight. */
+  hintLines?: number;
+  /** Spoken hint for choices whose visible hint was traded for calm. */
+  accessibilityHint?: string;
   style?: StyleProp<ViewStyle>;
 }) {
   const t = useTheme();
+  const inkColor = tone === "danger" ? t.danger : t.ink;
+  const iconColor = selected ? t.accent : tone === "danger" ? t.danger : t.inkSoft;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected }}
+      accessibilityHint={accessibilityHint}
       onPress={onPress}
       style={(s) => [
         {
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 10,
           borderWidth: 1,
           borderColor: selected
             ? t.accent
@@ -577,28 +602,38 @@ export function Choice({
               : alpha(t.lineAxis, 0.55),
           borderRadius: t.radius,
           backgroundColor: selected ? t.accentSoft : t.bgRaised,
-          paddingVertical: 10.4,
+          paddingVertical: 8.8,
           paddingHorizontal: 12.8,
         },
         style,
       ]}
     >
-      <Text style={{ fontFamily: t.fontBody, color: t.ink, fontSize: 15.2, lineHeight: 20.5 }}>
-        {title}
-      </Text>
-      {hint ? (
-        <Text
-          style={{
-            fontFamily: t.fontBody,
-            color: t.inkSoft,
-            fontSize: 13.6,
-            lineHeight: 18.4,
-            marginTop: 2,
-          }}
-        >
-          {hint}
-        </Text>
+      {Icon ? (
+        <View style={{ width: 24, alignItems: "center" }}>
+          <Icon color={iconColor} />
+        </View>
       ) : null}
+      <View style={{ flex: 1 }}>
+        <Text
+          style={{ fontFamily: t.fontBody, color: inkColor, fontSize: 15.2, lineHeight: 20.5 }}
+        >
+          {title}
+        </Text>
+        {hint ? (
+          <Text
+            numberOfLines={hintLines}
+            style={{
+              fontFamily: t.fontBody,
+              color: t.inkSoft,
+              fontSize: 13.6,
+              lineHeight: 18.4,
+              marginTop: 2,
+            }}
+          >
+            {hint}
+          </Text>
+        ) : null}
+      </View>
     </Pressable>
   );
 }

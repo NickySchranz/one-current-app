@@ -1,12 +1,12 @@
-import { useState } from "react";
-import { Pressable, View, type PressableStateCallbackType } from "react-native";
+import { useState, type ComponentType } from "react";
+import { Pressable, View } from "react-native";
 import { useAppStore } from "@/stores/app-store";
 import { useT } from "@/i18n/i18n";
 import { appNow } from "@/domain/time/clock";
 import {
   AppTextInput,
   Button,
-  Field,
+  Choice,
   Hint,
   Panel,
   Prompt,
@@ -16,32 +16,54 @@ import {
   Tag,
 } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
-import { alpha } from "@/ui/color";
-
-type PressState = PressableStateCallbackType & { hovered?: boolean };
+import {
+  IconCheck,
+  IconFlame,
+  IconHandOff,
+  IconPath,
+  type IconProps,
+} from "@/ui/icons";
+import { StepFrame, StepTransition, useFocusStep } from "./QuickFlow";
 
 type Props = { branchId: string };
 
 type OutcomeId = "resolved" | "own-task" | "moved-past" | "burned";
 
-const OUTCOMES: { id: OutcomeId; label: string; hint: string }[] = [
-  { id: "resolved", label: "It is resolved", hint: "It can end here and come back with you." },
+const OUTCOMES: {
+  id: OutcomeId;
+  label: string;
+  hint: string;
+  icon: ComponentType<IconProps>;
+  tone?: "danger";
+}[] = [
+  {
+    id: "resolved",
+    label: "It is resolved",
+    hint: "It can end here and come back with you.",
+    icon: IconCheck,
+  },
   {
     id: "own-task",
     label: "It has become its own task",
     hint: "It leaves your head and lives where your tasks live.",
+    icon: IconHandOff,
   },
   {
     id: "moved-past",
     label: "I have moved past it",
     hint: "It ends here. Nothing needs to come with you.",
+    icon: IconPath,
   },
   {
     id: "burned",
     label: "Burn it away",
     hint: "Some worries don't get folded in. They get let go of — completely.",
+    icon: IconFlame,
+    tone: "danger",
   },
 ];
+
+type Path = "choice" | "burn" | "own-task";
 
 /** Bringing back is an ending: resolved, handed off as real work, or moved past. */
 export function QuickMerge({ branchId }: Props) {
@@ -56,8 +78,8 @@ export function QuickMerge({ branchId }: Props) {
   const theme = useTheme();
   const inTray = useInTray();
 
-  const [converting, setConverting] = useState(false);
-  const [burning, setBurning] = useState(false);
+  const [path, setPath] = useState<Path>("choice");
+  const [stepIndex, setStepIndex] = useState(0);
   const [burnItems, setBurnItems] = useState<string[]>([]);
   const [burnInput, setBurnInput] = useState("");
   const [farewell, setFarewell] = useState("");
@@ -66,6 +88,9 @@ export function QuickMerge({ branchId }: Props) {
   const [workHome, setWorkHome] = useState("");
   const [firstTask, setFirstTask] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Every step of both sub-paths is a typing step; the choice screen is not.
+  useFocusStep(path !== "choice");
 
   if (!branch) return null;
 
@@ -76,9 +101,11 @@ export function QuickMerge({ branchId }: Props) {
       if (id === "resolved") {
         await startMerge([branchId]);
       } else if (id === "own-task") {
-        setConverting(true);
+        setPath("own-task");
+        setStepIndex(0);
       } else if (id === "burned") {
-        setBurning(true);
+        setPath("burn");
+        setStepIndex(0);
       } else {
         // Moved past it: the line rejoins Now carrying nothing.
         await completeMerge({
@@ -120,7 +147,9 @@ export function QuickMerge({ branchId }: Props) {
   const burnSuggestions = [
     ...(branch.occupies ?? []),
     ...(branch.anxieties ?? []),
-  ].filter((x, i, arr) => arr.indexOf(x) === i && !burnItems.includes(x));
+  ]
+    .filter((x, i, arr) => arr.indexOf(x) === i && !burnItems.includes(x))
+    .slice(0, 6);
 
   const addBurnItem = (raw: string) => {
     const item = raw.trim();
@@ -134,116 +163,196 @@ export function QuickMerge({ branchId }: Props) {
     burnBranch(branchId, burnItems, lesson.trim());
   }
 
-  if (burning) {
+  const back = () => {
+    if (stepIndex > 0) setStepIndex(stepIndex - 1);
+    else setPath("choice");
+  };
+
+  if (path === "burn") {
     return (
       <Panel inTray={inTray}>
-        <T style={{ fontSize: 16.8, fontWeight: "600" }}>{branch.title}</T>
-        <Prompt>{t("Write down what burns with it. The fire keeps nothing.")}</Prompt>
-        <Hint>
-          {t("This thread will be gone from the app — completely. No line, no history. Only the lesson stays.")}
-        </Hint>
-        <Field label={t("What burns with it")}>
-          {burnSuggestions.length > 0 && (
-            <View style={[rowStyles.tagRow, { marginBottom: 6 }]}>
-              {burnSuggestions.map((sug) => (
-                <Pressable
-                  key={sug}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("Burn {item}", { item: sug })}
-                  onPress={() => addBurnItem(sug)}
-                >
-                  <Tag label={sug} quality />
-                </Pressable>
-              ))}
-            </View>
+        <StepTransition stepKey={stepIndex}>
+          {stepIndex === 0 && (
+            <StepFrame
+              title={branch.title}
+              prompt={t("What burns with it?")}
+              stepIndex={0}
+              totalSteps={3}
+              onBack={back}
+              next={{
+                label: t("Next"),
+                disabled: burnItems.length === 0,
+                onPress: () => setStepIndex(1),
+              }}
+            >
+              <Hint numberOfLines={2}>
+                {t("This thread will be gone from the app — completely. No line, no history. Only the lesson stays.")}
+              </Hint>
+              {burnSuggestions.length > 0 && (
+                <View style={[rowStyles.tagRow, { marginBottom: 6 }]}>
+                  {burnSuggestions.map((sug) => (
+                    <Pressable
+                      key={sug}
+                      accessibilityRole="button"
+                      accessibilityLabel={t("Burn {item}", { item: sug })}
+                      onPress={() => addBurnItem(sug)}
+                    >
+                      <Tag label={sug} quality />
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+              <AppTextInput
+                value={burnInput}
+                onChangeText={setBurnInput}
+                placeholder={t("a fear, a story, a should…")}
+                onSubmitEditing={() => addBurnItem(burnInput)}
+                blurOnSubmit={false}
+              />
+              {burnItems.length > 0 && (
+                <View style={[rowStyles.tagRow, { marginTop: 6 }]}>
+                  {burnItems.map((item) => (
+                    <Pressable
+                      key={item}
+                      accessibilityRole="button"
+                      accessibilityLabel={t("Take {item} back out", { item })}
+                      onPress={() => setBurnItems(burnItems.filter((x) => x !== item))}
+                    >
+                      <View style={{ opacity: 0.9 }}>
+                        <Tag label={`✕ ${item}`} quality />
+                      </View>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </StepFrame>
           )}
-          <AppTextInput
-            value={burnInput}
-            onChangeText={setBurnInput}
-            placeholder={t("a fear, a story, a should…")}
-            onSubmitEditing={() => addBurnItem(burnInput)}
-            blurOnSubmit={false}
-          />
-          {burnInput.trim().length > 0 && (
-            <Button
-              variant="quiet"
-              label={t("Add to the fire")}
-              onPress={() => addBurnItem(burnInput)}
-            />
+          {stepIndex === 1 && (
+            <StepFrame
+              title={branch.title}
+              prompt={t("The lesson you carry out of the fire")}
+              stepIndex={1}
+              totalSteps={3}
+              onBack={back}
+              next={{
+                label: t("Next"),
+                disabled: !lesson.trim(),
+                onPress: () => setStepIndex(2),
+              }}
+            >
+              <AppTextInput
+                autoFocus
+                value={lesson}
+                onChangeText={setLesson}
+                placeholder={t("one sentence you'll keep — e.g. I can survive being disliked")}
+                onSubmitEditing={() => lesson.trim() && setStepIndex(2)}
+                blurOnSubmit={false}
+              />
+              <Hint style={{ marginTop: 6, marginBottom: 0 }}>
+                {t("The fire takes the weight. You keep this.")}
+              </Hint>
+            </StepFrame>
           )}
-          {burnItems.length > 0 && (
-            <View style={[rowStyles.tagRow, { marginTop: 6 }]}>
-              {burnItems.map((item) => (
-                <Pressable
-                  key={item}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("Take {item} back out", { item })}
-                  onPress={() => setBurnItems(burnItems.filter((x) => x !== item))}
-                >
-                  <View style={{ opacity: 0.9 }}>
-                    <Tag label={`✕ ${item}`} quality />
-                  </View>
-                </Pressable>
-              ))}
-            </View>
+          {stepIndex === 2 && (
+            <StepFrame
+              title={branch.title}
+              prompt={t("A last word to it (optional)")}
+              stepIndex={2}
+              totalSteps={3}
+              onBack={back}
+              next={{
+                label: t("Strike the match"),
+                icon: <IconFlame size={16} color={theme.accentInk} />,
+                disabled: burnItems.length === 0 || !lesson.trim() || busy,
+                onPress: burn,
+              }}
+            >
+              <AppTextInput
+                autoFocus
+                value={farewell}
+                onChangeText={setFarewell}
+                placeholder={t("you kept me safe once. not anymore.")}
+              />
+              <Hint style={{ marginTop: 6, marginBottom: 0 }}>
+                {t("Spoken to the fire — kept nowhere.")}
+              </Hint>
+            </StepFrame>
           )}
-        </Field>
-        <Field label={t("The lesson you carry out of the fire")}>
-          <AppTextInput
-            value={lesson}
-            onChangeText={setLesson}
-            placeholder={t("one sentence you'll keep — e.g. I can survive being disliked")}
-          />
-          <Hint>{t("The fire takes the weight. You keep this.")}</Hint>
-        </Field>
-        <Field label={t("A last word to it (optional)")}>
-          <AppTextInput
-            value={farewell}
-            onChangeText={setFarewell}
-            placeholder={t("you kept me safe once. not anymore.")}
-          />
-          <Hint>{t("Spoken to the fire — kept nowhere.")}</Hint>
-        </Field>
-        <View style={rowStyles.stageNav}>
-          <Button variant="quiet" label={t("Back")} onPress={() => setBurning(false)} />
-          <Button
-            variant="primary"
-            label={t("Strike the match")}
-            disabled={burnItems.length === 0 || !lesson.trim() || busy}
-            onPress={burn}
-          />
-        </View>
+        </StepTransition>
       </Panel>
     );
   }
 
-  if (converting) {
+  if (path === "own-task") {
     return (
       <Panel inTray={inTray}>
-        <T style={{ fontSize: 16.8, fontWeight: "600" }}>{branch.title}</T>
-        <Prompt>{t("It becomes real work and leaves your head.")}</Prompt>
-        <Field label={t("What is the work called?")}>
-          <AppTextInput value={workName} onChangeText={setWorkName} />
-        </Field>
-        <Field label={t("Where will it live from now on?")}>
-          <AppTextInput
-            value={workHome}
-            onChangeText={setWorkHome}
-            placeholder={t("e.g. my task list, the team board")}
-          />
-        </Field>
-        <Field label={t("What is the first concrete task?")}>
-          <AppTextInput value={firstTask} onChangeText={setFirstTask} />
-        </Field>
-        <View style={rowStyles.stageNav}>
-          <Button variant="quiet" label={t("Back")} onPress={() => setConverting(false)} />
-          <Button
-            variant="primary"
-            label={t("Hand it off")}
-            disabled={!workName.trim() || busy}
-            onPress={() => void convert()}
-          />
-        </View>
+        <StepTransition stepKey={stepIndex}>
+          {stepIndex === 0 && (
+            <StepFrame
+              title={branch.title}
+              prompt={t("What is the work called?")}
+              stepIndex={0}
+              totalSteps={3}
+              onBack={back}
+              next={{
+                label: t("Next"),
+                disabled: !workName.trim(),
+                onPress: () => setStepIndex(1),
+              }}
+            >
+              <AppTextInput
+                autoFocus
+                value={workName}
+                onChangeText={setWorkName}
+                onSubmitEditing={() => workName.trim() && setStepIndex(1)}
+                blurOnSubmit={false}
+              />
+              <Hint style={{ marginTop: 6, marginBottom: 0 }}>
+                {t("It becomes real work and leaves your head.")}
+              </Hint>
+            </StepFrame>
+          )}
+          {stepIndex === 1 && (
+            <StepFrame
+              title={branch.title}
+              prompt={t("Where will it live from now on?")}
+              stepIndex={1}
+              totalSteps={3}
+              onBack={back}
+              next={{ label: t("Next"), onPress: () => setStepIndex(2) }}
+            >
+              <AppTextInput
+                autoFocus
+                value={workHome}
+                onChangeText={setWorkHome}
+                placeholder={t("e.g. my task list, the team board")}
+                onSubmitEditing={() => setStepIndex(2)}
+                blurOnSubmit={false}
+              />
+            </StepFrame>
+          )}
+          {stepIndex === 2 && (
+            <StepFrame
+              title={branch.title}
+              prompt={t("What is the first concrete task?")}
+              stepIndex={2}
+              totalSteps={3}
+              onBack={back}
+              next={{
+                label: t("Hand it off"),
+                disabled: !workName.trim() || busy,
+                onPress: () => void convert(),
+              }}
+            >
+              <AppTextInput
+                autoFocus
+                value={firstTask}
+                onChangeText={setFirstTask}
+                onSubmitEditing={() => void convert()}
+              />
+            </StepFrame>
+          )}
+        </StepTransition>
       </Panel>
     );
   }
@@ -251,38 +360,24 @@ export function QuickMerge({ branchId }: Props) {
   return (
     <Panel inTray={inTray}>
       <T style={{ fontSize: 16.8, fontWeight: "600" }}>{branch.title}</T>
-      <Prompt>{t("What is true about this thread now?")}</Prompt>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6.4, marginVertical: 6.4 }}>
+      <Prompt style={{ marginTop: 8 }}>{t("What is true about this thread now?")}</Prompt>
+      <View style={{ flexDirection: "column", gap: 6.4, marginVertical: 6.4 }}>
         {OUTCOMES.map((o) => (
-          <Pressable
+          <Choice
             key={o.id}
-            accessibilityRole="button"
+            icon={o.icon}
+            tone={o.tone}
+            title={t(o.label)}
+            hint={t(o.hint)}
+            hintLines={1}
             onPress={() => void choose(o.id)}
-            style={(s) => ({
-              width: "48%",
-              flexGrow: 1,
-              flexDirection: "column",
-              alignItems: "flex-start",
-              gap: 2.4,
-              paddingVertical: 8,
-              paddingHorizontal: 10.4,
-              borderWidth: 1,
-              borderColor: (s as PressState).hovered
-                ? theme.lineAxis
-                : alpha(theme.lineAxis, 0.55),
-              borderRadius: theme.radius,
-              backgroundColor: theme.bgRaised,
-            })}
-          >
-            <T style={{ fontWeight: "600" }}>{t(o.label)}</T>
-            <Hint style={{ marginBottom: 0, fontSize: 12.8, lineHeight: 18 }}>{t(o.hint)}</Hint>
-          </Pressable>
+          />
         ))}
       </View>
       <Button
         variant="quiet"
         label={t("Back")}
-        onPress={() => setOperation({ kind: "quick-touch", branchId })}
+        onPress={() => setOperation({ kind: "quick-touch", branchId, expanded: true })}
         style={{ marginTop: 3.2, alignSelf: "flex-start" }}
       />
     </Panel>
