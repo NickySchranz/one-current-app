@@ -236,8 +236,10 @@ export function useMascot(
   const initialised = useRef(false);
   // Live jump destination — updated when geometries change during a jump
   const jumpDestRef = useRef<{ x: number; y: number; branchId: string } | null>(null);
-  // Guard against re-entrant mid-jump re-routes
-  const reroutingRef = useRef(false);
+  // How far the world has panned since the current run began. The waypoint
+  // runner adds this at render time, so Pip and his remaining path translate
+  // with the timeline instead of sticking to the screen.
+  const panShiftRef = useRef({ x: 0, y: 0 });
   // Mutable position ref so waypoint runner can read current pos without setState callback
   const posRef = useRef<MascotPos>({ x: -999, y: -999 });
   // Rendering state
@@ -299,12 +301,18 @@ export function useMascot(
     let idx = 0;
     let lastToggle = performance.now();
     let runA = true;
+    // Waypoints are in the coordinates of the moment the run began; any pan
+    // after that lives in panShiftRef and is added at render time, so the
+    // whole run stays glued to the timeline, not the screen.
+    panShiftRef.current = { x: 0, y: 0 };
 
     const step = () => {
       if (idx >= waypoints.length) { onDone(); return; }
       const wp = waypoints[idx];
+      const s0 = panShiftRef.current;
       const cur = posRef.current;
-      const dx = wp.x - cur.x, dy_ = wp.y - cur.y;
+      const fromX = cur.x - s0.x, fromY = cur.y - s0.y; // back to base coords
+      const dx = wp.x - fromX, dy_ = wp.y - fromY;
       const dist = Math.hypot(dx, dy_) || 1;
       const duration = Math.max(120, dist / pxPerMs);
 
@@ -312,12 +320,12 @@ export function useMascot(
       setFlip(dx >= 0 ? 1 : -1);
 
       const t0 = performance.now();
-      const fromX = cur.x, fromY = cur.y;
 
       const tick = (now: number) => {
         const t = Math.min(1, (now - t0) / duration);
-        const nx = fromX + dx * t;
-        const ny = fromY + dy_ * t;
+        const s = panShiftRef.current;
+        const nx = fromX + dx * t + s.x;
+        const ny = fromY + dy_ * t + s.y;
         posRef.current = { x: nx, y: ny };
         setPos({ x: nx, y: ny });
 
@@ -330,8 +338,6 @@ export function useMascot(
         if (t < 1) {
           rafRef.current = requestAnimationFrame(tick);
         } else {
-          posRef.current = { x: wp.x, y: wp.y };
-          setPos({ x: wp.x, y: wp.y });
           idx++;
           step();
         }
@@ -396,25 +402,21 @@ export function useMascot(
     const ty = geo.endY - PX * 10;
 
     if (phase.current === 'jumping') {
-      // Update the live destination ref so the landing callback uses fresh coords
-      if (jumpDestRef.current?.branchId === id) {
-        jumpDestRef.current = { x: tx, y: ty, branchId: id };
-      }
-      // If the destination has drifted far (user panned), cancel and re-route
-      // directly without zigzag so the mascot cleanly tracks the branch.
+      // The world panned under him mid-run: fold the drift into the pan
+      // shift so Pip and his remaining path translate WITH the timeline —
+      // he keeps his place relative to Now, never to the screen.
       const dest = jumpDestRef.current;
-      if (!reroutingRef.current && dest && (Math.abs(dest.x - tx) > 25 || Math.abs(dest.y - ty) > 25)) {
-        reroutingRef.current = true;
-        cancelRaf();
-        jumpDestRef.current = { x: tx, y: ty, branchId: id };
-        const wps = [{ x: tx, y: ty }]; // straight line to new destination
-        runWaypoints(wps, () => {
-          reroutingRef.current = false;
-          posRef.current = { x: tx, y: ty };
-          setPos({ x: tx, y: ty });
-          setPendingIdState(null);
-          onLanded(id);
-        }, 0.28);
+      if (dest?.branchId === id) {
+        const dx = tx - dest.x, dy = ty - dest.y;
+        if (dx !== 0 || dy !== 0) {
+          jumpDestRef.current = { x: tx, y: ty, branchId: id };
+          panShiftRef.current = {
+            x: panShiftRef.current.x + dx,
+            y: panShiftRef.current.y + dy,
+          };
+          posRef.current = { x: posRef.current.x + dx, y: posRef.current.y + dy };
+          setPos(posRef.current);
+        }
       }
       return;
     }
@@ -519,7 +521,6 @@ export function useMascot(
         posRef.current = { x: fx, y: fy };
         setPos({ x: fx, y: fy });
         jumpDestRef.current = null;
-        reroutingRef.current = false;
         setPendingIdState(null);
         onLanded(targetId);
       }, 0.16);
@@ -575,7 +576,6 @@ export function useMascot(
     }
 
     clearTimer(); cancelRaf();
-    reroutingRef.current = false;
     inspectedId.current = branchId;
     setInspectedIdState(branchId);
     setArrivedIdState(null);
@@ -594,7 +594,6 @@ export function useMascot(
       posRef.current = { x: fx, y: fy };
       setPos({ x: fx, y: fy });
       jumpDestRef.current = null;
-      reroutingRef.current = false;
       setFrame('INSPECT_A');
       phase.current = 'inspecting';
       setArrivedIdState(branchId);

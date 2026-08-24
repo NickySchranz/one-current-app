@@ -68,9 +68,10 @@ export function defaultWindow(forkDates: string[], now: Date = new Date()): Time
   const earliest = [...forkDates].sort()[0];
   const span = Math.max(120, daysBetween(earliest, today));
   const start = addDays(earliest, -Math.round(span * 0.12));
-  // Extend past today so Now sits at the halfway point of the view.
+  // Extend past today a little beyond the halfway point, so Now keeps clear
+  // water in front of it — room for Pip's offer bubble at the line ends.
   const future = daysBetween(start, today);
-  return { start, end: addDays(today, future) };
+  return { start, end: addDays(today, Math.round(future * 1.15)) };
 }
 
 export function zoomLevelForWindow(window: TimeWindow): ZoomLevel {

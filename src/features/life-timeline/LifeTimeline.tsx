@@ -1145,14 +1145,25 @@ export function LifeTimeline() {
                   if (!b || isClosed(b)) return null;
                   const spriteW = PX * 12;
                   const spriteH = PX * 16;
-                  // To his right; near the right edge they come out his left.
-                  const dir: 1 | -1 =
-                    mascot.pos.x + spriteW + 14 + BUBBLE_W + 10 > layout.metrics.width ? -1 : 1;
+                  // To his right; near the right edge it comes out his left —
+                  // but only while he's actually on screen. Once he scrolls
+                  // out of view, the bubble scrolls out with him (it belongs
+                  // to him, never pinned to the viewport).
+                  const wouldOverflowRight =
+                    mascot.pos.x + spriteW + 14 + BUBBLE_W + 10 > layout.metrics.width;
+                  const pipOnScreen =
+                    mascot.pos.x > -spriteW && mascot.pos.x < layout.metrics.width - spriteW / 2;
+                  const dir: 1 | -1 = wouldOverflowRight && pipOnScreen ? -1 : 1;
                   const originX = dir === 1 ? mascot.pos.x + spriteW + 5 : mascot.pos.x - 5;
-                  // The bubble's top row sits at his shoulder line — always
-                  // under his head, clear of the speech bubble above him —
-                  // and the whole thing lifts just enough to clear the strip.
-                  const desired = mascot.pos.y + spriteH * 0.55;
+                  // On his right the bubble's top row sits at his shoulder
+                  // line — under his head, clear of the speech bubble above.
+                  // On his LEFT it drops below the line instead: that side is
+                  // where the thread's title lives, and the title stays
+                  // readable. Either way it lifts just enough for the strip.
+                  const desired =
+                    dir === 1
+                      ? mascot.pos.y + spriteH * 0.55
+                      : mascot.pos.y + spriteH + 10 + BUBBLE_PAD + ROW_H / 2;
                   const maxCy =
                     layout.height - 26 - (ROW_H * 1.5 + ROW_GAP + BUBBLE_PAD);
                   const cy = Math.max(20, Math.min(desired, maxCy));
