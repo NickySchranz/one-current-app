@@ -15,6 +15,7 @@ import { MorePage } from "@/features/more/MorePage";
 import { AuthGate } from "@/features/auth/AuthGate";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
+import { useKeyboard } from "@/ui/keyboard";
 import { T } from "@/ui/primitives";
 import { useTutorial } from "@/features/tutorial/useTutorial";
 import { TutorialOverlay } from "@/features/tutorial/TutorialOverlay";
@@ -33,6 +34,9 @@ function AppShell() {
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
   const compactNav = winW <= 760;
+  // The tab bar must never ride up with the software keyboard — while the
+  // keyboard is open it simply steps away (the sheet above has Back/Next).
+  const keyboard = useKeyboard();
   const tutorial = useTutorial();
 
   useEffect(() => {
@@ -160,7 +164,7 @@ function AppShell() {
         {view.kind === "merge-review" && <MergeReview mergeId={view.mergeId} />}
         {view.kind === "more" && <MorePage />}
       </View>
-      {compactNav && <PrimaryNavigation variant="bottom" />}
+      {compactNav && !keyboard.open && <PrimaryNavigation variant="bottom" />}
       {ready && authUser && tutorial.active && tutorial.currentStep && (
         <TutorialOverlay
           step={tutorial.currentStep}
