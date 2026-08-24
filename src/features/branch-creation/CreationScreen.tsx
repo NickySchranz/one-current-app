@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { View } from "react-native";
+import { Platform, View, useWindowDimensions } from "react-native";
 import Svg, { Path, Text as SvgText } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppStore } from "@/stores/app-store";
@@ -34,7 +34,9 @@ export function CreationScreen() {
   const t = useT();
   const tk = useTheme();
   const insets = useSafeAreaInsets();
-  const { inset: kbInset, open: kbOpen } = useKeyboard();
+  const { inset: kbInset, open: kbOpen, offsetTop } = useKeyboard();
+  // On web winH is the visual viewport — already minus the keyboard.
+  const { height: winH } = useWindowDimensions();
   const [size, setSize] = useState({ width: 390, height: 320 });
 
   const draft = branches.find((b) => b.id === draftBranchId);
@@ -83,14 +85,19 @@ export function CreationScreen() {
   return (
     <View
       style={{
+        // Pinned to the VISIBLE screen: on web the container starts where the
+        // visual viewport starts and is exactly as tall as it (winH tracks
+        // it), so stage + questions always fit above the keyboard. Native
+        // iOS overlays instead — there the keyboard inset trims the bottom.
         position: "absolute",
         left: 0,
         right: 0,
-        top: 0,
-        bottom: 0,
+        ...(Platform.OS === "web"
+          ? { top: offsetTop, height: winH }
+          : { top: 0, bottom: kbInset }),
         zIndex: 50,
         backgroundColor: tk.bg,
-        paddingTop: insets.top,
+        paddingTop: kbOpen ? 0 : insets.top,
       }}
     >
       <View
@@ -187,10 +194,10 @@ export function CreationScreen() {
           </>
         )}
       </View>
-      {/* the four questions, flush to the bottom edge; rides the keyboard */}
+      {/* the four questions, flush to the container's bottom — which is the
+          keyboard's top edge while typing */}
       <View
         style={{
-          marginBottom: kbInset,
           borderTopWidth: 1,
           borderTopColor: alpha(tk.lineAxis, 0.55),
           backgroundColor: tk.bgRaised,

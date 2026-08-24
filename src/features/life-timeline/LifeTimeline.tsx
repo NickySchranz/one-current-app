@@ -293,8 +293,10 @@ export function LifeTimeline() {
         compact,
         now,
         mainShift,
-        // Room above the top lane for its label, clear of the pinned chip.
-        topPad: topInset > 0 ? topInset + 18 : undefined,
+        // Room above the top lane for its label, clear of the pinned chip —
+        // and always enough headroom for Pip's speech bubble when he stands
+        // at the highest thread (sprite ~22px above the lane, bubble above).
+        topPad: Math.max(88, topInset > 0 ? topInset + 18 : 0),
         // Lines created this session keep their lane — through "since when?"
         // changes and past the save, while the quick menu is still open.
         pinnedBranchIds,

@@ -13,9 +13,13 @@ import { Dimensions, Keyboard, Platform } from "react-native";
  * overlays the window, so the keyboard frame's top edge is tracked. Android
  * native resizes the window itself — inset stays 0, only `open` is tracked.
  */
-export function useKeyboard(): { inset: number; open: boolean } {
+export function useKeyboard(): { inset: number; open: boolean; offsetTop: number } {
   const [inset, setInset] = useState(0);
   const [open, setOpen] = useState(false);
+  // Web only: how far the browser has scrolled the visual viewport down the
+  // layout viewport (iOS Safari does this to reveal a focused input). A view
+  // pinned to the VISIBLE screen sits at top: offsetTop, height: winH.
+  const [offsetTop, setOffsetTop] = useState(0);
   useEffect(() => {
     if (Platform.OS === "web") {
       if (typeof window === "undefined") return;
@@ -37,6 +41,7 @@ export function useKeyboard(): { inset: number; open: boolean } {
         covered = vv
           ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))
           : 0;
+        setOffsetTop(vv ? Math.max(0, Math.round(vv.offsetTop)) : 0);
         apply();
       };
       const isEditable = (el: EventTarget | null) =>
@@ -80,5 +85,5 @@ export function useKeyboard(): { inset: number; open: boolean } {
       hide.remove();
     };
   }, []);
-  return { inset, open };
+  return { inset, open, offsetTop };
 }
