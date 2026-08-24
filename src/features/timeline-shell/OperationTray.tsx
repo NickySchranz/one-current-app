@@ -217,11 +217,17 @@ export function OperationTray() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [operation.kind, setOperation]);
 
+  // Creating a thread takes over the screen: the visible timeline is part of
+  // the experience, so stray taps on it must never throw the draft away.
+  // Cancel is explicit (the Cancel button, or Escape).
+  const takeover = operation.kind === "creating-branch";
+
   // A tap anywhere outside the quick tray only sets it down — nothing
   // underneath activates on that same tap. A drag is a pan, not a dismissal.
   // (Web: window listeners with a click swallow, exactly like the source app.)
   useEffect(() => {
-    if (Platform.OS !== "web" || depth !== "quick") return;
+    if (Platform.OS !== "web" || depth !== "quick" || operation.kind === "creating-branch")
+      return;
     let start: { x: number; y: number } | null = null;
     const inTray = (target: EventTarget | null) => {
       const node = trayRef.current as unknown as HTMLElement | null;
@@ -249,7 +255,7 @@ export function OperationTray() {
       window.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("pointerup", onUp, true);
     };
-  }, [depth, setOperation]);
+  }, [depth, operation.kind, setOperation]);
 
   if (depth === "none") return null;
 
@@ -284,7 +290,7 @@ export function OperationTray() {
     return (
       <>
         {/* Native: a tap outside sets the tray down (web handles this above). */}
-        {Platform.OS !== "web" && (
+        {Platform.OS !== "web" && !takeover && (
           <Pressable
             onPress={() => setOperation({ kind: "idle" })}
             style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0, zIndex: 38 }}
@@ -339,23 +345,26 @@ export function OperationTray() {
               onHeight={reportHeight}
               label={t(trayLabel(operation))}
               style={{
-                width: Math.min(560, winW),
+                // Takeover (creating): flush to the screen edges — a screen
+                // of its own, not a floating sheet.
+                width: takeover ? winW : Math.min(560, winW),
                 // 0.52: the choice lists fit unscrolled with the timeline
                 // still holding the upper half of the screen.
                 maxHeight: sheetMax(0.52),
                 backgroundColor: tk.bgRaised,
-                borderWidth: 1,
+                borderWidth: takeover ? 0 : 1,
+                borderTopWidth: 1,
                 borderBottomWidth: 0,
                 borderColor: alpha(tk.lineAxis, 0.55),
-                borderTopLeftRadius: tk.radiusLg,
-                borderTopRightRadius: tk.radiusLg,
-                paddingTop: 5.6,
+                borderTopLeftRadius: takeover ? 0 : tk.radiusLg,
+                borderTopRightRadius: takeover ? 0 : tk.radiusLg,
+                paddingTop: takeover ? 10 : 5.6,
                 paddingHorizontal: 16,
                 paddingBottom: 13.6 + (kbOpen ? 0 : insets.bottom),
                 ...trayShadow(tk, 24),
               }}
             >
-              {grip}
+              {takeover ? null : grip}
               {body}
             </TrayShell>
           </View>

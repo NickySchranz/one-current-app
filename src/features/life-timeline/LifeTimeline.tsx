@@ -1094,7 +1094,7 @@ export function LifeTimeline() {
         </View>
 
         {/* One round +, unmistakable and wordless, floating on the water. */}
-        {showFab && (
+        {showFab && !soloDraftId && (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("New thread")}
@@ -1130,7 +1130,7 @@ export function LifeTimeline() {
           onClose={() => setPaywalled(false)}
         />
 
-        <TimelineHelp />
+        {!soloDraftId && <TimelineHelp />}
 
         {/* First tap on a thread sends Pip over and arms this bar: Bonk fires
             instantly (and again, and again), Reflect opens the full panel. It
@@ -1217,11 +1217,14 @@ export function LifeTimeline() {
           );
         })()}
         {/* how split the present is: strands fan out per undecided line and
-            come home as decisions are taken — tap it for the day's forecast */}
-        <WholenessIndicator
-          activeLines={activeLines}
-          onChipHeight={(h) => setTopInset(Math.max(0, Math.round(9.6 + h) + 8))}
-        />
+            come home as decisions are taken — tap it for the day's forecast.
+            During creation the stage is the new line's alone: chip steps away. */}
+        {!soloDraftId && (
+          <WholenessIndicator
+            activeLines={activeLines}
+            onChipHeight={(h) => setTopInset(Math.max(0, Math.round(9.6 + h) + 8))}
+          />
+        )}
 
         {/* while the thumb dials a thread's loudness: its name and level, live */}
         {preview && previewBranch && (

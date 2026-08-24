@@ -37,6 +37,10 @@ function AppShell() {
   // The tab bar must never ride up with the software keyboard — while the
   // keyboard is open it simply steps away (the sheet above has Back/Next).
   const keyboard = useKeyboard();
+  // Creating a thread takes over the whole screen: no header, no tab bar —
+  // just the solo timeline with Pip and the four questions.
+  const operation = useAppStore((s) => s.operation);
+  const creating = operation.kind === "creating-branch";
   const tutorial = useTutorial();
 
   useEffect(() => {
@@ -110,6 +114,7 @@ function AppShell() {
   return (
     <View style={{ flex: 1, backgroundColor: tk.bg }}>
       <StatusBar style={tk.mode === "dark" ? "light" : "dark"} />
+      {!creating && (
       <View
         style={{
           flexDirection: "row",
@@ -153,6 +158,7 @@ function AppShell() {
         )}
         {!compactNav && <PrimaryNavigation variant="header" />}
       </View>
+      )}
       <View style={{ flex: 1, minHeight: 0 }}>
         {view.kind === "now" && (
           <View style={{ flex: 1, minHeight: 0 }}>
@@ -164,7 +170,7 @@ function AppShell() {
         {view.kind === "merge-review" && <MergeReview mergeId={view.mergeId} />}
         {view.kind === "more" && <MorePage />}
       </View>
-      {compactNav && !keyboard.open && <PrimaryNavigation variant="bottom" />}
+      {compactNav && !keyboard.open && !creating && <PrimaryNavigation variant="bottom" />}
       {ready && authUser && tutorial.active && tutorial.currentStep && (
         <TutorialOverlay
           step={tutorial.currentStep}
