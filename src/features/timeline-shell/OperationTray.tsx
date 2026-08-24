@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import {
-  Dimensions,
-  Keyboard,
   Platform,
   Pressable,
   ScrollView,
@@ -35,6 +33,7 @@ import { IntegratedThreadsPanel } from "@/features/integrated-threads/Integrated
 import { useT } from "@/i18n/i18n";
 import { useTheme, type ThemeTokens } from "@/ui/theme";
 import { alpha } from "@/ui/color";
+import { useKeyboard } from "@/ui/keyboard";
 import { InTrayContext } from "@/ui/primitives";
 
 function trayLabel(op: TimelineOperation): string {
@@ -153,57 +152,6 @@ function trayShadow(t: ThemeTokens, up: number) {
     shadowOffset: { width: 0, height: -up / 3.5 },
     elevation: 8,
   };
-}
-
-/**
- * The software keyboard, as the bottom sheet needs to know it: `inset` is how
- * far the sheet must lift off the window bottom to sit right above the keys,
- * `open` widens the sheet's height cap while typing. The sheet never leaves
- * the bottom of the screen.
- *
- * Web: the visual viewport shrinks under a mobile keyboard; the inset is the
- * layout-viewport strip it covers (0 for hardware keyboards). Note RN Web
- * already reports the visual viewport as the window height. iOS native
- * overlays the window, so the keyboard frame's top edge is tracked. Android
- * native resizes the window itself — inset stays 0, only `open` is tracked.
- */
-function useKeyboard(): { inset: number; open: boolean } {
-  const [inset, setInset] = useState(0);
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (Platform.OS === "web") {
-      if (typeof window === "undefined" || !window.visualViewport) return;
-      const vv = window.visualViewport;
-      const update = () => {
-        const covered = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-        setInset(covered);
-        setOpen(covered > 0);
-      };
-      vv.addEventListener("resize", update);
-      vv.addEventListener("scroll", update);
-      update();
-      return () => {
-        vv.removeEventListener("resize", update);
-        vv.removeEventListener("scroll", update);
-      };
-    }
-    if (Platform.OS === "ios") {
-      // screenY tracks the keyboard's top edge, so hide/undock land on 0.
-      const sub = Keyboard.addListener("keyboardWillChangeFrame", (e) => {
-        const covered = Math.max(0, Dimensions.get("window").height - e.endCoordinates.screenY);
-        setInset(covered);
-        setOpen(covered > 0);
-      });
-      return () => sub.remove();
-    }
-    const show = Keyboard.addListener("keyboardDidShow", () => setOpen(true));
-    const hide = Keyboard.addListener("keyboardDidHide", () => setOpen(false));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
-  return { inset, open };
 }
 
 /**

@@ -2,22 +2,22 @@ import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { useAppStore } from "@/stores/app-store";
 import { useT } from "@/i18n/i18n";
-import type { ForkPeriodChoice } from "@/domain/branches/types";
+import type { ForkPeriodChoice, Loudness } from "@/domain/branches/types";
 import { resolveForkDate } from "@/domain/branches/logic";
 import { ANXIETIES, suggestLockedFeelings } from "@/domain/feelings/logic";
 import { FeelingPicker } from "@/features/branch-touch/FeelingPicker";
+import { StepFrame, StepTransition } from "@/features/branch-quick-actions/QuickFlow";
 import { appNow } from "@/domain/time/clock";
 import {
   AppTextInput,
-  Button,
   Field,
   Hint,
   Panel,
-  Prompt,
   Tag,
   rowStyles,
   useInTray,
 } from "@/ui/primitives";
+import { LoudnessSlider } from "@/ui/LoudnessSlider";
 
 type WhenId = "today" | "this-week" | "this-month" | "earlier";
 type EarlierId = "date" | "period" | "unsure";
@@ -36,10 +36,10 @@ const EARLIER_OPTIONS: { id: EarlierId; label: string }[] = [
 ];
 
 /**
- * One screen: name what pulls, say when, create. The line draws itself onto
- * the timeline the moment the form opens (optimistically); cancelling takes
- * it away again. Loudness is not asked here — the quick menu that follows
- * carries the dial.
+ * Four small questions: what pulls, since when, what it makes you feel, how
+ * loud. While the form is open the map holds only this one line (drawn
+ * optimistically the moment the form opens; cancelling takes it away).
+ * Finishing closes the panel — the line then draws itself in among the rest.
  */
 export function CreateBranch() {
   const requestBranch = useAppStore((s) => s.requestBranch);
@@ -49,6 +49,7 @@ export function CreateBranch() {
   const t = useT();
   const inTray = useInTray();
 
+  const [stage, setStage] = useState(0);
   const [title, setTitle] = useState("");
   const [whenId, setWhenId] = useState<WhenId>("today");
   const [earlierId, setEarlierId] = useState<EarlierId>("date");
@@ -56,6 +57,7 @@ export function CreateBranch() {
   const [periodLabel, setPeriodLabel] = useState("");
   const [periodYear, setPeriodYear] = useState("");
   const [anxieties, setAnxieties] = useState<string[]>([]);
+  const [loudness, setLoudness] = useState<number>(3);
   const [busy, setBusy] = useState(false);
 
   // The optimistic line: born with the form, gone if the form closes unsaved.
@@ -100,133 +102,197 @@ export function CreateBranch() {
         title,
         kindChoiceId: "unnamed",
         period: p,
+        loudness: loudness as Loudness,
         anxieties: anxieties.length > 0 ? anxieties : undefined,
         occupies: anxieties.length > 0 ? suggestLockedFeelings(anxieties) : undefined,
       });
       // On recurrence the tray content switches to the recurrence check.
-      // Otherwise the new line stays in focus and its quick menu opens:
-      // the same actions every thread has, right away.
-      if (result.branch) setOperation({ kind: "quick-touch", branchId: result.branch.id });
+      // Otherwise the panel sets itself down: the full map returns, the new
+      // line draws itself in, and a small note says it has been added.
+      if (result.branch) setOperation({ kind: "idle" });
     } finally {
       setBusy(false);
     }
   }
 
+  // Cancel before the operation flips so the draft never flashes on the
+  // restored full map (the unmount cleanup is then a no-op).
+  const cancel = () => {
+    useAppStore.getState().cancelDraftBranch();
+    setOperation({ kind: "idle" });
+  };
+
+  const namedTitle = title.trim() || undefined;
+
   return (
     <Panel inTray={inTray}>
-      <Prompt>{t("What is pulling at you?")}</Prompt>
-      <Field>
-        <AppTextInput
-          autoFocus
-          value={title}
-          onChangeText={(v) => {
-            setTitle(v);
-            // the optimistic line carries the name as it is typed
-            updateDraftBranch({ title: v });
-          }}
-          placeholder={t("Name it in a few words")}
-          accessibilityLabel={t("Name the thread")}
-          onSubmitEditing={() => void createNow()}
-        />
-      </Field>
-      <Field label={t("Since when?")}>
-        <View
-          style={rowStyles.tagRow}
-          accessibilityRole="radiogroup"
-          accessibilityLabel={t("When this began")}
-        >
-          {WHEN_OPTIONS.map((opt) => (
-            <Tag
-              key={opt.id}
-              label={t(opt.label)}
-              pressed={whenId === opt.id}
-              onPress={() => setWhenId(opt.id)}
-            />
-          ))}
-        </View>
-      </Field>
-      {whenId === "earlier" && (
-        <>
-          <View
-            style={rowStyles.tagRow}
-            accessibilityRole="radiogroup"
-            accessibilityLabel={t("Earlier, more precisely")}
+      <StepTransition stepKey={stage}>
+        {stage === 0 && (
+          <StepFrame
+            prompt={t("What is pulling at you?")}
+            stepIndex={0}
+            totalSteps={4}
+            backLabel={t("Cancel")}
+            onBack={cancel}
+            next={{
+              label: t("Next"),
+              disabled: !title.trim(),
+              onPress: () => setStage(1),
+            }}
           >
-            {EARLIER_OPTIONS.map((opt) => (
-              <Tag
-                key={opt.id}
-                label={t(opt.label)}
-                pressed={earlierId === opt.id}
-                onPress={() => setEarlierId(opt.id)}
-              />
-            ))}
-          </View>
-          {earlierId === "date" && (
-            <Field label={t("Roughly when?")}>
+            <Field>
               <AppTextInput
-                value={approxDate}
-                onChangeText={setApproxDate}
-                placeholder="YYYY-MM-DD"
-                accessibilityLabel={t("Roughly when?")}
+                autoFocus
+                value={title}
+                onChangeText={(v) => {
+                  setTitle(v);
+                  // the optimistic line carries the name as it is typed
+                  updateDraftBranch({ title: v });
+                }}
+                placeholder={t("Name it in a few words")}
+                accessibilityLabel={t("Name the thread")}
+                onSubmitEditing={() => title.trim() && setStage(1)}
+                blurOnSubmit={false}
               />
             </Field>
-          )}
-          {earlierId === "period" && (
-            <>
-              <Field label={t("Name the period")}>
-                <AppTextInput
-                  value={periodLabel}
-                  onChangeText={setPeriodLabel}
-                  placeholder={t("e.g. after the move, my first job")}
-                />
-              </Field>
-              <Field label={t("Around which year?")}>
-                <AppTextInput
-                  value={periodYear}
-                  onChangeText={setPeriodYear}
-                  keyboardType="number-pad"
-                  placeholder={String(appNow().getFullYear())}
-                  accessibilityLabel={t("Around which year?")}
-                />
-              </Field>
-            </>
-          )}
-        </>
-      )}
-      <Field label={t("What does it make you feel? (optional)")}>
-        <FeelingPicker
-          label={t("What it makes you feel")}
-          options={ANXIETIES}
-          selected={anxieties}
-          onToggle={(f: string) =>
-            setAnxieties((prev) =>
-              prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f],
-            )
-          }
-        />
-        {anxieties.length > 0 && (
-          <Hint style={{ marginBottom: 0 }}>
-            {t("While it stays open, it may draw on {list}.", {
-              list: suggestLockedFeelings(anxieties)
-                .map((f) => t(f))
-                .join(", "),
-            })}
-          </Hint>
+          </StepFrame>
         )}
-      </Field>
-      <View style={rowStyles.stageNav}>
-        <Button
-          variant="quiet"
-          label={t("Cancel")}
-          onPress={() => setOperation({ kind: "idle" })}
-        />
-        <Button
-          variant="primary"
-          label={t("Start the thread")}
-          disabled={!title.trim() || !resolvedPeriod() || busy}
-          onPress={() => void createNow()}
-        />
-      </View>
+        {stage === 1 && (
+          <StepFrame
+            title={namedTitle}
+            prompt={t("Since when?")}
+            stepIndex={1}
+            totalSteps={4}
+            onBack={() => setStage(0)}
+            next={{
+              label: t("Next"),
+              disabled: !resolvedPeriod(),
+              onPress: () => setStage(2),
+            }}
+          >
+            <View
+              style={rowStyles.tagRow}
+              accessibilityRole="radiogroup"
+              accessibilityLabel={t("When this began")}
+            >
+              {WHEN_OPTIONS.map((opt) => (
+                <Tag
+                  key={opt.id}
+                  label={t(opt.label)}
+                  pressed={whenId === opt.id}
+                  onPress={() => setWhenId(opt.id)}
+                />
+              ))}
+            </View>
+            {whenId === "earlier" && (
+              <>
+                <View
+                  style={rowStyles.tagRow}
+                  accessibilityRole="radiogroup"
+                  accessibilityLabel={t("Earlier, more precisely")}
+                >
+                  {EARLIER_OPTIONS.map((opt) => (
+                    <Tag
+                      key={opt.id}
+                      label={t(opt.label)}
+                      pressed={earlierId === opt.id}
+                      onPress={() => setEarlierId(opt.id)}
+                    />
+                  ))}
+                </View>
+                {earlierId === "date" && (
+                  <Field label={t("Roughly when?")}>
+                    <AppTextInput
+                      value={approxDate}
+                      onChangeText={setApproxDate}
+                      placeholder="YYYY-MM-DD"
+                      accessibilityLabel={t("Roughly when?")}
+                    />
+                  </Field>
+                )}
+                {earlierId === "period" && (
+                  <>
+                    <Field label={t("Name the period")}>
+                      <AppTextInput
+                        value={periodLabel}
+                        onChangeText={setPeriodLabel}
+                        placeholder={t("e.g. after the move, my first job")}
+                      />
+                    </Field>
+                    <Field label={t("Around which year?")}>
+                      <AppTextInput
+                        value={periodYear}
+                        onChangeText={setPeriodYear}
+                        keyboardType="number-pad"
+                        placeholder={String(appNow().getFullYear())}
+                        accessibilityLabel={t("Around which year?")}
+                      />
+                    </Field>
+                  </>
+                )}
+              </>
+            )}
+          </StepFrame>
+        )}
+        {stage === 2 && (
+          <StepFrame
+            title={namedTitle}
+            prompt={t("What does it make you feel? (optional)")}
+            stepIndex={2}
+            totalSteps={4}
+            onBack={() => setStage(1)}
+            next={{ label: t("Next"), onPress: () => setStage(3) }}
+          >
+            <FeelingPicker
+              label={t("What it makes you feel")}
+              options={ANXIETIES}
+              selected={anxieties}
+              onToggle={(f: string) =>
+                setAnxieties((prev) =>
+                  prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f],
+                )
+              }
+            />
+            {anxieties.length > 0 && (
+              <Hint style={{ marginTop: 6, marginBottom: 0 }}>
+                {t("While it stays open, it may draw on {list}.", {
+                  list: suggestLockedFeelings(anxieties)
+                    .map((f) => t(f))
+                    .join(", "),
+                })}
+              </Hint>
+            )}
+          </StepFrame>
+        )}
+        {stage === 3 && (
+          <StepFrame
+            title={namedTitle}
+            prompt={t("How loud is it right now?")}
+            stepIndex={3}
+            totalSteps={4}
+            onBack={() => setStage(2)}
+            next={{
+              label: t("Start the thread"),
+              disabled: busy,
+              onPress: () => void createNow(),
+            }}
+          >
+            <LoudnessSlider
+              value={loudness}
+              accessibilityText={
+                loudness === 1
+                  ? t("Quiet")
+                  : t("Loudness {level} of 5", { level: Math.round(loudness) })
+              }
+              onChange={(v) => {
+                setLoudness(v);
+                // the lone line on the map thickens as the dial fills
+                updateDraftBranch({ loudness: v as Loudness });
+              }}
+            />
+          </StepFrame>
+        )}
+      </StepTransition>
     </Panel>
   );
 }

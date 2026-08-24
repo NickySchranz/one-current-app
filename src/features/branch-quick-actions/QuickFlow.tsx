@@ -26,7 +26,8 @@ export function StepFrame({
   next,
   children,
 }: {
-  title: string;
+  /** The thread's name — omitted when the flow hasn't named one yet. */
+  title?: string;
   prompt: string;
   /** 0-based. Omit both step props for a single-step flow — no dots shown. */
   stepIndex?: number;
@@ -41,7 +42,7 @@ export function StepFrame({
   const dots = totalSteps != null && totalSteps > 1 && stepIndex != null;
   return (
     <View>
-      <T style={{ fontSize: 16.8, fontWeight: "600" }}>{title}</T>
+      {title ? <T style={{ fontSize: 16.8, fontWeight: "600" }}>{title}</T> : null}
       <Prompt style={{ marginTop: 8 }}>{prompt}</Prompt>
       {children}
       <View style={rowStyles.stageNav}>

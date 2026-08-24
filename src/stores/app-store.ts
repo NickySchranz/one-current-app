@@ -111,6 +111,8 @@ type AppState = {
   reclaim?: ReclaimEvent;
   /** A branch was just created: its line draws itself onto the timeline. */
   born?: { key: number; branchId: string };
+  /** A thread was just committed from the create flow: a small confirmation pops by its line. */
+  added?: { key: number; branchId: string };
   /** A worry is being burned: fire consumes its line, then finalizeBurn removes it. */
   burn?: { key: number; branchId: string; items: string[]; lesson: string };
   /** Pip just struck a thread (drives the attack animation). */
@@ -175,6 +177,7 @@ type AppState = {
   /** Phase 2: the fire is done — keep the lesson, remove the thread entirely. */
   finalizeBurn(): Promise<void>;
   clearBorn(): void;
+  clearAdded(): void;
   updateMoment(branchId: string, moment: BranchCommit): Promise<void>;
 
   startMerge(branchIds: string[]): Promise<void>;
@@ -489,8 +492,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       draftBranchId: null,
       window: weekWindow(appNow()),
       view: nowView(s.view),
-      // A committed draft already drew itself; only a fresh line is born here.
-      born: draftId ? s.born : { key: Date.now(), branchId: branch.id },
+      // Always born: a committed draft replays its draw-in on the full map
+      // (during creation it stood alone; this is its arrival among the rest).
+      born: { key: Date.now(), branchId: branch.id },
+      // The small "thread added" pop belongs to the create flow only — the
+      // recurrence path (no draft) lands in an existing thread's menu instead.
+      added: draftId ? { key: Date.now(), branchId: branch.id } : s.added,
     }));
     return branch;
   },
@@ -653,6 +660,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
   clearBorn: () => set({ born: undefined }),
+  clearAdded: () => set({ added: undefined }),
 
   async createTodayAction(branchId, step) {
     const branch = get().branches.find((b) => b.id === branchId);

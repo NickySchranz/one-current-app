@@ -25,11 +25,8 @@ export const quick: Record<string, string> = {
   "How loud is it right now?": "¿Qué tan fuerte suena en este momento?",
   Cancel: "Cancelar",
   "Start the thread": "Abrir el hilo",
-  "Thread started. Its line just drew itself onto the timeline — it begins in your past and reaches Now.":
-    "El hilo comenzó. Su línea acaba de dibujarse en la línea de tiempo: comienza en tu pasado y llega hasta Ahora.",
+  "Thread added to your timeline.": "Hilo agregado a tu línea de tiempo.",
   "Return to timeline": "Volver a la línea de tiempo",
-  "Explore what it carries": "Explorar lo que lleva dentro",
-  "Add one action": "Agregar una acción",
 
   // ---- RecurrenceCheck ----
   "This resembles a thread you integrated before.": "Se parece a un hilo que ya integraste.",

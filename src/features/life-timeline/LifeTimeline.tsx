@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   PanResponder,
   Platform,
@@ -97,6 +97,43 @@ function useEased(target: number, reducedMotion: boolean): number {
 
 type LoudnessPreview = { branchId: string; level: number };
 
+/**
+ * The small note that pops by a just-added line: rises in, holds, fades on
+ * its own. It carries information, so reduced motion shows it statically —
+ * the parent unmounts it when the `added` event clears.
+ */
+function AddedPop({
+  reducedMotion,
+  children,
+  style,
+}: {
+  reducedMotion: boolean;
+  children: ReactNode;
+  style?: object;
+}) {
+  const op = useSharedValue(reducedMotion ? 1 : 0);
+  const ty = useSharedValue(reducedMotion ? 0 : 6);
+  useEffect(() => {
+    if (reducedMotion) return;
+    op.value = withTiming(1, { duration: 180, easing: Easing.out(Easing.cubic) });
+    ty.value = withTiming(0, { duration: 180, easing: Easing.out(Easing.cubic) });
+    const fade = setTimeout(() => {
+      op.value = withTiming(0, { duration: 400, easing: Easing.ease });
+    }, 2100);
+    return () => clearTimeout(fade);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one life per mount
+  }, []);
+  const anim = useAnimatedStyle(() => ({
+    opacity: op.value,
+    transform: [{ translateY: ty.value }],
+  }));
+  return (
+    <Animated.View pointerEvents="none" style={[style, anim]}>
+      {children}
+    </Animated.View>
+  );
+}
+
 export function LifeTimeline() {
   const branches = useAppStore((s) => s.branches);
   const pinnedBranchIds = useAppStore((s) => s.pinnedBranchIds);
@@ -118,6 +155,8 @@ export function LifeTimeline() {
   const [paywalled, setPaywalled] = useState(false);
   const born = useAppStore((s) => s.born);
   const clearBorn = useAppStore((s) => s.clearBorn);
+  const added = useAppStore((s) => s.added);
+  const clearAdded = useAppStore((s) => s.clearAdded);
   const burn = useAppStore((s) => s.burn);
   const hit = useAppStore((s) => s.hit);
   const clearHit = useAppStore((s) => s.clearHit);
@@ -192,6 +231,14 @@ export function LifeTimeline() {
     return () => clearTimeout(timer);
   }, [born, clearBorn, reducedMotion]);
 
+  // The small "thread added" note by the new line: holds, then fades. It
+  // carries information, so under reduced motion it still shows (statically).
+  useEffect(() => {
+    if (!added) return;
+    const timer = setTimeout(clearAdded, reducedMotion ? 2000 : 2600);
+    return () => clearTimeout(timer);
+  }, [added, clearAdded, reducedMotion]);
+
   const stageRef = useRef<View>(null);
   const scrollRef = useRef<ScrollView>(null);
   const scrollYRef = useRef(0);
@@ -208,10 +255,17 @@ export function LifeTimeline() {
     trayHeight > 0 && !traySide ? Math.min(trayHeight, size.height - 130) : 0;
   const bottomInset = useEased(insetTarget, reducedMotion);
 
-  const visible = useMemo(
-    () => filterBranches(branches, typeFilter, statusFilter),
-    [branches, typeFilter, statusFilter],
-  );
+  // While the create form is open, the map holds only the line being born —
+  // the whole current steps aside so the new thread has the stage to itself.
+  const soloDraftId =
+    operation.kind === "creating-branch" && draftBranchId ? draftBranchId : null;
+  const visible = useMemo(() => {
+    if (soloDraftId) return branches.filter((b) => b.id === soloDraftId);
+    // Dismissals flip the operation to idle a frame before the unmount
+    // cleanup removes the draft — never show that stale draft on the full map.
+    const base = draftBranchId ? branches.filter((b) => b.id !== draftBranchId) : branches;
+    return filterBranches(base, typeFilter, statusFilter);
+  }, [branches, soloDraftId, draftBranchId, typeFilter, statusFilter]);
 
   const compact = size.width < 640;
   // When the bottom nav shows, its central + takes over — no second one here.
@@ -543,6 +597,15 @@ export function LifeTimeline() {
     if (!bornKey || !showMascot) return;
     setTimeout(() => mascotReactionRef.current?.(randomFrom(mascot.phrases.born)), 800);
   }, [bornKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A thread just committed from the create flow: Pip walks over and stands
+  // at it, so one tap on him opens its decisions. (After the tray closed,
+  // nothing else re-sends him — the id survived from the draft.)
+  const addedKey = added?.key;
+  useEffect(() => {
+    if (!addedKey || !added || !showMascot || !mascot.visible) return;
+    mascot.focusBranch(added.branchId);
+  }, [addedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fire mascot reaction when an action/note operation closes
   const prevOpKind = useRef(operation.kind);
@@ -957,6 +1020,33 @@ export function LifeTimeline() {
                 </LungeG>
               )}
             </Svg>
+            {/* the small "thread added" note, anchored by the new line's
+                endpoint — inside the scrolled canvas, so it stays with it */}
+            {added &&
+              (() => {
+                const g = layout.geometries.find((x) => x.branchId === added.branchId);
+                if (!g) return null;
+                return (
+                  <AddedPop
+                    key={added.key}
+                    reducedMotion={reducedMotion}
+                    style={{
+                      position: "absolute",
+                      right: Math.max(8, size.width - g.endX + 12),
+                      top: Math.max(8, g.endY - 48),
+                      paddingVertical: 4,
+                      paddingHorizontal: 10,
+                      borderRadius: 6,
+                      backgroundColor: tk.bgRaised,
+                      borderWidth: 1,
+                      borderColor: alpha(tk.lineAxis, 0.55),
+                      ...(tk.shadows ? shadow(tk) : null),
+                    }}
+                  >
+                    <T style={{ fontSize: 12.8 }}>{t("Thread added to your timeline.")}</T>
+                  </AddedPop>
+                );
+              })()}
           </View>
         </ScrollView>
 
