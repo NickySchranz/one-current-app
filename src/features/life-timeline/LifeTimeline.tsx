@@ -33,7 +33,7 @@ import { BranchLine } from "./BranchLine";
 import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
 import { TimelineHelp } from "@/features/timeline-help/TimelineHelp";
 import { WholenessIndicator } from "./WholenessIndicator";
-import { branchColor } from "@/visualization/branch-lines/style";
+import { branchColor, restingToday } from "@/visualization/branch-lines/style";
 import { mergePreviewPath } from "@/visualization/branch-lines/paths";
 import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
@@ -184,6 +184,88 @@ function MascotOptionsBubble({
           </G>
           <SvgText x={rowLeft + 28} y={row2C + 4.1} fontSize={11.5} fontWeight="600" fill={tk.ink}>
             {labels.dial}
+          </SvgText>
+        </G>
+      </AnimatedOptionG>
+    </G>
+  );
+}
+
+/**
+ * The single quiet pill shown at an already-answered thread: no offers, no
+ * prompts — just the sign that pressing again opens the panel. Same spring
+ * out of Pip's side as the offer bubble.
+ */
+function MascotOpenPill({
+  originX,
+  cy,
+  dir,
+  tailDy,
+  label,
+  onPress,
+  tk,
+  reducedMotion,
+}: {
+  originX: number;
+  cy: number;
+  dir: 1 | -1;
+  tailDy: number;
+  label: string;
+  onPress: () => void;
+  tk: ReturnType<typeof useTheme>;
+  reducedMotion: boolean;
+}) {
+  const p = useSharedValue(reducedMotion ? 1 : 0);
+  useEffect(() => {
+    if (reducedMotion) {
+      p.value = 1;
+      return;
+    }
+    p.value = 0;
+    p.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.back(1.6)) });
+  }, [p, reducedMotion]);
+  const animatedProps = useAnimatedProps(() => ({
+    opacity: Math.min(1, Math.max(0, p.value * 1.5)),
+    scale: 0.4 + 0.6 * p.value,
+  }));
+  const W = 78;
+  const H = 27;
+  const left = dir === 1 ? 8 : -8 - W;
+  const stroke = alpha(tk.lineAxis, 0.9);
+  const eye = {
+    stroke: tk.accent,
+    strokeWidth: 1.9,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    fill: "none" as const,
+  };
+  return (
+    <G x={originX} y={cy}>
+      <AnimatedOptionG animatedProps={animatedProps}>
+        <Path
+          d={`M 0 ${tailDy} L ${dir * 10.5} -5 L ${dir * 10.5} 6 Z`}
+          fill={alpha(tk.bgRaised, 0.97)}
+          stroke={stroke}
+          strokeWidth={1}
+        />
+        <G onPress={onPress}>
+          <Rect x={left - 8} y={-H / 2 - 6} width={W + 16} height={H + 12} fill="transparent" />
+          <Rect
+            x={left}
+            y={-H / 2}
+            width={W}
+            height={H}
+            rx={H / 2}
+            fill={alpha(tk.bgRaised, 0.97)}
+            stroke={stroke}
+            strokeWidth={1}
+          />
+          <G x={left + 9} y={-7.5} scale={15 / 24}>
+            <Path d="M3 12 C6.5 6.8, 17.5 6.6, 21 12 C17.5 17.3, 6.5 17.4, 3 12 Z" {...eye} />
+            <Circle cx={12} cy={12} r={2.6} {...eye} />
+          </G>
+          <SvgText x={left + 28} y={4.1} fontSize={11.5} fontWeight="600" fill={tk.ink}>
+            {label}
           </SvgText>
         </G>
       </AnimatedOptionG>
@@ -693,6 +775,7 @@ export function LifeTimeline() {
     language,
     heldBranchId,
     burn?.branchId ?? null,
+    layout.mainY,
   );
 
   // Keep reaction ref current so effects below can call it
@@ -1157,19 +1240,39 @@ export function LifeTimeline() {
                   const originX = dir === 1 ? mascot.pos.x + spriteW + 5 : mascot.pos.x - 5;
                   // On his right the bubble's top row sits at his shoulder
                   // line — under his head, clear of the speech bubble above.
-                  // On his LEFT it drops below the line instead: that side is
-                  // where the thread's title lives, and the title stays
-                  // readable. Either way it lifts just enough for the strip.
+                  // On his LEFT it tucks just under the thread's line — the
+                  // title stays readable, but the bubble never strays far.
                   const desired =
                     dir === 1
                       ? mascot.pos.y + spriteH * 0.55
-                      : mascot.pos.y + spriteH + 10 + BUBBLE_PAD + ROW_H / 2;
+                      : mascot.pos.y + PX * 10 + 4 + BUBBLE_PAD + ROW_H / 2;
                   const maxCy =
                     layout.height - 26 - (ROW_H * 1.5 + ROW_GAP + BUBBLE_PAD);
                   const cy = Math.max(20, Math.min(desired, maxCy));
                   // The tail aims back at Pip's middle (capped to stay a beak).
                   const pipMidY = mascot.pos.y + spriteH / 2;
                   const tailDy = Math.max(-12, Math.min(12, pipMidY - cy));
+                  // An answered thread gets no offers — only the quiet sign
+                  // that pressing again opens its panel.
+                  const answered = decidedToday(b, now) || restingToday(b, now);
+                  if (answered) {
+                    return (
+                      <MascotOpenPill
+                        key={`open-${optId}`}
+                        originX={originX}
+                        cy={cy}
+                        dir={dir}
+                        tailDy={tailDy}
+                        label={t("Open")}
+                        onPress={() => {
+                          setArmedBranchId(null);
+                          setOperation({ kind: "quick-touch", branchId: optId });
+                        }}
+                        tk={tk}
+                        reducedMotion={reducedMotion}
+                      />
+                    );
+                  }
                   const open = (dialOnly: boolean) => {
                     setArmedBranchId(null);
                     setOperation(

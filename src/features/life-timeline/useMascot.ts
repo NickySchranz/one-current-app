@@ -50,6 +50,10 @@ type Phrases = {
   note: string[];
   greet: string[];
   focus: string[];
+  /** Arriving at a thread the user already answered today — pure praise. */
+  handled: string[];
+  /** Every open thread answered: Pip chills at Now and says these. */
+  allDone: string[];
   attack: string[];
   attackCalm: string[];
   action_loud: string;
@@ -72,6 +76,8 @@ const EN: Phrases = {
   note:       ["Got it. Witnessed, boss.", "Recorded — nothing gets lost on my watch.", "I heard that. Logged.", "Got it, boss. Keep going."],
   greet:      ["I got it, boss! Working on these with you.", "Don't worry — I'm keeping an eye on everything.", "Hey boss! Your threads are in good hands.", "On the job! I got these timelines."],
   focus:      ["On it, boss!", "Right, I see this one.", "Got you!", "Let's look at this."],
+  handled:    ["This one's answered, boss. Nice.", "Already handled this one. That was you.", "This thread got what it needed today.", "Answered and resting. Good work, boss."],
+  allDone:    ["Every thread answered. Enjoy the quiet, boss.", "All handled today. That was you.", "Nothing pulling right now. We handled it.", "Whole current today, boss. I'm just chilling."],
   action_loud:       "This one's LOUD, boss. Give it an answer?",
   action_ready:      "Boss, this one's ready to come home!",
   action_waiting:    "Still waiting on this one…",
@@ -94,6 +100,8 @@ const ES: Phrases = {
   note:       ["Anotado. Testigo de ello.", "Registrado — nada se pierde aquí.", "Te escucho. Guardado.", "Listo, jefe. Sigue adelante."],
   greet:      ["¡Yo me encargo, jefe! Trabajando contigo en esto.", "No te preocupes — tengo el ojo en todo.", "¡Oye, jefe! Tus hilos están en buenas manos.", "¡En ello! Me ocupo de estos hilos."],
   focus:      ["¡Aquí estoy, jefe!", "Claro, a ver este.", "¡Te tengo!", "Veamos esto juntos."],
+  handled:    ["Este ya está respondido, jefe. Bien.", "Este ya lo manejaste hoy. Eso fue todo tuyo.", "Este hilo ya recibió lo suyo hoy.", "Respondido y en calma. Buen trabajo, jefe."],
+  allDone:    ["Todos los hilos respondidos. Disfruta la calma, jefe.", "Todo manejado hoy. Eso fuiste tú.", "Nada jala ahora mismo. Lo manejamos.", "Corriente entera hoy, jefe. Aquí descansando."],
   action_loud:       "¡Este hilo está FUERTE, jefe! ¿Lo resolvemos?",
   action_ready:      "¡Jefe, este ya está listo para cerrar!",
   action_waiting:    "Todavía esperando por este…",
@@ -114,6 +122,8 @@ const ES_CO: Phrases = {
   born:       ["¿Nuevo hilo? En eso estoy, parce.", "Anotado. Le tengo el ojo encima.", "Nombrado — eso ya es el primer paso.", "Lo veo. No lo pierdo de vista.", "Te cubro en este, parcero."],
   greet:      ["¡Yo me encargo, parce! Trabajando contigo.", "No te preocupes — tengo el ojo en todo.", "¡Oye, parce! Tus hilos están en buenas manos.", "¡En ello! Me ocupo de estos hilos."],
   focus:      ["¡Aquí estoy, parce!", "Claro, a ver este.", "¡Te tengo, parcero!", "Veamos esto juntos."],
+  handled:    ["Este ya está respondido, parce. Bien.", "Este ya lo manejaste hoy. Todo tuyo.", "Este hilo ya recibió lo suyo hoy.", "Respondido y en calma. Buen trabajo, parce."],
+  allDone:    ["Todos los hilos respondidos. Disfruta la calma, parce.", "Todo manejado hoy. Eso fuiste tú.", "Nada jala ahora, parcero. Lo manejamos.", "Corriente entera hoy, parce. Sin afán."],
   action_loud:       "¡Este hilo está TENAZ, parce! ¿Lo resolvemos?",
   action_default:    "¿Cómo va este, parce?",
 };
@@ -206,8 +216,12 @@ export function useMascot(
   heldBranchId: string | null = null,
   /** A thread mid-destruction (burning): patrol never lands on it. */
   avoidBranchId: string | null = null,
+  /** The main line's y — where Pip chills when every thread is answered. */
+  nowY = 0,
 ): MascotState {
   const lang = getLang(language);
+  const langRef = useRef(lang);
+  langRef.current = lang;
   // Stable refs for latest values
   const branchesRef = useRef(branches);
   branchesRef.current = branches;
@@ -215,6 +229,10 @@ export function useMascot(
   geometriesRef.current = geometries;
   const nowXRef = useRef(nowX);
   nowXRef.current = nowX;
+  const nowYRef = useRef(nowY);
+  nowYRef.current = nowY;
+  // True while every open thread is answered and Pip rests at the Now point.
+  const chillingRef = useRef(false);
   const onSelectRef = useRef(onSelectBranch);
   onSelectRef.current = onSelectBranch;
 
@@ -380,7 +398,19 @@ export function useMascot(
   useEffect(() => {
     if (viewingIntegratedRef.current) return;
     const id = inspectedId.current;
-    if (!id) return;
+    if (!id) {
+      // Chilling at Now: the Now point pans with the timeline, and so does he.
+      if (chillingRef.current && phase.current !== 'jumping') {
+        const tx = nowXRef.current - PX * 12 - 10;
+        const ty = nowYRef.current - PX * 10;
+        const cur = posRef.current;
+        if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
+          posRef.current = { x: tx, y: ty };
+          setPos({ x: tx, y: ty });
+        }
+      }
+      return;
+    }
 
     // Never track closed/merged branches — they live in the past. A DELETED
     // branch (burned away) must be escaped the same way, or Pip freezes at a
@@ -490,7 +520,46 @@ export function useMascot(
       const s = scoreBranch(b, g, nX, lastVisited.current);
       if (s > bestScore) { bestScore = s; best = b; }
     }
-    if (!best || bestScore === -Infinity) return;
+    if (!best || bestScore === -Infinity) {
+      // Every open thread has its answer for today: Pip retires to the Now
+      // point and, every so often, says how well it all went — until a new
+      // (or reopened) thread gives the patrol somewhere to go again.
+      chillingRef.current = true;
+      inspectedId.current = null;
+      setInspectedIdState(null);
+      setPendingIdState(null);
+      setArrivedIdState(null);
+      const tx = nX - PX * 12 - 10;
+      const ty = nowYRef.current - PX * 10;
+      const say = () => {
+        setBubbleText(randomFrom(langRef.current.allDone));
+        fadeBubble(1, 250);
+        timerRef.current = setTimeout(() => {
+          fadeBubble(0, 300);
+          timerRef.current = setTimeout(() => {
+            phase.current = 'idle';
+            scheduleJump(12000 + Math.random() * 8000);
+          }, 350);
+        }, 2600);
+      };
+      const cur = posRef.current;
+      if (Math.hypot(tx - cur.x, ty - cur.y) > 8) {
+        phase.current = 'jumping';
+        jumpDestRef.current = null;
+        setFrame('RUN_A');
+        runWaypoints(makeZigWaypoints(cur.x, cur.y, tx, ty, 2, 24), () => {
+          phase.current = 'idle';
+          setFrame('IDLE_A');
+          say();
+        }, 0.18);
+      } else {
+        phase.current = 'idle';
+        setFrame('IDLE_A');
+        say();
+      }
+      return;
+    }
+    chillingRef.current = false;
     const destGeo = geoMap.get(best.id)!;
 
     const toX = destGeo.endX + 10;
@@ -576,6 +645,7 @@ export function useMascot(
     }
 
     clearTimer(); cancelRaf();
+    chillingRef.current = false;
     inspectedId.current = branchId;
     setInspectedIdState(branchId);
     setArrivedIdState(null);
@@ -597,7 +667,11 @@ export function useMascot(
       setFrame('INSPECT_A');
       phase.current = 'inspecting';
       setArrivedIdState(branchId);
-      setBubbleText(randomFrom(lang.focus));
+      // A thread already answered today gets praise, not a prompt.
+      const focused = branchesRef.current.find(x => x.id === branchId);
+      const answered =
+        focused && (decidedToday(focused, new Date()) || restingToday(focused, new Date()));
+      setBubbleText(randomFrom(answered ? lang.handled : lang.focus));
       fadeBubble(1, 150);
       timerRef.current = setTimeout(() => {
         fadeBubble(0, 200);
