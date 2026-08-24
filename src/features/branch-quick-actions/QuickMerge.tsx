@@ -23,7 +23,7 @@ import {
   IconPath,
   type IconProps,
 } from "@/ui/icons";
-import { StepFrame, StepTransition, useFocusStep } from "./QuickFlow";
+import { StepFrame, StepTransition } from "./QuickFlow";
 
 type Props = { branchId: string };
 
@@ -88,9 +88,6 @@ export function QuickMerge({ branchId }: Props) {
   const [workHome, setWorkHome] = useState("");
   const [firstTask, setFirstTask] = useState("");
   const [busy, setBusy] = useState(false);
-
-  // Every step of both sub-paths is a typing step; the choice screen is not.
-  useFocusStep(path !== "choice");
 
   if (!branch) return null;
 

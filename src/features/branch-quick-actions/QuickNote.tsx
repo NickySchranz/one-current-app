@@ -11,7 +11,7 @@ import {
   T,
   useInTray,
 } from "@/ui/primitives";
-import { StepFrame, useFocusStep } from "./QuickFlow";
+import { StepFrame } from "./QuickFlow";
 
 type Props = { branchId: string };
 
@@ -26,9 +26,6 @@ export function QuickNote({ branchId }: Props) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-
-  // One typing step: on phones the tray rides at the top, above the keyboard.
-  useFocusStep(!done);
 
   if (!branch) return null;
 

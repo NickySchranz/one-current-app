@@ -15,7 +15,7 @@ import {
   useInTray,
 } from "@/ui/primitives";
 import { IconClock } from "@/ui/icons";
-import { StepFrame, StepTransition, useFocusStep } from "./QuickFlow";
+import { StepFrame, StepTransition } from "./QuickFlow";
 
 type Props = { branchId: string };
 
@@ -42,9 +42,6 @@ export function QuickAct({ branchId }: Props) {
   const [time, setTime] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-
-  // Step 1 is typing; step 2 only if "Choose a time" opens its input.
-  useFocusStep(!done && (stage === 0 || when === "Choose a time"));
 
   if (!branch) return null;
 

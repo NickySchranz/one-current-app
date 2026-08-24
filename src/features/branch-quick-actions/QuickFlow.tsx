@@ -7,7 +7,6 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { useAppStore } from "@/stores/app-store";
-import { useLayoutStore } from "@/stores/layout-store";
 import { useT } from "@/i18n/i18n";
 import { Button, Prompt, T, rowStyles } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
@@ -112,13 +111,3 @@ export function StepTransition({
   return <Animated.View style={anim}>{children}</Animated.View>;
 }
 
-/**
- * Declares "this step is for typing". On narrow screens the operation tray
- * then anchors to the top of the screen, where no keyboard can reach it.
- */
-export function useFocusStep(active: boolean) {
-  useEffect(() => {
-    useLayoutStore.getState().setFocusStep(active);
-    return () => useLayoutStore.getState().setFocusStep(false);
-  }, [active]);
-}
