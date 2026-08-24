@@ -192,6 +192,14 @@ export function useMascot(
   patrolEnabled: boolean,
   viewingIntegrated: boolean,
   language: string,
+  /**
+   * The thread the user is focused on (armed for a bonk, or the one an open
+   * panel concerns). While set, Pip runs to it, stays at it, and never
+   * patrols away — until the hold is released by another interaction.
+   */
+  heldBranchId: string | null = null,
+  /** A thread mid-destruction (burning): patrol never lands on it. */
+  avoidBranchId: string | null = null,
 ): MascotState {
   const lang = getLang(language);
   // Stable refs for latest values
@@ -209,6 +217,10 @@ export function useMascot(
   const pendingPatrol = useRef(false); // set when patrol is blocked mid-cycle
   const viewingIntegratedRef = useRef(viewingIntegrated);
   viewingIntegratedRef.current = viewingIntegrated;
+  const heldRef = useRef(heldBranchId);
+  heldRef.current = heldBranchId;
+  const avoidRef = useRef(avoidBranchId);
+  avoidRef.current = avoidBranchId;
 
   const lastVisited = useRef(new Map<string, number>());
   const phase = useRef<'idle'|'jumping'|'landing'|'inspecting'|'talking'|'reacting'>('idle');
@@ -255,6 +267,18 @@ export function useMascot(
   }, []);
 
   const jumpRef = useRef<() => void>(() => {});
+  const focusBranchRef = useRef<(id: string) => void>(() => {});
+
+  // The only door back to patrol. While the user holds a thread (or a panel
+  // is open, or they browse the past) the jump is parked, not scheduled —
+  // the hold-release / panel-close effects reopen the door.
+  const scheduleJump = useCallback((delay: number) => {
+    if (heldRef.current || !patrolEnabledRef.current || viewingIntegratedRef.current) {
+      pendingPatrol.current = true;
+      return;
+    }
+    timerRef.current = setTimeout(() => jumpRef.current(), delay);
+  }, []);
 
   // ── Waypoint runner ──
   // Runs Pip through an array of {x,y} waypoints one segment at a time.
@@ -345,15 +369,16 @@ export function useMascot(
     const id = inspectedId.current;
     if (!id) return;
 
-    // Never track position of closed/merged branches — they live in the past.
-    // If Pip ended up on one (e.g. it was merged while he sat on it), escape.
+    // Never track closed/merged branches — they live in the past. A DELETED
+    // branch (burned away) must be escaped the same way, or Pip freezes at a
+    // dead spot with no patrol timer ever coming.
     const branch = branchesRef.current.find(b => b.id === id);
-    if (branch && isClosed(branch)) {
-      if (!patrolEnabledRef.current) return; // panel open — stay put till closed
+    if (!branch || isClosed(branch)) {
+      if (heldRef.current === id) return; // stale hold — the caller clears it
       inspectedId.current = null;
       setInspectedIdState(null);
       clearTimer(); cancelRaf();
-      timerRef.current = setTimeout(() => jumpRef.current(), 400);
+      scheduleJump(400); // parks as pendingPatrol when a panel is open
       return;
     }
 
@@ -413,17 +438,12 @@ export function useMascot(
           phase.current = 'idle';
           setFrame('IDLE_A');
           lastVisited.current.set(branchId, Date.now());
-          if (patrolEnabledRef.current && !viewingIntegratedRef.current) {
-            timerRef.current = setTimeout(() => jumpRef.current(), 2500 + Math.random() * 2000);
-          } else {
-            // Panel open or user is viewing past — stay put, resume when back to today
-            pendingPatrol.current = true;
-          }
+          scheduleJump(2500 + Math.random() * 2000);
         }, 350);
       }
     };
     tick(0);
-  }, [fadeBubble]);
+  }, [fadeBubble, scheduleJump]);
 
   // ── Landing ──
   const onLanded = useCallback((branchId: string) => {
@@ -443,6 +463,8 @@ export function useMascot(
 
   // ── Jump ──
   const jumpToNext = useCallback(() => {
+    // A held thread pins him — a stale timer must never pull him off it.
+    if (heldRef.current) { pendingPatrol.current = true; return; }
     const bs = branchesRef.current;
     const gs = geometriesRef.current;
     const nX = nowXRef.current;
@@ -451,6 +473,7 @@ export function useMascot(
     let best: PsychologicalBranch | null = null;
     let bestScore = -Infinity;
     for (const b of bs) {
+      if (b.id === avoidRef.current) continue; // burning line — never land on it
       const g = geoMap.get(b.id);
       if (!g) continue;
       const s = scoreBranch(b, g, nX, lastVisited.current);
@@ -507,11 +530,11 @@ export function useMascot(
         timerRef.current = setTimeout(() => {
           phase.current = 'idle';
           setFrame('IDLE_A');
-          timerRef.current = setTimeout(() => jumpRef.current(), 1500);
+          scheduleJump(1500);
         }, 350);
       }, 2800);
     }, 120);
-  }, [fadeBubble]);
+  }, [fadeBubble, scheduleJump]);
 
   // ── Idle bob ──
   useEffect(() => {
@@ -566,16 +589,13 @@ export function useMascot(
         timerRef.current = setTimeout(() => {
           phase.current = 'idle';
           setFrame('IDLE_A');
-          // Resume patrol after user focus — don't stay frozen on the branch
-          if (patrolEnabledRef.current && !viewingIntegratedRef.current) {
-            timerRef.current = setTimeout(() => jumpRef.current(), 2000 + Math.random() * 1500);
-          } else {
-            pendingPatrol.current = true;
-          }
+          // Resume patrol after a passing focus; a held thread keeps him here.
+          scheduleJump(2000 + Math.random() * 1500);
         }, 350);
       }, 1800);
     }, 0.20);
-  }, [fadeBubble, runWaypoints, lang]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fadeBubble, runWaypoints, lang, scheduleJump]); // eslint-disable-line react-hooks/exhaustive-deps
+  focusBranchRef.current = focusBranch;
 
   // ── Bootstrap ──
   const hasGreeted = useRef(false);
@@ -623,12 +643,34 @@ export function useMascot(
 
   // Resume patrol when the panel closes (patrolEnabled flips true)
   useEffect(() => {
-    if (!patrolEnabled) return;
-    if (pendingPatrol.current && phase.current === 'idle') {
+    if (!patrolEnabled || heldRef.current) return;
+    if (pendingPatrol.current && (phase.current === 'idle' || phase.current === 'inspecting')) {
       pendingPatrol.current = false;
       timerRef.current = setTimeout(() => jumpRef.current(), 1200);
     }
   }, [patrolEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The user's hold: run to the held thread and stay planted at it; when the
+  // hold releases (panel closed, another interaction), rejoin the patrol.
+  const prevHeld = useRef<string | null>(heldBranchId);
+  useEffect(() => {
+    const prev = prevHeld.current;
+    prevHeld.current = heldBranchId;
+    if (heldBranchId) {
+      const b = branchesRef.current.find(x => x.id === heldBranchId);
+      if (b && !isClosed(b) && !viewingIntegratedRef.current) {
+        focusBranchRef.current(heldBranchId);
+      }
+      return;
+    }
+    if (prev === null) return; // nothing was released — leave timers alone
+    if (phase.current === 'idle' || phase.current === 'inspecting') {
+      clearTimer();
+      scheduleJump(1500);
+    } else {
+      pendingPatrol.current = true;
+    }
+  }, [heldBranchId, scheduleJump]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => { clearTimer(); cancelRaf(); }, []);
 

@@ -18,19 +18,50 @@ export function useKeyboard(): { inset: number; open: boolean } {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (Platform.OS === "web") {
-      if (typeof window === "undefined" || !window.visualViewport) return;
+      if (typeof window === "undefined") return;
       const vv = window.visualViewport;
-      const update = () => {
-        const covered = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      // `open` must flip the instant typing starts: iOS Safari's viewport
+      // events can lag behind the keyboard animation (or misfire in
+      // standalone/PWA mode), so an editable being focused counts as open
+      // on touch devices even before any viewport change is measured.
+      const coarse =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(pointer: coarse)").matches;
+      let covered = 0;
+      let editing = false;
+      const apply = () => {
         setInset(covered);
-        setOpen(covered > 0);
+        setOpen(covered > 0 || (coarse && editing));
       };
-      vv.addEventListener("resize", update);
-      vv.addEventListener("scroll", update);
-      update();
+      const measure = () => {
+        covered = vv
+          ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))
+          : 0;
+        apply();
+      };
+      const isEditable = (el: EventTarget | null) =>
+        el instanceof HTMLElement &&
+        (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
+      const onFocusIn = (e: FocusEvent) => {
+        if (isEditable(e.target)) {
+          editing = true;
+          apply();
+        }
+      };
+      const onFocusOut = () => {
+        editing = false;
+        apply();
+      };
+      vv?.addEventListener("resize", measure);
+      vv?.addEventListener("scroll", measure);
+      window.addEventListener("focusin", onFocusIn);
+      window.addEventListener("focusout", onFocusOut);
+      measure();
       return () => {
-        vv.removeEventListener("resize", update);
-        vv.removeEventListener("scroll", update);
+        vv?.removeEventListener("resize", measure);
+        vv?.removeEventListener("scroll", measure);
+        window.removeEventListener("focusin", onFocusIn);
+        window.removeEventListener("focusout", onFocusOut);
       };
     }
     if (Platform.OS === "ios") {

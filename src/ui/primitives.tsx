@@ -519,8 +519,16 @@ export function AppTextInput({
 }: TextInputProps) {
   const t = useTheme();
   const [focused, setFocused] = React.useState(false);
+  // These are personal reflections, never form data: no autofill bars, no
+  // contact/password suggestions, no iOS QuickType dialogs. Fields that DO
+  // want autofill (the login form) opt back in by passing autoComplete.
+  const noAutofill =
+    props.autoComplete == null
+      ? ({ autoComplete: "off", textContentType: "none", importantForAutofill: "no" } as const)
+      : null;
   return (
     <TextInput
+      {...noAutofill}
       {...props}
       multiline={multiline}
       placeholderTextColor={t.inkFaint}

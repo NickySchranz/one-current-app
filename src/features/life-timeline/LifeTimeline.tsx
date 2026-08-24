@@ -381,6 +381,19 @@ export function LifeTimeline() {
     setScrollLocked(false);
   };
 
+  // Web mice never fire the wrapper's onTouchEnd, so a plain click on a line
+  // (which arms the dial and locks scrolling) would leave the stage
+  // unscrollable. A pointerup that ends as a tap unlocks it.
+  useEffect(() => {
+    if (!scrollLocked || Platform.OS !== "web") return;
+    const up = () => {
+      if (modeRef.current === "idle") resetGesture();
+    };
+    window.addEventListener("pointerup", up, true);
+    return () => window.removeEventListener("pointerup", up, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resetGesture is stable in spirit
+  }, [scrollLocked]);
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -542,6 +555,24 @@ export function LifeTimeline() {
   // How split the present is: open lines pull apart, decisions gather them.
   const activeLines = visible.filter((b) => !isClosed(b));
 
+  // The thread the user is holding: the one an open panel concerns, the one
+  // armed for a bonk, or the draft being created. While held, its line stays
+  // lit and Pip stays planted at it — bonks land on it until the panel closes
+  // or another interaction moves the focus.
+  const heldBranchId =
+    focusedBranchId ??
+    armedBranchId ??
+    (operation.kind === "creating-branch" ? draftBranchId : null);
+
+  // An armed thread whose line vanished (burned away, closed) releases its
+  // hold; so does opening a panel about a different thread.
+  useEffect(() => {
+    if (!armedBranchId) return;
+    const b = branches.find((x) => x.id === armedBranchId);
+    if (!b || isClosed(b)) setArmedBranchId(null);
+    else if (focusedBranchId && focusedBranchId !== armedBranchId) setArmedBranchId(null);
+  }, [branches, armedBranchId, focusedBranchId]);
+
   // Mascot: visible always unless reduced motion (hides when no open branches).
   const showMascot = !reducedMotion;
   const mascot = useMascot(
@@ -553,35 +584,15 @@ export function LifeTimeline() {
     operation.kind === "idle",
     operation.kind === "viewing-integrated",
     language,
+    heldBranchId,
+    burn?.branchId ?? null,
   );
 
   // Keep reaction ref current so effects below can call it
   mascotReactionRef.current = mascot.showReaction;
 
-  // When user taps an active (open) branch, run mascot to it.
-  // Never run mascot to closed/merged branches — Pip lives in today.
-  const prevFocusedId = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (!showMascot || !mascot.visible) return;
-    if (focusedBranchId && focusedBranchId !== prevFocusedId.current) {
-      const b = allBranches.find((br) => br.id === focusedBranchId);
-      if (b && !isClosed(b)) {
-        mascot.focusBranch(focusedBranchId);
-      }
-    }
-    prevFocusedId.current = focusedBranchId;
-  }, [focusedBranchId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // When the "creating-branch" form opens, run mascot to the optimistic draft line.
-  // If creation is cancelled (draftBranchId clears without born), mascot resumes patrol.
-  const prevDraftId = useRef<string | null>(null);
-  useEffect(() => {
-    if (!showMascot || !mascot.visible) return;
-    if (draftBranchId && draftBranchId !== prevDraftId.current) {
-      mascot.focusBranch(draftBranchId);
-    }
-    prevDraftId.current = draftBranchId;
-  }, [draftBranchId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Running Pip to the held thread (op focus, armed bonk, or the draft being
+  // created) now lives inside useMascot's hold — no per-source effects here.
 
   // Fire mascot reaction on merge (reclaim event)
   const reclaimKey = reclaim?.key;
@@ -703,23 +714,19 @@ export function LifeTimeline() {
                 />
               )}
 
-              {/* axis ticks */}
+              {/* axis gridlines — their date labels live on the pinned strip
+                  at the stage bottom, so they never scroll out of view */}
               {ticks.map((tick) => {
                 const x = dateToX(tick.date, layout.window, layout.metrics.width);
                 return (
-                  <G key={tick.date}>
-                    <Line x1={x} y1={16} x2={x} y2={layout.height - 20} stroke={tk.lineAxis} />
-                    <SvgText
-                      x={x + 4}
-                      y={layout.height - 8}
-                      fontSize={11}
-                      fontFamily={tk.fontBody}
-                      fontWeight={tick.major ? "600" : "400"}
-                      fill={tick.major ? tk.inkSoft : tk.inkFaint}
-                    >
-                      {tick.label}
-                    </SvgText>
-                  </G>
+                  <Line
+                    key={tick.date}
+                    x1={x}
+                    y1={16}
+                    x2={x}
+                    y2={layout.height - 4}
+                    stroke={tk.lineAxis}
+                  />
                 );
               })}
 
@@ -829,7 +836,8 @@ export function LifeTimeline() {
                   operation.kind !== "viewing-integrated";
                 const mascotFocusId = mascot.pendingBranchId ?? mascot.inspectedBranchId;
                 // User-focused thread always stays at full opacity regardless of mascot position
-                const isUserFocused = branch.id === focusedBranchId;
+                const isUserFocused =
+                  branch.id === focusedBranchId || branch.id === armedBranchId;
                 const lineOpacity = isUserFocused
                   ? 1
                   : mascotActive && mascotFocusId !== null && branch.id !== mascotFocusId
@@ -865,7 +873,7 @@ export function LifeTimeline() {
                     }
                     focused={false}
                     emphasizedId={top?.id}
-                    highlighted={branch.id === focusedBranchId || mascotHighlight}
+                    highlighted={isUserFocused || mascotHighlight}
                     dimmed={!!focusedBranchId && branch.id !== focusedBranchId}
                     born={!reducedMotion && born?.branchId === branch.id}
                     reducedMotion={reducedMotion}
@@ -1048,7 +1056,45 @@ export function LifeTimeline() {
                 );
               })()}
           </View>
+          {/* breathing room: lets the lowest lane be pulled up clear of the
+              pinned date strip and the bonk bar */}
+          <View style={{ height: 84 }} />
         </ScrollView>
+
+        {/* the dates, pinned: lanes scroll behind them, they never move */}
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 22,
+            zIndex: 5,
+            backgroundColor: alpha(tk.bg, 0.88),
+          }}
+        >
+          {ticks.map((tick) => {
+            const x = dateToX(tick.date, layout.window, layout.metrics.width);
+            if (x < -40 || x > size.width + 8) return null;
+            return (
+              <T
+                key={tick.date}
+                style={{
+                  position: "absolute",
+                  left: x + 4,
+                  bottom: 4,
+                  fontSize: 11,
+                  lineHeight: 13,
+                  fontWeight: tick.major ? "600" : "400",
+                  color: tick.major ? tk.inkSoft : tk.inkFaint,
+                }}
+              >
+                {tick.label}
+              </T>
+            );
+          })}
+        </View>
 
         {/* One round +, unmistakable and wordless, floating on the water. */}
         {showFab && (
