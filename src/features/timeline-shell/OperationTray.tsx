@@ -185,7 +185,17 @@ export function OperationTray() {
     if (depth === "none") useLayoutStore.getState().clearTray();
   }, [depth, operation]);
   useEffect(() => () => useLayoutStore.getState().clearTray(), []);
-  const reportHeight = (h: number) => useLayoutStore.getState().setTray(h, side);
+  // The timeline scrolls clear of everything covering its bottom: the sheet
+  // itself plus the keyboard it rides on.
+  const lastHeightRef = useRef(0);
+  const reportHeight = (h: number) => {
+    lastHeightRef.current = h;
+    useLayoutStore.getState().setTray(h + (side ? 0 : kbInset), side);
+  };
+  useEffect(() => {
+    if (depth !== "none" && lastHeightRef.current > 0) reportHeight(lastHeightRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-report on keyboard moves
+  }, [kbInset, side]);
 
   // Escape sets the operation down; the timeline is still right there.
   // While typing, Escape only leaves the field — it never discards the tray.

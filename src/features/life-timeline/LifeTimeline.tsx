@@ -338,13 +338,16 @@ export function LifeTimeline() {
   // follows the sheet as it slides in.
   useEffect(() => {
     if (scrollH <= 0) return;
-    if (!focusedBranchId && bottomInset <= 0) return;
+    // The draft being created anchors the view like a focused thread does,
+    // so the new line (and Pip at it) stays in sight through every step.
+    const anchorId = focusedBranchId ?? soloDraftId;
+    if (!anchorId && bottomInset <= 0) return;
     const usable = Math.max(130, scrollH - bottomInset);
     const maxScroll = Math.max(0, layout.height + Math.round(bottomInset) - scrollH);
     let anchor = layout.mainY;
     let scrollCap = maxScroll;
-    if (focusedBranchId) {
-      const g = layout.geometries.find((geo) => geo.branchId === focusedBranchId);
+    if (anchorId) {
+      const g = layout.geometries.find((geo) => geo.branchId === anchorId);
       if (g && g.inWindow) {
         anchor = (g.laneY + layout.mainY) / 2;
         // A focused lane comes to rest below the pinned chip, never underneath.
@@ -353,7 +356,7 @@ export function LifeTimeline() {
     }
     const y = Math.max(0, Math.min(scrollCap, anchor - usable / 2));
     scrollRef.current?.scrollTo({ y, animated: false });
-  }, [focusedBranchId, layout, bottomInset, topInset, scrollH]);
+  }, [focusedBranchId, soloDraftId, layout, bottomInset, topInset, scrollH]);
 
   // ---- gestures: tap / horizontal time-pan / vertical loudness dial --------
 
@@ -657,7 +660,10 @@ export function LifeTimeline() {
     transform: [{ translateX: chipX.value }, { translateY: chipY.value }],
   }));
 
-  const svgHeight = layout.height + Math.round(bottomInset);
+  // +84: breathing room below the lanes, so the lowest one can be pulled up
+  // clear of the pinned date strip and the bonk bar. Inside the canvas (not a
+  // spacer view) so the day dividers run through it.
+  const svgHeight = layout.height + Math.round(bottomInset) + 84;
   const previewBranch = preview ? byId.get(preview.branchId) : undefined;
 
   return (
@@ -708,25 +714,19 @@ export function LifeTimeline() {
                   x={todayX}
                   y={0}
                   width={layout.nowX - todayX}
-                  height={layout.height}
+                  height={svgHeight}
                   fill={tk.accent}
                   opacity={0.05}
                 />
               )}
 
-              {/* axis gridlines — their date labels live on the pinned strip
-                  at the stage bottom, so they never scroll out of view */}
+              {/* axis gridlines — full canvas height, including the scroll
+                  headroom; their date labels live on the pinned strip at the
+                  stage bottom, so they never scroll out of view */}
               {ticks.map((tick) => {
                 const x = dateToX(tick.date, layout.window, layout.metrics.width);
                 return (
-                  <Line
-                    key={tick.date}
-                    x1={x}
-                    y1={16}
-                    x2={x}
-                    y2={layout.height - 4}
-                    stroke={tk.lineAxis}
-                  />
+                  <Line key={tick.date} x1={x} y1={0} x2={x} y2={svgHeight} stroke={tk.lineAxis} />
                 );
               })}
 
@@ -762,7 +762,7 @@ export function LifeTimeline() {
                     x={layout.nowX}
                     y={0}
                     width={Math.max(0, layout.fullWidth - layout.nowX)}
-                    height={layout.height}
+                    height={svgHeight}
                     fill={tk.inkFaint}
                     opacity={0.05}
                   />
@@ -1056,9 +1056,6 @@ export function LifeTimeline() {
                 );
               })()}
           </View>
-          {/* breathing room: lets the lowest lane be pulled up clear of the
-              pinned date strip and the bonk bar */}
-          <View style={{ height: 84 }} />
         </ScrollView>
 
         {/* the dates, pinned: lanes scroll behind them, they never move */}
@@ -1162,9 +1159,11 @@ export function LifeTimeline() {
               style={{
                 // Rests on the date strip (the one band threads never enter),
                 // on the right — stopping short of the + button's corner.
+                // Above the pinned strip (zIndex 5): the buttons stay tappable.
                 position: "absolute",
                 right: showFab ? 92 : 8,
                 bottom: 0,
+                zIndex: 10,
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 6,

@@ -497,6 +497,9 @@ export function useMascot(
       const cur = posRef.current;
       const wps = makeZigWaypoints(cur.x, cur.y, toX, toY, 3, 38);
       phase.current = 'jumping';
+      // From here he belongs to the destination: a press mid-run opens the
+      // thread he's heading to, never the (possibly deleted) one he left.
+      inspectedId.current = targetId;
       setFrame('RUN_A');
       runWaypoints(wps, () => {
         // Use live geometry in case timeline was panned during the run
@@ -675,7 +678,9 @@ export function useMascot(
   useEffect(() => () => { clearTimer(); cancelRaf(); }, []);
 
   const onPress = useCallback(() => {
-    if (inspectedId.current) onSelectRef.current(inspectedId.current);
+    const id = inspectedId.current;
+    // Never open a panel for a thread that no longer exists (just burned).
+    if (id && branchesRef.current.some(b => b.id === id)) onSelectRef.current(id);
   }, []);
 
   const visible = branches.some(b => !isClosed(b));
