@@ -42,3 +42,6 @@ yarn-error.*
 
 # GitHub Pages build
 dist-pages/
+
+# stray check screenshots (headless scripts run with cwd here)
+/*.png
