@@ -77,10 +77,11 @@ type Props = {
   /** While the loudness dial is being dragged: the level under the thumb. */
   loudnessPreview?: number;
   /** A press starts here; sliding up or down dials this thread's loudness. */
-  onDialTouchStart?: (e: GestureResponderEvent) => void;
-  onSelect: () => void;
-  onSelectMoment: (momentId: string) => void;
-  onSelectMergePoint: () => void;
+  dialEnabled?: boolean;
+  onDialTouchStart?: (branchId: string, e: GestureResponderEvent) => void;
+  onSelect: (branchId: string) => void;
+  onSelectMoment: (branchId: string, momentId: string) => void;
+  onSelectMergePoint: (branchId: string) => void;
   /** The main line's calm wave: this branch's fork/merge ends ride it. */
   wave?: WaveHandles | null;
   waveNowX?: number;
@@ -101,6 +102,7 @@ export const BranchLine = memo(function BranchLine({
   reducedMotion = false,
   nowMs,
   loudnessPreview,
+  dialEnabled = false,
   onDialTouchStart,
   onSelect,
   onSelectMoment,
@@ -115,6 +117,14 @@ export const BranchLine = memo(function BranchLine({
   const resting = restingToday(branch, now);
   // A decision was taken on this line today: it rests, marked with a quiet check.
   const acted = isOpen(branch) && decidedToday(branch, now);
+
+  // Local closures over the id-keyed stable handlers (recreated only when
+  // THIS branch renders — the parent's identity stays stable).
+  const select = () => onSelect(branch.id);
+  const dialTouch =
+    dialEnabled && onDialTouchStart
+      ? (e: GestureResponderEvent) => onDialTouchStart(branch.id, e)
+      : undefined;
 
   // The line slithers with its loudness — a wave travelling toward Now, wider
   // and faster the louder it is. Both ends stay anchored; a decision today
@@ -158,7 +168,7 @@ export const BranchLine = memo(function BranchLine({
       (wave
         ? calmWaveOffset(
             g.forkX,
-            wave.clock.value,
+            wave.tick.value,
             Math.min(1.35, wave.progressSV.value + wave.surgeSV.value),
             wave.progressSV.value,
             waveNowX,
@@ -172,7 +182,7 @@ export const BranchLine = memo(function BranchLine({
       (wave && g.endsOnMain
         ? calmWaveOffset(
             g.endX,
-            wave.clock.value,
+            wave.tick.value,
             Math.min(1.35, wave.progressSV.value + wave.surgeSV.value),
             wave.progressSV.value,
             waveNowX,
@@ -238,7 +248,7 @@ export const BranchLine = memo(function BranchLine({
       animatedProps={groupProps}
       accessible
       accessibilityLabel={describeBranch(branch, t)}
-      onPressIn={onDialTouchStart}
+      onPressIn={dialTouch}
     >
       {/* generous invisible hit area — the true geometry, never squiggled.
           react-native-svg on web only maps onPress→onClick, so the loudness
@@ -248,9 +258,9 @@ export const BranchLine = memo(function BranchLine({
         stroke="transparent"
         strokeWidth={22}
         fill="none"
-        onPress={onSelect}
-        {...(Platform.OS === "web" && onDialTouchStart
-          ? ({ onPointerDown: onDialTouchStart } as object)
+        onPress={select}
+        {...(Platform.OS === "web" && dialTouch
+          ? ({ onPointerDown: dialTouch } as object)
           : null)}
       />
 
@@ -305,7 +315,7 @@ export const BranchLine = memo(function BranchLine({
           fill={color}
           stroke={tk.bg}
           strokeWidth={1.5}
-          onPress={() => onSelectMoment(p.moment.id)}
+          onPress={() => onSelectMoment(branch.id, p.moment.id)}
         />
       ))}
 
@@ -321,7 +331,7 @@ export const BranchLine = memo(function BranchLine({
             color={color}
             loudness={loudness}
             reducedMotion={reducedMotion}
-            onPress={onSelect}
+            onPress={select}
           />
         ) : (
           <AnimatedCircle
@@ -330,7 +340,7 @@ export const BranchLine = memo(function BranchLine({
             cy={g.endY}
             r={acted ? 6.5 : emphasized ? 6 : 5}
             fill={color}
-            onPress={onSelect}
+            onPress={select}
           />
         ))}
 
@@ -370,7 +380,7 @@ export const BranchLine = memo(function BranchLine({
           stroke={color}
           strokeWidth={2.5}
           fill={tk.bg}
-          onPress={onSelectMergePoint}
+          onPress={() => onSelectMergePoint(branch.id)}
         />
       )}
 
@@ -402,7 +412,7 @@ export const BranchLine = memo(function BranchLine({
             fontWeight={focused ? "700" : "600"}
             fontFamily={tk.fontBody}
             fill={color}
-            onPress={onSelect}
+            onPress={select}
           >
             {labelText}
           </SvgText>

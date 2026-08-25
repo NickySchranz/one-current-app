@@ -181,13 +181,12 @@ export function CreationScreen() {
               />
               {showMascot && mascot.visible && (
                 <Mascot
-                  x={mascot.pos.x}
-                  y={mascot.pos.y}
+                  posX={mascot.posX}
+                  posY={mascot.posY}
                   frame={mascot.frame}
                   flip={mascot.flip}
                   mascotType={mascot.mascotType}
                   // He watches the line take shape, quietly — no speech here.
-                  bubbleOpacity={0}
                   bubbleText=""
                   showTapHint={false}
                   theme={tk}

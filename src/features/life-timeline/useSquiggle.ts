@@ -92,6 +92,24 @@ export function useBranchStrokes(opts: {
   );
   const total = pts.length > 0 ? pts[pts.length - 1].s : 0;
 
+  // For riding-without-trembling, only the attached ends ever move: freeze
+  // the middle of the path as a prebuilt string and rebuild just the ends.
+  const rideSplit = useMemo(() => {
+    if (pts.length === 0 || !riding) return null;
+    const startCut = attachStart ? WAVE_BLEND : -1;
+    const endCut = attachEnd ? total - WAVE_BLEND : Infinity;
+    const startIdx: number[] = [];
+    const endIdx: number[] = [];
+    let mid = "";
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      if (p.s <= startCut) startIdx.push(i);
+      else if (p.s >= endCut) endIdx.push(i);
+      else mid += `L${Math.round(p.x * 10) / 10} ${Math.round(p.y * 10) / 10}`;
+    }
+    return { startIdx, endIdx, mid };
+  }, [pts, riding, attachStart, attachEnd, total]);
+
   // Time in seconds, ticking on the UI thread while the slither is active.
   const clock = useSharedValue(0);
   useEffect(() => {
@@ -113,17 +131,37 @@ export function useBranchStrokes(opts: {
   // The squiggled path, built once per frame and shared by all three strokes.
   // Two motions can compose: the loudness slither along the whole line, and
   // the main wave carrying the attached end(s) in the timeline's rhythm.
+  // The slither advances at 30Hz too — dependents only fire on change.
+  const tick = useDerivedValue(() => Math.round(clock.value * 30) / 30, []);
   const d = useDerivedValue(() => {
     if (pts.length === 0) return basePath;
     const ampP = wave ? Math.min(1.35, wave.progressSV.value + wave.surgeSV.value) : 0;
     const waveOn = riding && ampP > 0.01;
     if (!trembling && !waveOn) return basePath;
     const freqP = wave ? wave.progressSV.value : 0;
-    const waveT = wave ? wave.clock.value : 0;
+    const waveT = wave ? wave.tick.value : 0;
     const amp = trembling ? lerpTable(AMP, level) : 0;
     const k = (2 * Math.PI) / lerpTable(LAMBDA, level);
     const omega = 2 * Math.PI * lerpTable(SPEED, level);
-    const t = clock.value;
+    const t = tick.value;
+    if (!trembling && waveOn && rideSplit) {
+      // Fast path: bend only the attached ends around the frozen middle.
+      let out = "";
+      for (let j = 0; j < rideSplit.startIdx.length; j++) {
+        const p = pts[rideSplit.startIdx[j]];
+        const w = Math.max(0, 1 - p.s / WAVE_BLEND);
+        const y = p.y - w * calmWaveOffset(p.x, waveT, ampP, freqP, waveNowX, wavePeriodMs);
+        out += `${out ? "L" : "M"}${Math.round(p.x * 10) / 10} ${Math.round(y * 10) / 10}`;
+      }
+      out += out ? rideSplit.mid : "M" + rideSplit.mid.slice(1);
+      for (let j = 0; j < rideSplit.endIdx.length; j++) {
+        const p = pts[rideSplit.endIdx[j]];
+        const w = Math.max(0, 1 - (total - p.s) / WAVE_BLEND);
+        const y = p.y - w * calmWaveOffset(p.x, waveT, ampP, freqP, waveNowX, wavePeriodMs);
+        out += `L${Math.round(p.x * 10) / 10} ${Math.round(y * 10) / 10}`;
+      }
+      return out;
+    }
     let out = "";
     for (let i = 0; i < pts.length; i++) {
       const p = pts[i];
@@ -139,10 +177,10 @@ export function useBranchStrokes(opts: {
           y -= w * calmWaveOffset(p.x, waveT, ampP, freqP, waveNowX, wavePeriodMs);
         }
       }
-      out += `${out ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`;
+      out += `${out ? "L" : "M"}${Math.round(x * 10) / 10} ${Math.round(y * 10) / 10}`;
     }
     return out;
-  }, [trembling, riding, pts, level, basePath, total, attachStart, attachEnd, waveNowX, wavePeriodMs, wave]);
+  }, [trembling, riding, pts, level, basePath, total, attachStart, attachEnd, waveNowX, wavePeriodMs, wave, tick, rideSplit]);
 
   // Newborn draw-in: dash the full length, sweep the offset to zero.
   const drawing = born && !reducedMotion;
@@ -190,9 +228,12 @@ export function useBranchStrokes(opts: {
 
   const halo = useAnimatedProps<PathProps>(() => ({ d: d.value }), [d]);
 
+  // Sub-pixel dash motion doesn't need per-frame writes: quantize to 0.25px
+  // steps via a derived value, so the DOM only updates when a step lands.
+  const flowQ = useDerivedValue(() => Math.round(flowOffset.value * 4) / 4, []);
   const flow = useAnimatedProps<PathProps>(
-    () => ({ d: d.value, strokeDashoffset: flowOffset.value }),
-    [d],
+    () => ({ d: d.value, strokeDashoffset: flowQ.value }),
+    [d, flowQ],
   );
 
   return { line, halo, flow };
@@ -234,9 +275,11 @@ export function calmWaveOffset(
   return CALM_AMP * ampP * taper * Math.sin(k * x - omega * t);
 }
 
-/** The live handles every wave rider shares: one clock, one strength. */
+/** The live handles every wave rider shares: one 30Hz tick, one strength.
+ * The tick is quantized time — derived values only propagate on change, so
+ * every consumer keyed to it runs at most 30×/s, invisible on a slow wave. */
 export type WaveHandles = {
-  clock: SharedValue<number>;
+  tick: SharedValue<number>;
   progressSV: SharedValue<number>;
   surgeSV: SharedValue<number>;
 };
@@ -279,6 +322,8 @@ export function useCalmCurrent(opts: {
   /** ms per dash-flow cycle (the theme's mainFlowDuration itself). */
   dashDurationMs: number;
   reducedMotion: boolean;
+  /** Optional shared world clock (seconds); the hook runs its own if absent. */
+  worldClock?: SharedValue<number> | null;
   /** The theme's accent (the everyday current) and shimmer (the sacred one). */
   accentColor: string;
   shimmerColor: string;
@@ -294,6 +339,7 @@ export function useCalmCurrent(opts: {
     periodMs,
     dashDurationMs,
     reducedMotion,
+    worldClock = null,
     accentColor,
     shimmerColor,
     lineColor,
@@ -358,19 +404,22 @@ export function useCalmCurrent(opts: {
   // width on top of wherever progress stands — felt, not just seen.
   const surgeSV = useSharedValue(0);
 
+  // Quantized time: the whole wave system advances at 30Hz, not display rate.
+  const waveTick = useDerivedValue(() => Math.round(clock.value * 30) / 30, []);
+
   const d = useDerivedValue(() => {
     const ampP = Math.min(1.35, progressSV.value + surgeSV.value);
     if (ampP <= 0.01 || xs.length < 2) return `M 0 ${mainY} L ${nowX} ${mainY}`;
     const freqP = progressSV.value;
-    const t = clock.value;
+    const t = waveTick.value;
     let out = "";
     for (let i = 0; i < xs.length; i++) {
       const x = xs[i];
       const off = calmWaveOffset(x, t, ampP, freqP, nowX, periodMs);
-      out += `${out ? "L" : "M"}${x} ${(mainY - off).toFixed(2)}`;
+      out += `${out ? "L" : "M"}${x} ${Math.round((mainY - off) * 10) / 10}`;
     }
     return out;
-  }, [xs, mainY, nowX, periodMs]);
+  }, [xs, mainY, nowX, periodMs, waveTick]);
 
   // The flourish: on each new answer a bright streak sweeps the line into
   // Now. Offset 60 parks the dash just before the path; -(nowX+80) is past
@@ -476,11 +525,11 @@ export function useCalmCurrent(opts: {
   // The sacred glow breathes with the wave — never a flat sticker of light —
   // and every answer flashes gold along the whole line for a beat.
   const halo = useAnimatedProps<PathProps>(() => {
-    const breathe = 0.34 + 0.12 * Math.sin(((2 * Math.PI * 1000) / (periodMs * 1.4)) * clock.value);
+    const breathe = 0.34 + 0.12 * Math.sin(((2 * Math.PI * 1000) / (periodMs * 1.4)) * waveTick.value);
     return { d: d.value, opacity: Math.max(haloScale.value * breathe, flashSV.value) };
   }, [d, periodMs]);
   const haloOuter = useAnimatedProps<PathProps>(() => {
-    const breathe = 0.16 + 0.06 * Math.sin(((2 * Math.PI * 1000) / (periodMs * 1.4)) * clock.value + 1.2);
+    const breathe = 0.16 + 0.06 * Math.sin(((2 * Math.PI * 1000) / (periodMs * 1.4)) * waveTick.value + 1.2);
     return { d: d.value, opacity: Math.max(haloScale.value * breathe, flashSV.value * 0.45) };
   }, [d, periodMs]);
   // The solid line itself turns gilded at completion, and swells with each surge.
@@ -492,14 +541,16 @@ export function useCalmCurrent(opts: {
     }),
     [d, lineColor, sacredLineColor],
   );
-  // At completion the everyday current itself turns golden.
+  // At completion the everyday current itself turns golden. Dash motion is
+  // quantized to 0.25px steps so the DOM only hears about real movement.
+  const flowQ = useDerivedValue(() => Math.round(flowOffset.value * 4) / 4, []);
   const flow = useAnimatedProps<PathProps>(
     () => ({
       d: d.value,
-      strokeDashoffset: flowOffset.value,
+      strokeDashoffset: flowQ.value,
       stroke: interpolateColor(haloScale.value, [0, 1], [accentColor, shimmerColor]),
     }),
-    [d, accentColor, shimmerColor],
+    [d, flowQ, accentColor, shimmerColor],
   );
   const shimmer = useAnimatedProps<PathProps>(
     () => ({
@@ -521,8 +572,8 @@ export function useCalmCurrent(opts: {
     [d],
   );
   const wave = useMemo<WaveHandles>(
-    () => ({ clock, progressSV, surgeSV }),
-    [clock, progressSV, surgeSV],
+    () => ({ tick: waveTick, progressSV, surgeSV }),
+    [waveTick, progressSV, surgeSV],
   );
 
   return { halo, haloOuter, line, flow, shimmer, shimmerWide, wave };

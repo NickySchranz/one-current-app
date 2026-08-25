@@ -203,9 +203,14 @@ export function NowGlow({
     };
   }, [still, spec, stillOpacity, opacity, scale, ty]);
 
+  // Coarse steps (invisible at these sizes) so the glow writes to the DOM
+  // a handful of times a second instead of every frame.
+  const qO = useDerivedValue(() => Math.round(opacity.value * 200) / 200, []);
+  const qR = useDerivedValue(() => Math.round(14 * scale.value * 10) / 10, []);
+  const qY = useDerivedValue(() => Math.round(ty.value * 10) / 10, []);
   const props = useAnimatedProps(
-    () => ({ opacity: opacity.value, r: 14 * scale.value, cy: cy + ty.value }),
-    [cy],
+    () => ({ opacity: qO.value, r: qR.value, cy: cy + qY.value }),
+    [cy, qO, qR, qY],
   );
 
   return <AnimatedCircle animatedProps={props} cx={cx} cy={cy} r={14} fill={fill} />;
@@ -233,7 +238,10 @@ export function useDashFlow(
     );
     return () => cancelAnimation(sv);
   }, [active, from, to, durationMs, sv]);
-  return useAnimatedProps(() => ({ strokeDashoffset: sv.value }));
+  // Quantize to 0.25px steps: derived values propagate only on change, so
+  // the DOM hears about the dash a few times a second, not every frame.
+  const q = useDerivedValue(() => Math.round(sv.value * 4) / 4, []);
+  return useAnimatedProps(() => ({ strokeDashoffset: q.value }), [q]);
 }
 
 /** `.merge-preview-target`: a breathing ring at Now while a merge is considered. */
@@ -1063,6 +1071,7 @@ function BackdropParticle({
   moodSV,
   colors,
   durationMs,
+  tick,
 }: {
   spec: BackdropSpec;
   index: number;
@@ -1071,14 +1080,10 @@ function BackdropParticle({
   moodSV: SharedValue<number>;
   colors: [string, string];
   durationMs: number;
+  /** Shared 30Hz layer time (seconds) — one clock for the whole fleet. */
+  tick: SharedValue<number>;
 }) {
-  const q = useSharedValue(0);
-  useEffect(() => {
-    q.value = 0;
-    q.value = withRepeat(withTiming(1, { duration: durationMs, easing: Easing.linear }), -1, false);
-    return () => cancelAnimation(q);
-  }, [q, durationMs]);
-
+  const loopSec = durationMs / 1000;
   const x = seeded(index, 11) * width;
   const y = seeded(index, 12) * height;
   const sz = spec.size[0] + seeded(index, 13) * (spec.size[1] - spec.size[0]);
@@ -1093,7 +1098,7 @@ function BackdropParticle({
   const style = useAnimatedStyle(() => {
     const m = moodSV.value;
     const axis = clears ? 1 - m : m;
-    const tt = (q.value + phase) % 1;
+    const tt = (tick.value / loopSec + phase) % 1;
     // density: particles wake up one by one as the mood axis rises
     const gate = Math.max(0, Math.min(1, axis * count - index));
     const ceiling = op0 + (op1 - op0) * axis;
@@ -1156,6 +1161,7 @@ export function ThemeBackdrop({
   accent,
   inkFaint,
   reducedMotion,
+  worldClock = null,
 }: {
   theme: ThemeId;
   width: number;
@@ -1165,6 +1171,7 @@ export function ThemeBackdrop({
   accent: string;
   inkFaint: string;
   reducedMotion: boolean;
+  worldClock?: SharedValue<number> | null;
 }) {
   const spec = backdropFor(theme);
   const moodSV = useSharedValue(mood);
@@ -1172,6 +1179,21 @@ export function ThemeBackdrop({
     moodSV.value = withTiming(mood, { duration: 1200, easing: Easing.inOut(Easing.ease) });
     return () => cancelAnimation(moodSV);
   }, [mood, moodSV]);
+
+  // The shared world clock, quantized to 30Hz — one heartbeat for the fleet.
+  const ownClock = useSharedValue(0);
+  const clock = worldClock ?? ownClock;
+  useEffect(() => {
+    if (worldClock || reducedMotion) {
+      cancelAnimation(ownClock);
+      ownClock.value = 0;
+      return;
+    }
+    ownClock.value = 0;
+    ownClock.value = withRepeat(withTiming(3600, { duration: 3600_000, easing: Easing.linear }), -1, false);
+    return () => cancelAnimation(ownClock);
+  }, [worldClock, reducedMotion, ownClock]);
+  const tick = useDerivedValue(() => Math.round(clock.value * 30) / 30, []);
 
   // Loop duration follows the mood only in coarse steps, so loops rarely
   // restart; opacity/color glide continuously off the shared value.
@@ -1192,6 +1214,7 @@ export function ThemeBackdrop({
           moodSV={moodSV}
           colors={colors}
           durationMs={Math.round((7000 + seeded(i, 16) * 5000) * speedMul)}
+          tick={tick}
         />
       ))}
     </>
@@ -1463,10 +1486,11 @@ function SceneFrond({
   clock: SharedValue<number>;
   still: boolean;
 }) {
-  const bend = useDerivedValue(
-    () => (still ? sway * 0.35 : sway * Math.sin(clock.value * speed + phase)),
-    [still, sway, speed, phase],
-  );
+  const bend = useDerivedValue(() => {
+    if (still) return sway * 0.35;
+    const t = Math.round(clock.value * 30) / 30; // 30Hz is plenty for a sway
+    return Math.round(sway * Math.sin(t * speed + phase) * 10) / 10;
+  }, [still, sway, speed, phase]);
   const blade = useAnimatedProps(() => {
     const b = bend.value;
     return { d: `M ${x} ${baseY} Q ${x + b * 0.35} ${baseY - h * 0.55} ${x + b} ${baseY - h}` };
@@ -1520,10 +1544,12 @@ function SceneRay({
   clock: SharedValue<number>;
   still: boolean;
 }) {
-  const props = useAnimatedProps(() => {
-    const o = still ? 0.06 : 0.04 + 0.05 * (0.5 + 0.5 * Math.sin(clock.value * 0.25 + phase));
-    return { opacity: o };
+  const o = useDerivedValue(() => {
+    if (still) return 0.06;
+    const t = Math.round(clock.value * 10) / 10; // rays swell over seconds
+    return Math.round((0.04 + 0.05 * (0.5 + 0.5 * Math.sin(t * 0.25 + phase))) * 500) / 500;
   }, [still, phase]);
+  const props = useAnimatedProps(() => ({ opacity: o.value }), [o]);
   const slant = height * 0.35;
   return (
     <AnimatedPath
@@ -1567,8 +1593,9 @@ function SceneOrb({
     );
     return () => cancelAnimation(p);
   }, [still, p]);
-  const inner = useAnimatedProps(() => ({ opacity: 0.55 + 0.25 * p.value, r: r * (0.94 + 0.08 * p.value) }), [r]);
-  const outer = useAnimatedProps(() => ({ opacity: 0.2 + 0.12 * p.value, r: r * (1.6 + 0.15 * p.value) }), [r]);
+  const q = useDerivedValue(() => Math.round(p.value * 100) / 100, []);
+  const inner = useAnimatedProps(() => ({ opacity: 0.55 + 0.25 * q.value, r: r * (0.94 + 0.08 * q.value) }), [r, q]);
+  const outer = useAnimatedProps(() => ({ opacity: 0.2 + 0.12 * q.value, r: r * (1.6 + 0.15 * q.value) }), [r, q]);
   const rayEls: React.JSX.Element[] = [];
   if (sunRays) {
     for (let i = 0; i < 8; i++) {
@@ -1611,6 +1638,7 @@ export function ThemeScenery({
   bg,
   danger,
   reducedMotion,
+  worldClock = null,
 }: {
   theme: ThemeId;
   width: number;
@@ -1622,6 +1650,7 @@ export function ThemeScenery({
   bg: string;
   danger: string;
   reducedMotion: boolean;
+  worldClock?: SharedValue<number> | null;
 }) {
   const spec = sceneFor(theme);
   const moodSV = useSharedValue(mood);
@@ -1629,18 +1658,19 @@ export function ThemeScenery({
     moodSV.value = withTiming(mood, { duration: 1200, easing: easeInOut });
     return () => cancelAnimation(moodSV);
   }, [mood, moodSV]);
-  const clock = useSharedValue(0);
+  const ownClock = useSharedValue(0);
+  const clock = worldClock ?? ownClock;
   const animated = !reducedMotion && !!(spec?.fronds || spec?.rays);
   useEffect(() => {
-    if (!animated) {
-      cancelAnimation(clock);
-      clock.value = 0;
+    if (worldClock || !animated) {
+      cancelAnimation(ownClock);
+      ownClock.value = 0;
       return;
     }
-    clock.value = 0;
-    clock.value = withRepeat(withTiming(3600, { duration: 3600_000, easing: Easing.linear }), -1, false);
-    return () => cancelAnimation(clock);
-  }, [animated, clock]);
+    ownClock.value = 0;
+    ownClock.value = withRepeat(withTiming(3600, { duration: 3600_000, easing: Easing.linear }), -1, false);
+    return () => cancelAnimation(ownClock);
+  }, [worldClock, animated, ownClock]);
 
   const [o0, o1] = spec?.opacity ?? [0, 0];
   const wrapStyle = useAnimatedStyle(() => ({ opacity: o0 + (o1 - o0) * moodSV.value }), [o0, o1]);

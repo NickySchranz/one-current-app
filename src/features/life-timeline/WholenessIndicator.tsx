@@ -8,6 +8,7 @@ import {
 import Animated, {
   cancelAnimation,
   useAnimatedProps,
+  useDerivedValue,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -68,7 +69,10 @@ function Strand({
     );
     return () => cancelAnimation(sway);
   }, [still, swayPx, durationMs, delayMs, sway]);
-  const props = useAnimatedProps(() => ({ y: sway.value }));
+  // 0.25px steps via a derived value: the braid sways just as gently, but
+  // the DOM only hears about it when a step lands — not every frame.
+  const q = useDerivedValue(() => Math.round(sway.value * 4) / 4, []);
+  const props = useAnimatedProps(() => ({ y: q.value }), [q]);
   return (
     <AnimatedG animatedProps={props}>
       <Path d={d} stroke={stroke} strokeWidth={1.6} fill="none" opacity={opacity} />

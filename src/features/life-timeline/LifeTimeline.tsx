@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PanResponder,
   Platform,
@@ -17,6 +17,7 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withDelay,
+  withRepeat,
   withTiming,
   Easing,
 } from "react-native-reanimated";
@@ -673,6 +674,58 @@ export function LifeTimeline() {
     fn();
   };
 
+  // Latest values behind stable refs, so the id-keyed handlers below never
+  // need to change identity as data flows.
+  const branchesRef = useRef(branches);
+  branchesRef.current = branches;
+  const nowRef = useRef(now);
+  nowRef.current = now;
+
+  // Stable, id-keyed handlers for BranchLine: fresh closures per render
+  // defeat its memo, and Pip's 9Hz sprite frames would re-render every
+  // branch. These change identity only when their rare inputs change.
+  const selectBranch = useCallback(
+    (branchId: string) => {
+      if (Date.now() < blockTapsUntilRef.current) return;
+      const b = branchesRef.current.find((x) => x.id === branchId);
+      if (!b) return;
+      if (isClosed(b) || armedBranchId === branchId) {
+        setArmedBranchId(null);
+        setOperation({ kind: "quick-touch", branchId });
+        return;
+      }
+      setArmedBranchId(branchId);
+      mascot.focusBranch(branchId);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- focusBranch is stable
+    [armedBranchId, setOperation],
+  );
+  const selectBranchMoment = useCallback(
+    (branchId: string, _momentId: string) => selectBranch(branchId),
+    [selectBranch],
+  );
+  const selectMergePoint = useCallback(
+    (branchId: string) => {
+      if (Date.now() < blockTapsUntilRef.current) return;
+      const b = branchesRef.current.find((x) => x.id === branchId);
+      const mergeId = b?.mergeIds[b.mergeIds.length - 1];
+      if (mergeId) setView({ kind: "merge-review", mergeId });
+    },
+    [setView],
+  );
+  const dialTouchStart = useCallback(
+    (branchId: string, _e: GestureResponderEvent) => {
+      const b = branchesRef.current.find((x) => x.id === branchId);
+      if (!b) return;
+      candidateRef.current = {
+        branchId,
+        startLevel: Math.round(effectiveLoudness(b, nowRef.current)),
+      };
+      setScrollLocked(true);
+    },
+    [],
+  );
+
   // Wheel / trackpad (web only): sideways scrolling moves through time —
   // faster down by the date labels. Vertical wheel stays native: it scrolls
   // the stage when the threads have grown taller than it.
@@ -896,9 +949,28 @@ export function LifeTimeline() {
   // Every fork dot, merge dot and branch end rides the same wave (see
   // BranchLine), so nothing sits flat against a moving line.
   const wavePeriodMs = tk.mainFlowDuration * 1.4;
+  // One world clock: the wave, weather and scenery all share a single
+  // continuous animation instead of three identical ramps.
+  const worldClock = useSharedValue(0);
+  useEffect(() => {
+    if (reducedMotion) {
+      cancelAnimation(worldClock);
+      worldClock.value = 0;
+      return;
+    }
+    worldClock.value = 0;
+    worldClock.value = withRepeat(
+      withTiming(3600, { duration: 3600_000, easing: Easing.linear }),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(worldClock);
+  }, [reducedMotion, worldClock]);
+
   const calmCurrent = useCalmCurrent({
     progress: calmProgress,
     pulseKey,
+    worldClock,
     mainY: layout.mainY,
     nowX: layout.nowX,
     periodMs: wavePeriodMs,
@@ -955,6 +1027,7 @@ export function LifeTimeline() {
             bg={tk.bg}
             danger={tk.danger}
             reducedMotion={reducedMotion}
+            worldClock={worldClock}
           />
           <ThemeBackdrop
             theme={theme}
@@ -965,6 +1038,7 @@ export function LifeTimeline() {
             accent={tk.accent}
             inkFaint={tk.inkFaint}
             reducedMotion={reducedMotion}
+            worldClock={worldClock}
           />
         </View>
 
@@ -1193,49 +1267,19 @@ export function LifeTimeline() {
                     loudnessPreview={
                       preview?.branchId === branch.id ? preview.level : undefined
                     }
-                    onDialTouchStart={
-                      // A decision today settles the loudness too: the dial rests
-                      // with the line until tomorrow (or until it reopens).
-                      isClosed(branch) || decidedToday(branch, now)
-                        ? undefined
-                        : // The drag moves in whole levels, starting from the
-                          // loudness as felt today (drift included).
-                          (_e: GestureResponderEvent) => {
-                            candidateRef.current = {
-                              branchId: branch.id,
-                              startLevel: Math.round(effectiveLoudness(branch, now)),
-                            };
-                            setScrollLocked(true);
-                          }
-                    }
+                    // A decision today settles the loudness too: the dial
+                    // rests with the line until tomorrow (or until it reopens).
+                    dialEnabled={!isClosed(branch) && !decidedToday(branch, now)}
+                    onDialTouchStart={dialTouchStart}
                     focused={false}
                     emphasizedId={top?.id}
                     highlighted={isUserFocused || mascotHighlight}
                     dimmed={!!focusedBranchId && branch.id !== focusedBranchId}
                     born={!reducedMotion && born?.branchId === branch.id}
                     reducedMotion={reducedMotion}
-                    onSelect={guarded(() => {
-                      if (isClosed(branch) || armedBranchId === branch.id) {
-                        setArmedBranchId(null);
-                        setOperation({ kind: "quick-touch", branchId: branch.id });
-                        return;
-                      }
-                      setArmedBranchId(branch.id);
-                      mascot.focusBranch(branch.id);
-                    })}
-                    onSelectMoment={guarded(() => {
-                      if (isClosed(branch) || armedBranchId === branch.id) {
-                        setArmedBranchId(null);
-                        setOperation({ kind: "quick-touch", branchId: branch.id });
-                        return;
-                      }
-                      setArmedBranchId(branch.id);
-                      mascot.focusBranch(branch.id);
-                    })}
-                    onSelectMergePoint={guarded(() => {
-                      const mergeId = branch.mergeIds[branch.mergeIds.length - 1];
-                      if (mergeId) setView({ kind: "merge-review", mergeId });
-                    })}
+                    onSelect={selectBranch}
+                    onSelectMoment={selectBranchMoment}
+                    onSelectMergePoint={selectMergePoint}
                   />
                   </G>
                 );
@@ -1351,12 +1395,13 @@ export function LifeTimeline() {
                   })()}
                 >
                 <Mascot
-                  x={mascot.pos.x}
-                  y={mascot.pos.y}
+                  posX={mascot.posX}
+                  posY={mascot.posY}
+                  runPhase={mascot.runPhase}
                   frame={hit && !hit.calm ? "LAND_A" : mascot.frame}
                   flip={mascot.flip}
                   mascotType={mascot.mascotType}
-                  bubbleOpacity={mascot.bubbleOpacity}
+                  bubbleO={mascot.bubbleO}
                   bubbleText={mascot.bubbleText}
                   showTapHint={mascot.frame === 'IDLE_A' || mascot.frame === 'IDLE_B'}
                   theme={tk}

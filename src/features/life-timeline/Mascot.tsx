@@ -5,6 +5,7 @@
 
 import { useMemo } from "react";
 import { Platform } from "react-native";
+import Animated, { useAnimatedProps, type SharedValue } from "react-native-reanimated";
 import { G, Rect, Text as SvgText, Circle, Polygon } from "react-native-svg";
 import type { ThemeTokens } from "@/ui/theme";
 import { mix } from "@/ui/color";
@@ -96,10 +97,11 @@ function SpeechBubble({
   spriteX, spriteY, opacity, text, theme,
 }: {
   spriteX: number; spriteY: number;
-  opacity: number; text: string;
+  opacity: SharedValue<number>; text: string;
   theme: ThemeTokens;
 }) {
-  if (opacity <= 0.01 || !text) return null;
+  const fade = useAnimatedProps(() => ({ opacity: opacity.value }), [opacity]);
+  if (!text) return null;
 
   const { lines, w: bubbleW, h: bubbleH } = measureBubble(text);
   const spriteW = PX * 12;
@@ -108,7 +110,7 @@ function SpeechBubble({
   const mid = bx + bubbleW / 2;
 
   return (
-    <G opacity={opacity} pointerEvents="none">
+    <AnimatedG animatedProps={fade} pointerEvents="none">
       <Rect x={bx} y={by} width={bubbleW} height={bubbleH} rx={5}
         fill={theme.bgRaised} stroke={theme.accent} strokeWidth={1.3} />
       <Polygon
@@ -130,7 +132,7 @@ function SpeechBubble({
           {line}
         </SvgText>
       ))}
-    </G>
+    </AnimatedG>
   );
 }
 
@@ -166,34 +168,53 @@ function TapRing({ spriteW, theme }: { spriteW: number; theme: ThemeTokens }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 type Props = {
-  x: number;
-  y: number;
+  /** Per-frame position on the UI thread — the sprite never re-renders to move. */
+  posX: SharedValue<number>;
+  posY: SharedValue<number>;
   frame: FrameName;
   flip: number;
   mascotType: MascotType;
-  bubbleOpacity: number;
+  /** Bubble fade on the UI thread; omit for a mascot that never speaks. */
+  bubbleO?: SharedValue<number>;
+  /** 0/1 gait phase while `frame` is a RUN frame — swapped without renders. */
+  runPhase?: SharedValue<number>;
   bubbleText: string;
   showTapHint: boolean;
   theme: ThemeTokens;
   onPress: () => void;
 };
 
+const AnimatedG = Animated.createAnimatedComponent(G);
+
 export function Mascot({
-  x, y, frame, flip, mascotType,
-  bubbleOpacity, bubbleText, showTapHint, theme, onPress,
+  posX, posY, frame, flip, mascotType,
+  bubbleO, bubbleText, showTapHint, theme, onPress, runPhase,
 }: Props) {
   const palette = useMemo(() => resolveColors(theme.accent), [theme.accent]);
   const frames = CHARACTER_FRAMES[mascotType];
   const pixels = frames[frame] ?? frames['IDLE_A'];
   const spriteW = PX * 12;
+  // While running, both gait frames are mounted and the UI thread swaps
+  // their opacity — the 9Hz gait never re-renders React.
+  const running = (frame === 'RUN_A' || frame === 'RUN_B') && !!runPhase;
+  const gaitA = useAnimatedProps(
+    () => ({ opacity: runPhase ? (runPhase.value === 0 ? 1 : 0) : 1 }),
+    [runPhase],
+  );
+  const gaitB = useAnimatedProps(
+    () => ({ opacity: runPhase ? (runPhase.value === 1 ? 1 : 0) : 0 }),
+    [runPhase],
+  );
 
-  const transform = flip === -1
-    ? `translate(${x + spriteW}, ${y}) scale(-1, 1)`
-    : `translate(${x}, ${y})`;
+  // The whole group (bubble included) rides the shared position; everything
+  // inside is drawn relative to (0,0) = the sprite's top-left.
+  const rideProps = useAnimatedProps(() => ({ x: posX.value, y: posY.value }), [posX, posY]);
+
+  const transform = flip === -1 ? `translate(${spriteW}, 0) scale(-1, 1)` : undefined;
 
   return (
-    <>
-      <SpeechBubble spriteX={x} spriteY={y} opacity={bubbleOpacity} text={bubbleText} theme={theme} />
+    <AnimatedG animatedProps={rideProps}>
+      {bubbleO && <SpeechBubble spriteX={0} spriteY={0} opacity={bubbleO} text={bubbleText} theme={theme} />}
       <G
         transform={transform}
         onPress={onPress}
@@ -201,10 +222,21 @@ export function Mascot({
         {...(Platform.OS === 'web' ? { style: { cursor: 'pointer' } as object } : null)}
       >
         {showTapHint && <TapRing spriteW={spriteW} theme={theme} />}
-        <PixelGrid pixels={pixels} palette={palette} />
+        {running ? (
+          <>
+            <AnimatedG animatedProps={gaitA}>
+              <PixelGrid pixels={frames['RUN_A'] ?? pixels} palette={palette} />
+            </AnimatedG>
+            <AnimatedG animatedProps={gaitB}>
+              <PixelGrid pixels={frames['RUN_B'] ?? pixels} palette={palette} />
+            </AnimatedG>
+          </>
+        ) : (
+          <PixelGrid pixels={pixels} palette={palette} />
+        )}
         {/* Generous transparent hit area */}
         <Rect x={-4} y={-8} width={spriteW + 8} height={PX * 16 + 8} fill="transparent" onPress={onPress} />
       </G>
-    </>
+    </AnimatedG>
   );
 }

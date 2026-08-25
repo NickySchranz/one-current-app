@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { cancelAnimation, useSharedValue, withTiming, Easing, type SharedValue } from "react-native-reanimated";
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import type { BranchGeometry } from "@/visualization/branch-lines/paths";
 import { isClosed } from "@/domain/branches/logic";
@@ -22,10 +23,20 @@ const PX = 2.2; // must match PX in mascot-frames.ts
 export type MascotPos = { x: number; y: number };
 
 export type MascotState = {
+  /**
+   * Coarse position (React state): updated at landings, snaps and other
+   * stationary moments — everything that positions UI around a standing Pip.
+   * Never updated per animation frame.
+   */
   pos: MascotPos;
+  /** Per-frame position (UI thread): the sprite itself rides these. */
+  posX: SharedValue<number>;
+  posY: SharedValue<number>;
+  /** 0/1 while running: which gait frame shows (UI-thread swap). */
+  runPhase: SharedValue<number>;
   frame: FrameName;
   flip: number;
-  bubbleOpacity: number;
+  bubbleO: SharedValue<number>;
   bubbleText: string;
   mascotType: MascotType;
   inspectedBranchId: string | null;
@@ -262,9 +273,25 @@ export function useMascot(
   const posRef = useRef<MascotPos>({ x: -999, y: -999 });
   // Rendering state
   const [pos, setPos] = useState<MascotPos>({ x: -999, y: -999 });
+  const posX = useSharedValue(-999);
+  const posY = useSharedValue(-999);
+  // 0/1 gait phase while running — swapped on the UI thread, no re-renders.
+  const runPhase = useSharedValue(0);
+  // Move the sprite: per-frame ticks write ONLY the shared values (UI
+  // thread); coarse moments (`sync`) also publish React state for the UI
+  // that arranges itself around a standing Pip. Never sync from a rAF loop —
+  // that re-renders the whole timeline every frame.
+  const place = (x: number, y: number, sync: boolean) => {
+    posRef.current = { x, y };
+    posX.value = x;
+    posY.value = y;
+    if (sync) setPos({ x, y });
+  };
+  const placeRef = useRef(place);
+  placeRef.current = place;
   const [frame, setFrame] = useState<FrameName>('IDLE_A');
   const [flip, setFlip] = useState(1);
-  const [bubbleOpacity, setBubbleOpacity] = useState(0);
+  const bubbleO = useSharedValue(0);
   const [bubbleText, setBubbleText] = useState('');
   const [inspectedIdState, setInspectedIdState] = useState<string | null>(null);
   const [pendingIdState, setPendingIdState] = useState<string | null>(null);
@@ -277,20 +304,12 @@ export function useMascot(
     if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
   };
 
-  // Smooth bubble fade
-  const bubbleOpacityRef = useRef(0);
+  // Smooth bubble fade — on the UI thread, no React re-renders and no
+  // contention with the waypoint runner's rAF.
   const fadeBubble = useCallback((target: number, ms: number) => {
-    const start = bubbleOpacityRef.current;
-    const t0 = performance.now();
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - t0) / ms);
-      const v = start + (target - start) * t;
-      bubbleOpacityRef.current = v;
-      setBubbleOpacity(v);
-      if (t < 1) rafRef.current = requestAnimationFrame(tick);
-    };
-    cancelRaf();
-    rafRef.current = requestAnimationFrame(tick);
+    cancelAnimation(bubbleO);
+    bubbleO.value = withTiming(target, { duration: ms, easing: Easing.linear });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shared value is stable
   }, []);
 
   const jumpRef = useRef<() => void>(() => {});
@@ -344,12 +363,11 @@ export function useMascot(
         const s = panShiftRef.current;
         const nx = fromX + dx * t + s.x;
         const ny = fromY + dy_ * t + s.y;
-        posRef.current = { x: nx, y: ny };
-        setPos({ x: nx, y: ny });
+        placeRef.current(nx, ny, false);
 
         if (now - lastToggle >= 115) {
           runA = !runA;
-          setFrame(runA ? 'RUN_A' : 'RUN_B');
+          runPhase.value = runA ? 0 : 1; // sprite alternates on the UI thread
           lastToggle = now;
         }
 
@@ -405,8 +423,7 @@ export function useMascot(
         const ty = nowYRef.current - PX * 10;
         const cur = posRef.current;
         if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
-          posRef.current = { x: tx, y: ty };
-          setPos({ x: tx, y: ty });
+          placeRef.current(tx, ty, true);
         }
       }
       return;
@@ -444,8 +461,7 @@ export function useMascot(
             x: panShiftRef.current.x + dx,
             y: panShiftRef.current.y + dy,
           };
-          posRef.current = { x: posRef.current.x + dx, y: posRef.current.y + dy };
-          setPos(posRef.current);
+          placeRef.current(posRef.current.x + dx, posRef.current.y + dy, false);
         }
       }
       return;
@@ -455,8 +471,7 @@ export function useMascot(
     // Pip naturally scrolls off-screen when the user pans away from today.
     const cur = posRef.current;
     if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
-      posRef.current = { x: tx, y: ty };
-      setPos({ x: tx, y: ty });
+      placeRef.current(tx, ty, true);
     }
   }, [geometries, branches]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -587,8 +602,7 @@ export function useMascot(
         const liveGeo = geometriesRef.current.find(g => g.branchId === targetId);
         const fx = liveGeo ? liveGeo.endX + 10 : (jumpDestRef.current?.x ?? toX);
         const fy = liveGeo ? liveGeo.endY - PX * 10 : (jumpDestRef.current?.y ?? toY);
-        posRef.current = { x: fx, y: fy };
-        setPos({ x: fx, y: fy });
+        placeRef.current(fx, fy, true);
         jumpDestRef.current = null;
         setPendingIdState(null);
         onLanded(targetId);
@@ -661,8 +675,7 @@ export function useMascot(
       const liveGeo = geometriesRef.current.find(g => g.branchId === branchId);
       const fx = liveGeo ? liveGeo.endX + 10 : (jumpDestRef.current?.x ?? toX);
       const fy = liveGeo ? liveGeo.endY - PX * 10 : (jumpDestRef.current?.y ?? toY);
-      posRef.current = { x: fx, y: fy };
-      setPos({ x: fx, y: fy });
+      placeRef.current(fx, fy, true);
       jumpDestRef.current = null;
       setFrame('INSPECT_A');
       phase.current = 'inspecting';
@@ -708,8 +721,7 @@ export function useMascot(
 
     initialised.current = true;
     const startPos = { x: geo.endX + 10, y: geo.endY - PX * 10 };
-    posRef.current = startPos;
-    setPos(startPos);
+    placeRef.current(startPos.x, startPos.y, true);
     inspectedId.current = best.id;
     setInspectedIdState(best.id);
     setArrivedIdState(best.id); // he starts the session standing at it
@@ -772,8 +784,8 @@ export function useMascot(
   const visible = branches.some(b => !isClosed(b));
 
   return {
-    pos, frame, flip,
-    bubbleOpacity, bubbleText,
+    pos, posX, posY, runPhase, frame, flip,
+    bubbleO, bubbleText,
     mascotType,
     inspectedBranchId: inspectedIdState,
     pendingBranchId: pendingIdState,
