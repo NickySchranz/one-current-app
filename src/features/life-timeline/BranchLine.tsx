@@ -27,7 +27,7 @@ import { CatHead } from "./CatHead";
 import { AnglerHead } from "./AnglerHead";
 import { Ghost } from "./Ghost";
 import { Pomeranian } from "./Pomeranian";
-import { useBranchStrokes } from "./useSquiggle";
+import { calmWaveOffset, useBranchStrokes, type WaveHandles } from "./useSquiggle";
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -81,6 +81,10 @@ type Props = {
   onSelect: () => void;
   onSelectMoment: (momentId: string) => void;
   onSelectMergePoint: () => void;
+  /** The main line's calm wave: this branch's fork/merge ends ride it. */
+  wave?: WaveHandles | null;
+  waveNowX?: number;
+  wavePeriodMs?: number;
 };
 
 /** One branch: fork curve, run, optional merge curve, moments, label, endpoint. */
@@ -101,6 +105,9 @@ export const BranchLine = memo(function BranchLine({
   onSelect,
   onSelectMoment,
   onSelectMergePoint,
+  wave = null,
+  waveNowX = 0,
+  wavePeriodMs = 1,
 }: Props) {
   const t = useT();
   const tk = useTheme();
@@ -136,7 +143,43 @@ export const BranchLine = memo(function BranchLine({
     flowing: g.inWindow && !born && g.style.animated,
     flowDurationMs: emphasized ? 1400 : tk.flowDuration,
     reducedMotion,
+    wave,
+    waveNowX,
+    wavePeriodMs,
+    attachStart: g.forkVisible,
+    attachEnd: g.endsOnMain,
   });
+
+  // The fork and merge dots sit ON the main line, so they rise and fall
+  // with its wave — same clock, same formula, no drift.
+  const forkDotProps = useAnimatedProps(() => ({
+    cy:
+      g.forkY -
+      (wave
+        ? calmWaveOffset(
+            g.forkX,
+            wave.clock.value,
+            Math.min(1.35, wave.progressSV.value + wave.surgeSV.value),
+            wave.progressSV.value,
+            waveNowX,
+            wavePeriodMs,
+          )
+        : 0),
+  }), [g.forkX, g.forkY, wave, waveNowX, wavePeriodMs]);
+  const mergeDotProps = useAnimatedProps(() => ({
+    cy:
+      g.endY -
+      (wave && g.endsOnMain
+        ? calmWaveOffset(
+            g.endX,
+            wave.clock.value,
+            Math.min(1.35, wave.progressSV.value + wave.surgeSV.value),
+            wave.progressSV.value,
+            waveNowX,
+            wavePeriodMs,
+          )
+        : 0),
+  }), [g.endX, g.endY, g.endsOnMain, wave, waveNowX, wavePeriodMs]);
 
   // `.branch-dimmed { transition: opacity 0.25s ease }` — the whole group
   // steps back while another line holds the focus.
@@ -304,14 +347,23 @@ export const BranchLine = memo(function BranchLine({
         />
       )}
 
-      {/* fork point on the main line — only when the fork moment is in view */}
+      {/* fork point on the main line — rides the calm wave with it */}
       {g.forkVisible && (
-        <Circle cx={g.forkX} cy={g.forkY} r={4} stroke={color} strokeWidth={2} fill={tk.bg} />
+        <AnimatedCircle
+          animatedProps={forkDotProps}
+          cx={g.forkX}
+          cy={g.forkY}
+          r={4}
+          stroke={color}
+          strokeWidth={2}
+          fill={tk.bg}
+        />
       )}
 
-      {/* a merged line ends on the main line: its point stays still */}
+      {/* a merged line ends on the main line: its point moves with the line */}
       {g.endsOnMain && (
-        <Circle
+        <AnimatedCircle
+          animatedProps={mergeDotProps}
           cx={g.endX}
           cy={g.endY}
           r={6}

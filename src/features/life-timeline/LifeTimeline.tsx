@@ -27,7 +27,7 @@ import { buildTimelineLayout } from "@/visualization/main-line/layout";
 import { generateTicks, dateToX, addDays } from "@/visualization/zoom/time-scale";
 import { describeTimeline } from "@/visualization/a11y/describe";
 import { effectiveLoudness, isClosed, mostActivated } from "@/domain/branches/logic";
-import { decidedToday } from "@/domain/feelings/logic";
+import { decidedToday, energySplit } from "@/domain/feelings/logic";
 import type { PsychologicalBranch, Loudness } from "@/domain/branches/types";
 import { BranchLine } from "./BranchLine";
 import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
@@ -40,10 +40,11 @@ import { useTheme } from "@/ui/theme";
 import { alpha, mix } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
 import { loudnessWord } from "@/ui/LoudnessSlider";
-import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, useDashFlow } from "./timeline-fx";
+import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, ThemeBackdrop, useDashFlow } from "./timeline-fx";
 import { Mascot } from "./Mascot";
 import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
+import { useCalmCurrent } from "./useSquiggle";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -747,6 +748,62 @@ export function LifeTimeline() {
   // How split the present is: open lines pull apart, decisions gather them.
   const activeLines = visible.filter((b) => !isClosed(b));
 
+  // How much of today is answered: each Act / rest / integration nudges the
+  // main line toward its full strength (an empty current is a whole one).
+  // A planned step still ahead counts as answered — same as the Actions panel.
+  const hasPendingStep = (b: PsychologicalBranch) =>
+    actions.some((a) => !a.completedAt && a.branchesIntegrated[0]?.branchId === b.id);
+  const calmProgress =
+    activeLines.length === 0
+      ? 1
+      : activeLines.filter(
+          (b) => decidedToday(b, now) || restingToday(b, now) || hasPendingStep(b),
+        ).length / activeLines.length;
+
+  // How scattered the day is, 0..1 — the same wholeness score as the chip.
+  // The backdrop weather warms and settles as it rises.
+  const wholeness = useMemo(() => energySplit(branches, now).mainShare, [branches, now]);
+
+  // Each time progress rises (an answer landed, a thread integrated), one
+  // shimmer streak sweeps the main line; crossing into completion also
+  // blooms gold motes off it. A new thread lowering progress fires nothing.
+  const [pulseKey, setPulseKey] = useState(0);
+  const [bloom, setBloom] = useState({ key: 0, count: 0 });
+  const [celebration, setCelebration] = useState(0);
+  const prevProgressRef = useRef(calmProgress);
+  useEffect(() => {
+    const prev = prevProgressRef.current;
+    prevProgressRef.current = calmProgress;
+    if (calmProgress <= prev + 0.001) return;
+    setPulseKey((k) => k + 1);
+    // Every answer releases gold motes; finishing the day earns the full
+    // themed spectacle — rings from Now, a flight of particles, the works.
+    if (!reducedMotion) {
+      const crossing = calmProgress >= 0.999 && prev < 0.999;
+      setBloom((b) => ({ key: b.key + 1, count: crossing ? 12 : 4 }));
+      if (crossing) setCelebration((k) => k + 1);
+    }
+  }, [calmProgress, reducedMotion]);
+  useEffect(() => {
+    if (celebration === 0) return;
+    const id = setTimeout(() => setCelebration(0), 3200);
+    return () => clearTimeout(id);
+  }, [celebration]);
+  useEffect(() => {
+    if (bloom.count === 0) return;
+    const id = setTimeout(() => setBloom((b) => ({ key: b.key, count: 0 })), 2600);
+    return () => clearTimeout(id);
+  }, [bloom]);
+  // While sacred, a little golden dust keeps drifting off the line.
+  useEffect(() => {
+    if (calmProgress < 0.999 || reducedMotion) return;
+    const id = setInterval(
+      () => setBloom((b) => ({ key: b.key + 1, count: 2 })),
+      6500,
+    );
+    return () => clearInterval(id);
+  }, [calmProgress, reducedMotion]);
+
   // The thread the user is holding: the one an open panel concerns, or the
   // one armed for a bonk. While held, its line stays lit and Pip stays
   // planted at it — bonks land on it until the panel closes or another
@@ -835,7 +892,24 @@ export function LifeTimeline() {
   }, [viewingIntegratedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The slow current on the main line, and the merge preview's leaning dashes.
-  const mainFlowProps = useDashFlow(!reducedMotion, 15, 0, tk.mainFlowDuration);
+  // The main line's strokes: it gathers strength as the day gets answered.
+  // Every fork dot, merge dot and branch end rides the same wave (see
+  // BranchLine), so nothing sits flat against a moving line.
+  const wavePeriodMs = tk.mainFlowDuration * 1.4;
+  const calmCurrent = useCalmCurrent({
+    progress: calmProgress,
+    pulseKey,
+    mainY: layout.mainY,
+    nowX: layout.nowX,
+    periodMs: wavePeriodMs,
+    dashDurationMs: tk.mainFlowDuration,
+    reducedMotion,
+    accentColor: tk.accent,
+    shimmerColor: tk.shimmer,
+    lineColor: tk.lineMain,
+    sacredLineColor: mix(tk.shimmer, tk.lineMain, 70),
+  });
+
   const mergeFlowProps = useDashFlow(
     operation.kind === "confirming-merge" && !reducedMotion,
     0,
@@ -863,6 +937,25 @@ export function LifeTimeline() {
           setSize({ width: Math.max(320, width), height: Math.max(240, height) });
         }}
       >
+        {/* the theme's ambient weather, behind the transparent canvas: it
+            warms, brightens and settles as the day gathers itself */}
+        <View
+          pointerEvents="none"
+          testID="backdrop"
+          style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0 }}
+        >
+          <ThemeBackdrop
+            theme={theme}
+            width={size.width}
+            height={size.height}
+            mood={wholeness}
+            shimmer={tk.shimmer}
+            accent={tk.accent}
+            inkFaint={tk.inkFaint}
+            reducedMotion={reducedMotion}
+          />
+        </View>
+
         {/* the canvas may be taller than the stage: this container scrolls it,
             while the +, help and wholeness chip stay pinned to the stage */}
         <ScrollView
@@ -917,15 +1010,38 @@ export function LifeTimeline() {
                 );
               })}
 
-              {/* main life line, with a slow current flowing toward Now */}
-              <Path
+              {/* main life line, with a slow current flowing toward Now.
+                  As the day's threads get their answers it gathers strength —
+                  wave rising, stroke thickening — until it breathes as one
+                  calm, sacred current under a soft shimmer halo. Each answer
+                  sends a shimmer streak sweeping down the line. */}
+              <AnimatedPath
+                animatedProps={calmCurrent.haloOuter}
+                d={`M 0 ${layout.mainY} L ${layout.nowX} ${layout.mainY}`}
+                stroke={tk.shimmer}
+                strokeWidth={18}
+                strokeLinecap="round"
+                fill="none"
+                opacity={0}
+              />
+              <AnimatedPath
+                animatedProps={calmCurrent.halo}
+                d={`M 0 ${layout.mainY} L ${layout.nowX} ${layout.mainY}`}
+                stroke={tk.shimmer}
+                strokeWidth={9}
+                strokeLinecap="round"
+                fill="none"
+                opacity={0}
+              />
+              <AnimatedPath
+                animatedProps={calmCurrent.line}
                 d={`M 0 ${layout.mainY} L ${layout.nowX} ${layout.mainY}`}
                 stroke={tk.lineMain}
                 strokeWidth={3.25}
                 fill="none"
               />
               <AnimatedPath
-                animatedProps={mainFlowProps}
+                animatedProps={calmCurrent.flow}
                 d={`M 0 ${layout.mainY} L ${layout.nowX} ${layout.mainY}`}
                 stroke={tk.accent}
                 strokeWidth={2}
@@ -934,10 +1050,29 @@ export function LifeTimeline() {
                 strokeDasharray={tk.mainFlowDash}
                 opacity={0.7}
               />
+              {/* the per-answer flourish: wide soft glow + bright core */}
+              <AnimatedPath
+                animatedProps={calmCurrent.shimmerWide}
+                d={`M 0 ${layout.mainY} L ${layout.nowX} ${layout.mainY}`}
+                stroke={alpha(tk.shimmer, 0.45)}
+                strokeWidth={11}
+                strokeLinecap="round"
+                fill="none"
+                opacity={0}
+              />
+              <AnimatedPath
+                animatedProps={calmCurrent.shimmer}
+                d={`M 0 ${layout.mainY} L ${layout.nowX} ${layout.mainY}`}
+                stroke={tk.shimmer}
+                strokeWidth={3.5}
+                strokeLinecap="round"
+                fill="none"
+                opacity={0}
+              />
               <Path
                 d={`M ${layout.nowX - 12} ${layout.mainY - 6} L ${layout.nowX} ${layout.mainY} L ${layout.nowX - 12} ${layout.mainY + 6}`}
                 stroke={tk.lineMain}
-                strokeWidth={3.25}
+                strokeWidth={3.25 + calmProgress}
                 fill="none"
               />
 
@@ -1040,6 +1175,9 @@ export function LifeTimeline() {
                     geometry={g}
                     theme={theme}
                     nowMs={nowTick}
+                    wave={calmCurrent.wave}
+                    waveNowX={layout.nowX}
+                    wavePeriodMs={wavePeriodMs}
                     loudnessPreview={
                       preview?.branchId === branch.id ? preview.level : undefined
                     }
@@ -1299,6 +1437,68 @@ export function LifeTimeline() {
             </Svg>
           </View>
         </ScrollView>
+
+        {/* reaching the sacred state: the themed completion spectacle */}
+        {celebration > 0 && (
+          <View
+            key={`celebration-${celebration}`}
+            pointerEvents="none"
+            testID="celebration"
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              overflow: "hidden",
+              zIndex: 7,
+            }}
+          >
+            <CelebrationBurst
+              theme={theme}
+              nowX={layout.nowX}
+              mainY={layout.mainY}
+              shimmer={tk.shimmer}
+              accent={tk.accent}
+              danger={tk.danger}
+            />
+          </View>
+        )}
+
+        {/* every answer releases gold motes off the line; completion bursts */}
+        {bloom.count > 0 && (
+          <View
+            key={bloom.key}
+            pointerEvents="none"
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              overflow: "hidden",
+              zIndex: 6,
+            }}
+          >
+            {Array.from({ length: bloom.count }, (_, i) => (
+              <SmokeFly
+                key={i}
+                index={i}
+                x0={layout.nowX * (0.1 + (0.8 * i) / Math.max(1, bloom.count - 1))}
+                y0={layout.mainY - 3}
+              >
+                <View
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 3,
+                    backgroundColor: tk.shimmer,
+                  }}
+                />
+              </SmokeFly>
+            ))}
+          </View>
+        )}
 
         {/* the dates, pinned: lanes scroll behind them, they never move */}
         <View

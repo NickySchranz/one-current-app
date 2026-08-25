@@ -1,13 +1,17 @@
 import { useEffect, useMemo } from "react";
 import {
   cancelAnimation,
+  interpolateColor,
   useAnimatedProps,
   useDerivedValue,
   useSharedValue,
+  withDelay,
   withRepeat,
+  withSequence,
   withTiming,
   Easing,
 } from "react-native-reanimated";
+import type { SharedValue } from "react-native-reanimated";
 import type { PathProps } from "react-native-svg";
 import { pathLength, samplePath, type SamplePoint } from "@/visualization/path-sample";
 
@@ -57,12 +61,34 @@ export function useBranchStrokes(opts: {
   /** CSS `--flow-duration` in ms; emphasized lines use 1400. */
   flowDurationMs: number;
   reducedMotion: boolean;
+  /** The main line's wave: the branch's attached ends ride it in rhythm. */
+  wave?: WaveHandles | null;
+  waveNowX?: number;
+  wavePeriodMs?: number;
+  /** The path starts on the main line (visible fork point). */
+  attachStart?: boolean;
+  /** The path ends on the main line (integrated — merge curve). */
+  attachEnd?: boolean;
 }): BranchStrokeProps {
-  const { trembling, level, basePath, born, flowing, flowDurationMs, reducedMotion } = opts;
+  const {
+    trembling,
+    level,
+    basePath,
+    born,
+    flowing,
+    flowDurationMs,
+    reducedMotion,
+    wave = null,
+    waveNowX = 0,
+    wavePeriodMs = 1,
+    attachStart = false,
+    attachEnd = false,
+  } = opts;
 
+  const riding = wave != null && !reducedMotion && (attachStart || attachEnd);
   const pts = useMemo<SamplePoint[]>(
-    () => (trembling ? samplePath(basePath) : []),
-    [trembling, basePath],
+    () => (trembling || riding ? samplePath(basePath) : []),
+    [trembling, riding, basePath],
   );
   const total = pts.length > 0 ? pts[pts.length - 1].s : 0;
 
@@ -85,9 +111,16 @@ export function useBranchStrokes(opts: {
   }, [trembling, pts, clock]);
 
   // The squiggled path, built once per frame and shared by all three strokes.
+  // Two motions can compose: the loudness slither along the whole line, and
+  // the main wave carrying the attached end(s) in the timeline's rhythm.
   const d = useDerivedValue(() => {
-    if (!trembling || pts.length === 0) return basePath;
-    const amp = lerpTable(AMP, level);
+    if (pts.length === 0) return basePath;
+    const ampP = wave ? Math.min(1.35, wave.progressSV.value + wave.surgeSV.value) : 0;
+    const waveOn = riding && ampP > 0.01;
+    if (!trembling && !waveOn) return basePath;
+    const freqP = wave ? wave.progressSV.value : 0;
+    const waveT = wave ? wave.clock.value : 0;
+    const amp = trembling ? lerpTable(AMP, level) : 0;
     const k = (2 * Math.PI) / lerpTable(LAMBDA, level);
     const omega = 2 * Math.PI * lerpTable(SPEED, level);
     const t = clock.value;
@@ -96,10 +129,20 @@ export function useBranchStrokes(opts: {
       const p = pts[i];
       const taper = Math.min(1, p.s / TAPER, (total - p.s) / TAPER);
       const off = amp * taper * Math.sin(k * p.s - omega * t);
-      out += `${out ? "L" : "M"}${(p.x + p.nx * off).toFixed(2)} ${(p.y + p.ny * off).toFixed(2)}`;
+      let x = p.x + p.nx * off;
+      let y = p.y + p.ny * off;
+      if (waveOn) {
+        const wS = attachStart ? Math.max(0, 1 - p.s / WAVE_BLEND) : 0;
+        const wE = attachEnd ? Math.max(0, 1 - (total - p.s) / WAVE_BLEND) : 0;
+        const w = Math.max(wS, wE);
+        if (w > 0) {
+          y -= w * calmWaveOffset(p.x, waveT, ampP, freqP, waveNowX, wavePeriodMs);
+        }
+      }
+      out += `${out ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`;
     }
     return out;
-  }, [trembling, pts, level, basePath, total]);
+  }, [trembling, riding, pts, level, basePath, total, attachStart, attachEnd, waveNowX, wavePeriodMs, wave]);
 
   // Newborn draw-in: dash the full length, sweep the offset to zero.
   const drawing = born && !reducedMotion;
@@ -153,4 +196,334 @@ export function useBranchStrokes(opts: {
   );
 
   return { line, halo, flow };
+}
+
+// ─── The calm current ─────────────────────────────────────────────────────────
+// When every open thread has its answer for the day, the MAIN line breathes:
+// the same travelling sine as the threads, but low, slow and long. Both ends
+// taper to zero so the arrowhead, the Now dot and every fork stay seated.
+const CALM_AMP = 5.0; // px half-width at full progress — a prominent, unmissable swell
+const CALM_LAMBDA_SOFT = 220; // px per cycle at the first answer of the day
+const CALM_LAMBDA = 170; // px per cycle once everything is answered — the calm frequency
+const CALM_TAPER = 48; // px of fade at each end
+const MAIN_STROKE = 3.25; // the line's resting width; it gains up to +1px with progress
+/** px of a branch's arc, from its fork or merge point, that rides the wave. */
+const WAVE_BLEND = 46;
+
+/**
+ * The main line's wave as a function — one formula shared by the line
+ * itself, the fork/merge dots, and the ends of every branch line, so they
+ * all move in the same rhythm. Returns how far ABOVE the resting y the
+ * line sits at x (callers subtract it from y).
+ */
+export function calmWaveOffset(
+  x: number,
+  t: number,
+  ampP: number,
+  freqP: number,
+  nowX: number,
+  periodMs: number,
+): number {
+  "worklet";
+  if (ampP <= 0.01 || nowX <= 0) return 0;
+  const taper = Math.min(1, x / CALM_TAPER, (nowX - x) / CALM_TAPER);
+  if (taper <= 0) return 0;
+  const lambda = CALM_LAMBDA_SOFT - (CALM_LAMBDA_SOFT - CALM_LAMBDA) * Math.min(1, freqP);
+  const k = (2 * Math.PI) / lambda;
+  const omega = (2 * Math.PI * 1000) / periodMs;
+  return CALM_AMP * ampP * taper * Math.sin(k * x - omega * t);
+}
+
+/** The live handles every wave rider shares: one clock, one strength. */
+export type WaveHandles = {
+  clock: SharedValue<number>;
+  progressSV: SharedValue<number>;
+  surgeSV: SharedValue<number>;
+};
+
+export type CalmCurrentProps = {
+  /** The sacred under-glow: breathing `d` + opacity that arrives at completion. */
+  halo: Partial<PathProps>;
+  /** A wider, fainter second glow layer — the light bleeding outward. */
+  haloOuter: Partial<PathProps>;
+  /** For the solid main line: the breathing `d` + a width that grows with progress. */
+  line: Partial<PathProps>;
+  /** For the accent current dashes: breathing `d` + travelling dashoffset. */
+  flow: Partial<PathProps>;
+  /** The per-answer flourish: a bright streak sweeping the whole line into Now. */
+  shimmer: Partial<PathProps>;
+  /** The same streak for the wide soft-glow pass (own props instance). */
+  shimmerWide: Partial<PathProps>;
+  /** Shared handles so branch lines and dots ride the same wave. */
+  wave: WaveHandles;
+};
+
+/**
+ * The main line gathering strength. `progress` is the fraction of open
+ * threads answered today (1 = the calm, sacred state): the wave's amplitude
+ * and the stroke's width grow with it, the wavelength tightens toward the
+ * calm frequency, and each increment (`pulseKey`) sends a shimmer streak
+ * sweeping down the line. The dash offset ramp lives in here too (not
+ * useDashFlow), because dashes on a moving path need `d` and the offset in
+ * one animatedProps set.
+ */
+export function useCalmCurrent(opts: {
+  /** 0..1 — answered open threads over all open threads. */
+  progress: number;
+  /** Increment on each new answer to fire the shimmer sweep. */
+  pulseKey: number;
+  mainY: number;
+  nowX: number;
+  /** ms per wave cycle — pace it from the theme's mainFlowDuration. */
+  periodMs: number;
+  /** ms per dash-flow cycle (the theme's mainFlowDuration itself). */
+  dashDurationMs: number;
+  reducedMotion: boolean;
+  /** The theme's accent (the everyday current) and shimmer (the sacred one). */
+  accentColor: string;
+  shimmerColor: string;
+  /** The solid line's everyday ink, and the gilded ink it earns at completion. */
+  lineColor: string;
+  sacredLineColor: string;
+}): CalmCurrentProps {
+  const {
+    progress,
+    pulseKey,
+    mainY,
+    nowX,
+    periodMs,
+    dashDurationMs,
+    reducedMotion,
+    accentColor,
+    shimmerColor,
+    lineColor,
+    sacredLineColor,
+  } = opts;
+  const complete = progress >= 0.999;
+  const breathing = progress > 0.001 && !reducedMotion && nowX > 0;
+
+  // A straight horizontal line needs no samplePath: x every 8px, normal (0,-1).
+  const xs = useMemo(() => {
+    const out: number[] = [];
+    for (let x = 0; x <= nowX; x += 8) out.push(x);
+    if (out.length === 0 || out[out.length - 1] !== nowX) out.push(nowX);
+    return out;
+  }, [nowX]);
+
+  const clock = useSharedValue(0);
+  useEffect(() => {
+    if (!breathing) {
+      cancelAnimation(clock);
+      clock.value = 0;
+      return;
+    }
+    clock.value = 0;
+    clock.value = withRepeat(
+      withTiming(3600, { duration: 3600_000, easing: Easing.linear }),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(clock);
+  }, [breathing, clock]);
+
+  // Each answer eases the line toward its full strength — never a snap.
+  // Completing the day earns an exhale: the wave swells past full for a
+  // breath, then settles into its calm.
+  const progressSV = useSharedValue(0);
+  useEffect(() => {
+    if (reducedMotion) {
+      progressSV.value = withTiming(0, { duration: 300 });
+      return () => cancelAnimation(progressSV);
+    }
+    progressSV.value = complete
+      ? withSequence(
+          withTiming(1.22, { duration: 900, easing: Easing.out(Easing.cubic) }),
+          withTiming(1, { duration: 1400, easing: Easing.inOut(Easing.ease) }),
+        )
+      : withTiming(progress, { duration: 1400, easing: Easing.inOut(Easing.ease) });
+    return () => cancelAnimation(progressSV);
+  }, [progress, complete, reducedMotion, progressSV]);
+
+  // The sacred glow belongs to completion only.
+  const haloScale = useSharedValue(0);
+  useEffect(() => {
+    haloScale.value = withTiming(complete && !reducedMotion ? 1 : 0, {
+      duration: 1600,
+      easing: Easing.inOut(Easing.ease),
+    });
+    return () => cancelAnimation(haloScale);
+  }, [complete, reducedMotion, haloScale]);
+
+  // Each answer SURGES through the line: a quick swell of amplitude and
+  // width on top of wherever progress stands — felt, not just seen.
+  const surgeSV = useSharedValue(0);
+
+  const d = useDerivedValue(() => {
+    const ampP = Math.min(1.35, progressSV.value + surgeSV.value);
+    if (ampP <= 0.01 || xs.length < 2) return `M 0 ${mainY} L ${nowX} ${mainY}`;
+    const freqP = progressSV.value;
+    const t = clock.value;
+    let out = "";
+    for (let i = 0; i < xs.length; i++) {
+      const x = xs[i];
+      const off = calmWaveOffset(x, t, ampP, freqP, nowX, periodMs);
+      out += `${out ? "L" : "M"}${x} ${(mainY - off).toFixed(2)}`;
+    }
+    return out;
+  }, [xs, mainY, nowX, periodMs]);
+
+  // The flourish: on each new answer a bright streak sweeps the line into
+  // Now. Offset 60 parks the dash just before the path; -(nowX+80) is past
+  // its end — the streak crosses everything in between.
+  const sweepOffset = useSharedValue(110);
+  const sweepOpacity = useSharedValue(0);
+  // A line-wide flash of gold under every answer — brief, bright, unmissable.
+  const flashSV = useSharedValue(0);
+  useEffect(() => {
+    if (pulseKey === 0 || reducedMotion || nowX <= 0) return;
+    cancelAnimation(sweepOffset);
+    cancelAnimation(sweepOpacity);
+    // The surge: the wave and stroke swell for a beat on top of progress.
+    if (!complete) {
+      cancelAnimation(surgeSV);
+      surgeSV.value = withSequence(
+        withTiming(0.35, { duration: 260, easing: Easing.out(Easing.cubic) }),
+        withTiming(0, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+      );
+    }
+    cancelAnimation(flashSV);
+    flashSV.value = withSequence(
+      withTiming(complete ? 0.8 : 0.55, { duration: 180, easing: Easing.out(Easing.ease) }),
+      withTiming(0, { duration: complete ? 1100 : 750, easing: Easing.inOut(Easing.ease) }),
+    );
+    sweepOffset.value = 110;
+    if (complete) {
+      // Completing the day: a full-strength sweep, then a softer echo.
+      sweepOffset.value = withSequence(
+        withTiming(-(nowX + 130), { duration: 950, easing: Easing.out(Easing.cubic) }),
+        withTiming(110, { duration: 1 }),
+        withTiming(-(nowX + 130), { duration: 1350, easing: Easing.out(Easing.ease) }),
+      );
+      sweepOpacity.value = 0;
+      sweepOpacity.value = withSequence(
+        withTiming(1, { duration: 110, easing: Easing.linear }),
+        withTiming(1, { duration: 480, easing: Easing.linear }),
+        withTiming(0, { duration: 340, easing: Easing.out(Easing.ease) }),
+        withTiming(0.55, { duration: 160, easing: Easing.linear }),
+        withTiming(0.55, { duration: 700, easing: Easing.linear }),
+        withTiming(0, { duration: 450, easing: Easing.out(Easing.ease) }),
+      );
+    } else {
+      sweepOffset.value = withTiming(-(nowX + 130), {
+        duration: 1050,
+        easing: Easing.out(Easing.cubic),
+      });
+      sweepOpacity.value = 0;
+      // Quick rise, brief hold while the streak travels, then a soft fade.
+      sweepOpacity.value = withSequence(
+        withTiming(1, { duration: 120, easing: Easing.linear }),
+        withTiming(1, { duration: 550, easing: Easing.linear }),
+        withTiming(0, { duration: 380, easing: Easing.out(Easing.ease) }),
+      );
+    }
+    return () => {
+      cancelAnimation(sweepOffset);
+      cancelAnimation(sweepOpacity);
+      cancelAnimation(surgeSV);
+      cancelAnimation(flashSV);
+    };
+  }, [pulseKey, complete, reducedMotion, nowX, sweepOffset, sweepOpacity, surgeSV, flashSV]);
+
+  // While the line is sacred it glints now and then — a faint sweep every
+  // little while, so the state keeps feeling alive without shouting.
+  useEffect(() => {
+    if (!complete || reducedMotion || nowX <= 0) return;
+    const glint = () => {
+      sweepOffset.value = 110;
+      sweepOffset.value = withTiming(-(nowX + 130), {
+        duration: 1600,
+        easing: Easing.inOut(Easing.ease),
+      });
+      sweepOpacity.value = 0;
+      sweepOpacity.value = withSequence(
+        withTiming(0.5, { duration: 250, easing: Easing.linear }),
+        withTiming(0.5, { duration: 850, easing: Easing.linear }),
+        withTiming(0, { duration: 500, easing: Easing.out(Easing.ease) }),
+      );
+    };
+    // First glint waits out the completion celebration.
+    const id = setInterval(glint, 6500);
+    return () => clearInterval(id);
+  }, [complete, reducedMotion, nowX, sweepOffset, sweepOpacity]);
+
+  // The slow current toward Now: the same 15 → 0 ramp useDashFlow runs.
+  const flowOffset = useSharedValue(15);
+  useEffect(() => {
+    if (reducedMotion) {
+      cancelAnimation(flowOffset);
+      flowOffset.value = 15;
+      return;
+    }
+    flowOffset.value = 15;
+    flowOffset.value = withRepeat(
+      withTiming(0, { duration: dashDurationMs, easing: Easing.linear }),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(flowOffset);
+  }, [reducedMotion, dashDurationMs, flowOffset]);
+
+  // The sacred glow breathes with the wave — never a flat sticker of light —
+  // and every answer flashes gold along the whole line for a beat.
+  const halo = useAnimatedProps<PathProps>(() => {
+    const breathe = 0.34 + 0.12 * Math.sin(((2 * Math.PI * 1000) / (periodMs * 1.4)) * clock.value);
+    return { d: d.value, opacity: Math.max(haloScale.value * breathe, flashSV.value) };
+  }, [d, periodMs]);
+  const haloOuter = useAnimatedProps<PathProps>(() => {
+    const breathe = 0.16 + 0.06 * Math.sin(((2 * Math.PI * 1000) / (periodMs * 1.4)) * clock.value + 1.2);
+    return { d: d.value, opacity: Math.max(haloScale.value * breathe, flashSV.value * 0.45) };
+  }, [d, periodMs]);
+  // The solid line itself turns gilded at completion, and swells with each surge.
+  const line = useAnimatedProps<PathProps>(
+    () => ({
+      d: d.value,
+      strokeWidth: MAIN_STROKE + Math.min(progressSV.value + surgeSV.value, 1.5),
+      stroke: interpolateColor(haloScale.value, [0, 1], [lineColor, sacredLineColor]),
+    }),
+    [d, lineColor, sacredLineColor],
+  );
+  // At completion the everyday current itself turns golden.
+  const flow = useAnimatedProps<PathProps>(
+    () => ({
+      d: d.value,
+      strokeDashoffset: flowOffset.value,
+      stroke: interpolateColor(haloScale.value, [0, 1], [accentColor, shimmerColor]),
+    }),
+    [d, accentColor, shimmerColor],
+  );
+  const shimmer = useAnimatedProps<PathProps>(
+    () => ({
+      d: d.value,
+      strokeDasharray: [110, 1e6],
+      strokeDashoffset: sweepOffset.value,
+      opacity: sweepOpacity.value,
+    }),
+    [d],
+  );
+  // Same streak, its own props instance — one animatedProps per component.
+  const shimmerWide = useAnimatedProps<PathProps>(
+    () => ({
+      d: d.value,
+      strokeDasharray: [110, 1e6],
+      strokeDashoffset: sweepOffset.value,
+      opacity: sweepOpacity.value,
+    }),
+    [d],
+  );
+  const wave = useMemo<WaveHandles>(
+    () => ({ clock, progressSV, surgeSV }),
+    [clock, progressSV, surgeSV],
+  );
+
+  return { halo, haloOuter, line, flow, shimmer, shimmerWide, wave };
 }

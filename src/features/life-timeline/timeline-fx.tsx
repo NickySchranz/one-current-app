@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import Animated, {
   cancelAnimation,
+  interpolateColor,
   useAnimatedProps,
   useAnimatedStyle,
   useDerivedValue,
@@ -820,5 +821,379 @@ function MinusOne({ x, y, color, t }: {
     >
       −1
     </AnimatedSvgText>
+  );
+}
+
+// ─── Completion celebration ──────────────────────────────────────────────────
+// Reaching the sacred state earns a themed spectacle: rings bloom out of the
+// Now dot and a flight of theme-true particles crosses the timeline —
+// carnival confetti, demonfire embers, duskwood fireflies, abyss bubbles…
+
+export type CelebrationSpec = {
+  shape: "dot" | "rect" | "diamond" | "streak";
+  motion: "rise" | "fall" | "drift";
+  count: number;
+  twinkle?: boolean;
+  /** Resolve the particle palette from theme tokens. */
+  palette: (c: { shimmer: string; accent: string; danger: string }) => string[];
+};
+
+const DEFAULT_CELEBRATION: CelebrationSpec = {
+  shape: "dot",
+  motion: "drift",
+  count: 16,
+  twinkle: true,
+  palette: (c) => [c.shimmer, c.accent],
+};
+
+const CELEBRATIONS: Partial<Record<ThemeId, CelebrationSpec>> = {
+  midnight: { shape: "rect", motion: "rise", count: 18, twinkle: true, palette: (c) => [c.accent, c.shimmer] },
+  sunprint: { shape: "diamond", motion: "fall", count: 16, palette: (c) => [c.shimmer, c.accent, c.danger] },
+  duskwood: { shape: "dot", motion: "drift", count: 14, twinkle: true, palette: (c) => [c.shimmer, "#b7e07e"] },
+  porcelain: { shape: "diamond", motion: "fall", count: 14, palette: (c) => [c.shimmer, c.danger] },
+  demonfire: { shape: "streak", motion: "rise", count: 20, palette: (c) => [c.shimmer, "#ff5533", "#ffd27a"] },
+  koipond: { shape: "dot", motion: "drift", count: 16, palette: (c) => [c.shimmer, "#ffffff", c.accent] },
+  carnival: { shape: "rect", motion: "fall", count: 26, palette: (c) => [c.shimmer, c.accent, c.danger, "#7fb1ff"] },
+  catnap: { shape: "dot", motion: "drift", count: 14, twinkle: true, palette: (c) => [c.shimmer, "#c9b7e8"] },
+  abyss: { shape: "dot", motion: "rise", count: 18, palette: (c) => [c.shimmer, c.accent] },
+  pompom: { shape: "dot", motion: "drift", count: 18, palette: (c) => [c.shimmer, "#ffd7b0"] },
+  gravemist: { shape: "dot", motion: "drift", count: 14, twinkle: true, palette: (c) => [c.shimmer, "#cfe3dd"] },
+};
+
+export function celebrationFor(theme: ThemeId): CelebrationSpec {
+  return CELEBRATIONS[theme] ?? DEFAULT_CELEBRATION;
+}
+
+/** Deterministic per-particle "randomness" — stable across re-renders. */
+function seeded(i: number, salt: number): number {
+  const x = Math.sin(i * 127.1 + salt * 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function CelebrationParticle({
+  spec,
+  index,
+  x0,
+  y0,
+  color,
+}: {
+  spec: CelebrationSpec;
+  index: number;
+  x0: number;
+  y0: number;
+  color: string;
+}) {
+  const p = useSharedValue(0);
+  const dur = 1500 + seeded(index, 1) * 1000;
+  useEffect(() => {
+    p.value = 0;
+    p.value = withDelay(index * 60, withTiming(1, { duration: dur, easing: Easing.out(Easing.quad) }));
+    return () => cancelAnimation(p);
+  }, [index, p, dur]);
+
+  // All randomness resolved here — the worklet closes over plain numbers.
+  const drift = (seeded(index, 2) - 0.5) * 95;
+  const lift = 70 + seeded(index, 3) * 75;
+  const spin = (seeded(index, 4) - 0.5) * 560;
+  const wander = (seeded(index, 5) - 0.5) * 34;
+  const motion = spec.motion;
+  const twinkle = !!spec.twinkle;
+  const style = useAnimatedStyle(() => {
+    const t = p.value;
+    const dy =
+      motion === "rise"
+        ? -lift * t
+        : motion === "fall"
+          ? lift * 0.9 * t
+          : -18 * Math.sin(t * Math.PI) + wander * t;
+    const fadeIn = Math.min(1, t * 6);
+    const fadeOut = 1 - Math.max(0, (t - 0.65) / 0.35);
+    const tw = twinkle ? 0.55 + 0.45 * Math.sin(t * 14 + index) : 1;
+    return {
+      opacity: Math.max(0, fadeIn * fadeOut * tw),
+      transform: [
+        { translateX: drift * t + Math.sin(t * 6 + index) * 7 },
+        { translateY: dy },
+        { rotate: `${spin * t}deg` },
+        { scale: 1 - 0.25 * t },
+      ],
+    };
+  });
+  const base =
+    spec.shape === "rect"
+      ? { width: 7, height: 4.5, borderRadius: 1 }
+      : spec.shape === "diamond"
+        ? { width: 7, height: 7, borderRadius: 1.5 }
+        : spec.shape === "streak"
+          ? { width: 2.5, height: 9, borderRadius: 1.25 }
+          : { width: 6, height: 6, borderRadius: 3 };
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[{ position: "absolute", left: x0, top: y0, backgroundColor: color }, base, style]}
+    />
+  );
+}
+
+function CelebrationRing({ x, y, delay, color }: { x: number; y: number; delay: number; color: string }) {
+  const p = useSharedValue(0);
+  useEffect(() => {
+    p.value = 0;
+    p.value = withDelay(delay, withTiming(1, { duration: 1300, easing: Easing.out(Easing.cubic) }));
+    return () => cancelAnimation(p);
+  }, [delay, p]);
+  const style = useAnimatedStyle(() => ({
+    opacity: Math.max(0, (1 - p.value) * 0.85),
+    transform: [{ scale: 0.15 + p.value * 2.4 }],
+  }));
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        {
+          position: "absolute",
+          left: x - 32,
+          top: y - 32,
+          width: 64,
+          height: 64,
+          borderRadius: 32,
+          borderWidth: 2.5,
+          borderColor: color,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
+/**
+ * The full completion spectacle: three rings bloom from the Now dot while a
+ * flight of theme-true particles lifts off the whole line. Mount it once at
+ * the crossing into the sacred state; unmount after ~3s.
+ */
+export function CelebrationBurst({
+  theme,
+  nowX,
+  mainY,
+  shimmer,
+  accent,
+  danger,
+}: {
+  theme: ThemeId;
+  nowX: number;
+  mainY: number;
+  shimmer: string;
+  accent: string;
+  danger: string;
+}) {
+  const spec = celebrationFor(theme);
+  const palette = spec.palette({ shimmer, accent, danger });
+  return (
+    <>
+      {[0, 220, 460].map((delay, i) => (
+        <CelebrationRing key={i} x={nowX} y={mainY} delay={delay} color={shimmer} />
+      ))}
+      {Array.from({ length: spec.count }, (_, i) => (
+        <CelebrationParticle
+          key={i}
+          spec={spec}
+          index={i}
+          x0={nowX * (0.06 + 0.88 * seeded(i, 9))}
+          y0={mainY - 4 + (seeded(i, 8) - 0.5) * 10}
+          color={palette[i % palette.length]}
+        />
+      ))}
+    </>
+  );
+}
+
+// ─── Theme backdrop: ambient weather behind the timeline ─────────────────────
+// Every theme has its own weather, and the weather knows how gathered you
+// are: as wholeness rises the layer grows warmer, brighter and more serene;
+// scattered days keep it dim, sparse and restless. Gravemist runs the other
+// way — its fog THINS as you come back together.
+
+export type BackdropSpec = {
+  kind: "drift" | "rise" | "fall" | "twinkle";
+  count: number;
+  /** particle size range, px */
+  size: [number, number];
+  /** opacity ceiling at [scattered, whole] */
+  opacity: [number, number];
+  /** loop-duration multiplier at [scattered, whole] — bigger = more serene */
+  speed: [number, number];
+  /** particle color at [scattered, whole] */
+  palette: (c: { shimmer: string; accent: string; inkFaint: string }) => [string, string];
+  /** the mood axis is inverted: gathering CLEARS the layer (gravemist fog) */
+  clears?: boolean;
+};
+
+const DEFAULT_BACKDROP: BackdropSpec = {
+  kind: "drift",
+  count: 12,
+  size: [3, 5],
+  opacity: [0.05, 0.15],
+  speed: [0.7, 1.3],
+  palette: (c) => [c.inkFaint, c.shimmer],
+};
+
+const BACKDROPS: Partial<Record<ThemeId, BackdropSpec>> = {
+  midnight: { kind: "twinkle", count: 22, size: [1.5, 3], opacity: [0.10, 0.30], speed: [0.5, 1.4], palette: (c) => [c.inkFaint, c.shimmer] },
+  sunprint: { kind: "fall", count: 12, size: [2.5, 4.5], opacity: [0.06, 0.16], speed: [0.7, 1.3], palette: (c) => [c.inkFaint, c.shimmer] },
+  duskwood: { kind: "drift", count: 14, size: [2, 4], opacity: [0.10, 0.30], speed: [0.6, 1.2], palette: (c) => [c.inkFaint, c.shimmer] },
+  porcelain: { kind: "drift", count: 8, size: [2, 3.5], opacity: [0.03, 0.09], speed: [0.8, 1.5], palette: (c) => [c.inkFaint, c.shimmer] },
+  demonfire: { kind: "rise", count: 16, size: [2, 4], opacity: [0.12, 0.26], speed: [0.45, 1.1], palette: () => ["#c23b2a", "#ffce7a"] },
+  koipond: { kind: "drift", count: 14, size: [2.5, 5], opacity: [0.07, 0.20], speed: [0.6, 1.4], palette: (c) => [c.inkFaint, c.shimmer] },
+  carnival: { kind: "fall", count: 16, size: [2.5, 4.5], opacity: [0.07, 0.18], speed: [0.6, 1.2], palette: (c) => [c.accent, c.shimmer] },
+  catnap: { kind: "drift", count: 12, size: [3, 6], opacity: [0.06, 0.16], speed: [0.7, 1.4], palette: (c) => ["#b7a5d6", c.shimmer] },
+  abyss: { kind: "rise", count: 16, size: [1.5, 3.5], opacity: [0.10, 0.26], speed: [0.55, 1.2], palette: (c) => [c.inkFaint, c.shimmer] },
+  pompom: { kind: "drift", count: 14, size: [3, 6], opacity: [0.07, 0.18], speed: [0.7, 1.3], palette: (c) => ["#e8c9ad", c.shimmer] },
+  gravemist: { kind: "drift", count: 14, size: [26, 54], opacity: [0.05, 0.16], speed: [0.7, 1.3], palette: (c) => [c.inkFaint, c.shimmer], clears: true },
+};
+
+export function backdropFor(theme: ThemeId): BackdropSpec {
+  return BACKDROPS[theme] ?? DEFAULT_BACKDROP;
+}
+
+function BackdropParticle({
+  spec,
+  index,
+  width,
+  height,
+  moodSV,
+  colors,
+  durationMs,
+}: {
+  spec: BackdropSpec;
+  index: number;
+  width: number;
+  height: number;
+  moodSV: SharedValue<number>;
+  colors: [string, string];
+  durationMs: number;
+}) {
+  const q = useSharedValue(0);
+  useEffect(() => {
+    q.value = 0;
+    q.value = withRepeat(withTiming(1, { duration: durationMs, easing: Easing.linear }), -1, false);
+    return () => cancelAnimation(q);
+  }, [q, durationMs]);
+
+  const x = seeded(index, 11) * width;
+  const y = seeded(index, 12) * height;
+  const sz = spec.size[0] + seeded(index, 13) * (spec.size[1] - spec.size[0]);
+  const phase = seeded(index, 14);
+  const swayAmp = 12 + seeded(index, 15) * 20;
+  const kind = spec.kind;
+  const count = spec.count;
+  const clears = !!spec.clears;
+  const [op0, op1] = spec.opacity;
+  const [c0, c1] = colors;
+
+  const style = useAnimatedStyle(() => {
+    const m = moodSV.value;
+    const axis = clears ? 1 - m : m;
+    const tt = (q.value + phase) % 1;
+    // density: particles wake up one by one as the mood axis rises
+    const gate = Math.max(0, Math.min(1, axis * count - index));
+    const ceiling = op0 + (op1 - op0) * axis;
+    let fade = 1;
+    let tx = 0;
+    let ty = 0;
+    let scale = 1;
+    if (kind === "rise") {
+      ty = 60 - 130 * tt;
+      tx = Math.sin(tt * 4 * Math.PI + index) * 9;
+      fade = Math.sin(tt * Math.PI);
+    } else if (kind === "fall") {
+      ty = -60 + 130 * tt;
+      tx = Math.sin(tt * 3 * Math.PI + index) * 12;
+      fade = Math.sin(tt * Math.PI);
+    } else if (kind === "twinkle") {
+      fade = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(2 * Math.PI * (tt * 3 + index * 0.37)));
+      scale = 1 + 0.2 * Math.sin(2 * Math.PI * (tt * 2 + index));
+    } else {
+      tx = Math.sin(2 * Math.PI * tt + index) * swayAmp;
+      ty = Math.cos(2 * Math.PI * tt * 0.8 + index * 1.7) * (swayAmp * 0.55);
+      fade = 0.7 + 0.3 * Math.sin(2 * Math.PI * tt + index * 0.9);
+    }
+    return {
+      opacity: ceiling * gate * fade,
+      backgroundColor: interpolateColor(m, [0, 1], [c0, c1]),
+      transform: [{ translateX: tx }, { translateY: ty }, { scale }],
+    };
+  });
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        {
+          position: "absolute",
+          left: x,
+          top: y,
+          width: sz,
+          height: sz,
+          borderRadius: sz / 2,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
+/**
+ * The ambient weather layer. Mount it as the stage's first child (it renders
+ * behind the transparent canvas). `mood` is the wholeness score 0..1 — the
+ * layer glides toward warm/bright/serene as it rises.
+ */
+export function ThemeBackdrop({
+  theme,
+  width,
+  height,
+  mood,
+  shimmer,
+  accent,
+  inkFaint,
+  reducedMotion,
+}: {
+  theme: ThemeId;
+  width: number;
+  height: number;
+  mood: number;
+  shimmer: string;
+  accent: string;
+  inkFaint: string;
+  reducedMotion: boolean;
+}) {
+  const spec = backdropFor(theme);
+  const moodSV = useSharedValue(mood);
+  useEffect(() => {
+    moodSV.value = withTiming(mood, { duration: 1200, easing: Easing.inOut(Easing.ease) });
+    return () => cancelAnimation(moodSV);
+  }, [mood, moodSV]);
+
+  // Loop duration follows the mood only in coarse steps, so loops rarely
+  // restart; opacity/color glide continuously off the shared value.
+  const bucket = Math.round(Math.max(0, Math.min(1, mood)) * 4) / 4;
+  const speedMul = spec.speed[0] + (spec.speed[1] - spec.speed[0]) * (spec.clears ? 1 - bucket : bucket);
+
+  if (reducedMotion) return null;
+  const colors = spec.palette({ shimmer, accent, inkFaint });
+  return (
+    <>
+      {Array.from({ length: spec.count }, (_, i) => (
+        <BackdropParticle
+          key={i}
+          spec={spec}
+          index={i}
+          width={width}
+          height={height}
+          moodSV={moodSV}
+          colors={colors}
+          durationMs={Math.round((7000 + seeded(i, 16) * 5000) * speedMul)}
+        />
+      ))}
+    </>
   );
 }

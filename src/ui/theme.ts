@@ -37,6 +37,12 @@ export type ThemeTokens = {
   mainFlowDash: [number, number];
   /** Whether surfaces cast shadows (Porcelain casts none). */
   shadows: boolean;
+  /**
+   * The celebration color: the flourish that sweeps the main line when a
+   * thread gets its answer, and the halo of the fully-answered sacred line.
+   * Gold by default; each theme tunes it to its own light source.
+   */
+  shimmer: string;
 };
 
 const webFont = (stack: string) => (Platform.OS === "web" ? stack : undefined);
@@ -61,7 +67,25 @@ const FONT_FUTURA = webFont('Futura, "Century Gothic", "Trebuchet MS", "URW Goth
 
 type PartialTokens = Omit<ThemeTokens, "id" | "mode">;
 
-const base: Omit<PartialTokens, never> = {
+// Each theme's celebration light, matched to its palette's own imagery:
+// riverbed's warm gold, duskwood's fireflies, abyss's anglerfish lure,
+// demonfire's embers, gravemist's lantern, koi pond's sun on water…
+const SHIMMER: Record<ThemeId, string> = {
+  riverbed: "#d9a94a",
+  midnight: "#f2ce6b",
+  sunprint: "#d98a3d",
+  duskwood: "#ffc966",
+  porcelain: "#c8a24b",
+  demonfire: "#ff9d4d",
+  koipond: "#ffd166",
+  carnival: "#f0b429",
+  catnap: "#e8b96b",
+  abyss: "#9fe8ff",
+  pompom: "#f4a95c",
+  gravemist: "#ffd98a",
+};
+
+const base: Omit<PartialTokens, "shimmer"> = {
   bg: "#faf9f6",
   bgRaised: "#ffffff",
   bgSunken: "#f1efe9",
@@ -88,7 +112,7 @@ const base: Omit<PartialTokens, never> = {
 };
 
 function theme(id: ThemeId, mode: "light" | "dark", overrides: Partial<PartialTokens>): ThemeTokens {
-  const t = { ...base, ...overrides };
+  const t = { ...base, shimmer: SHIMMER[id], ...overrides };
   if (overrides.fontBody !== undefined && overrides.fontDisplay === undefined) {
     t.fontDisplay = overrides.fontBody;
   }
