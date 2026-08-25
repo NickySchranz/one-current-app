@@ -41,7 +41,7 @@ import { useTheme } from "@/ui/theme";
 import { alpha, mix } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
 import { loudnessWord } from "@/ui/LoudnessSlider";
-import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, ThemeBackdrop, ThemeScenery, useDashFlow } from "./timeline-fx";
+import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, CoinToken, COIN_LEAD, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, ThemeBackdrop, ThemeScenery, useDashFlow } from "./timeline-fx";
 import { Mascot } from "./Mascot";
 import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
@@ -363,6 +363,8 @@ export function LifeTimeline() {
   const mascotTypePref = useAppStore((s) => s.mascotType);
   const draftBranchId = useAppStore((s) => s.draftBranchId);
   const dialLoudness = useAppStore((s) => s.dialLoudness);
+  const maybeDropCoin = useAppStore((s) => s.maybeDropCoin);
+  const coin = useAppStore((s) => s.coin);
   const actions = useAppStore((s) => s.actions);
   const language = useAppStore((s) => s.language);
   const t = useT();
@@ -653,6 +655,9 @@ export function LifeTimeline() {
             blockTapsUntilRef.current = Date.now() + 350;
             const c = candidateRef.current;
             if (dialLevelRef.current !== c.startLevel) {
+              // Rolled before the commit: the loudness log is the coin's
+              // anti-farm memory and must still end at the old level here.
+              maybeDropCoin(c.branchId, c.startLevel, dialLevelRef.current);
               void dialLoudness(c.branchId, dialLevelRef.current as Loudness);
             }
           } else if (modeRef.current === "pan") {
@@ -892,6 +897,62 @@ export function LifeTimeline() {
 
   // Keep reaction ref current so effects below can call it
   mascotReactionRef.current = mascot.showReaction;
+
+  // ── Token drop: a coin pops off a thread; Pip dashes over to snatch it ──
+  // Local FX state outlives the store's `coin` (which clears at collect) so
+  // the burst and the floating "+10" can finish playing.
+  const [coinFx, setCoinFx] = useState<{ key: number; branchId: string; collected: boolean } | null>(null);
+  const coinFxRef = useRef(coinFx);
+  coinFxRef.current = coinFx;
+  const [coinFlash, setCoinFlash] = useState(0);
+  const doCollect = useCallback(() => {
+    const cur = coinFxRef.current;
+    if (!cur || cur.collected) return;
+    setCoinFx({ ...cur, collected: true });
+    setCoinFlash((k) => k + 1);
+    useAppStore.getState().collectCoin();
+  }, []);
+  const coinKey = coin?.key;
+  useEffect(() => {
+    if (!coinKey || !coin) return;
+    setCoinFx({ key: coin.key, branchId: coin.branchId, collected: false });
+  }, [coinKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Send Pip for it; keep trying while he is mid-super-bonk. If he can't
+  // reach it (thread scrolled away, motion reduced), patience collects it —
+  // the reward is never lost.
+  useEffect(() => {
+    if (!coinFx || coinFx.collected) return;
+    // While a sheet is up the token just bobs in place — the payoff deserves
+    // the open stage, and the wait is the anticipation.
+    if (operation.kind !== "idle") return;
+    if (!showMascot || reducedMotion) {
+      const id = setTimeout(doCollect, 900);
+      return () => clearTimeout(id);
+    }
+    let retry: ReturnType<typeof setInterval> | null = null;
+    if (!mascot.collectCoin(coinFx.branchId, doCollect)) {
+      retry = setInterval(() => {
+        if (mascot.collectCoin(coinFx.branchId, doCollect) && retry) clearInterval(retry);
+      }, 900);
+    }
+    const failsafe = setTimeout(doCollect, 9000);
+    return () => {
+      if (retry) clearInterval(retry);
+      clearTimeout(failsafe);
+    };
+  }, [coinFx?.key, coinFx?.collected, operation.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The burst finished: take the token off the stage.
+  useEffect(() => {
+    if (!coinFx?.collected) return;
+    const id = setTimeout(() => setCoinFx(null), 1200);
+    return () => clearTimeout(id);
+  }, [coinFx?.collected]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The meter's little gulp: the pill fill glows for a beat after a token.
+  useEffect(() => {
+    if (coinFlash === 0) return;
+    const id = setTimeout(() => setCoinFlash(0), 700);
+    return () => clearTimeout(id);
+  }, [coinFlash]);
 
   // Running Pip to the held thread (op focus, armed bonk, or the draft being
   // created) now lives inside useMascot's hold — no per-source effects here.
@@ -1311,6 +1372,32 @@ export function LifeTimeline() {
                       variant={attackVariantFor(theme)}
                       accent={tk.accent}
                       calm={hit.calm}
+                    />
+                  );
+                })()}
+
+              {/* a dropped token, hovering over its thread until collected */}
+              {coinFx &&
+                (() => {
+                  const g = layout.geometries.find((x) => x.branchId === coinFx.branchId);
+                  if (!g || !g.inWindow) return null;
+                  const cx = g.endX + COIN_LEAD;
+                  const fade = Math.max(
+                    0,
+                    Math.min(1, (layout.metrics.width - 40 - cx) / 45, (cx + 20) / 45),
+                  );
+                  if (fade <= 0) return null;
+                  return (
+                    <CoinToken
+                      key={coinFx.key}
+                      x={cx}
+                      y={g.endY}
+                      gold={tk.shimmer}
+                      accent={tk.accent}
+                      label="+10"
+                      collected={coinFx.collected}
+                      fade={fade}
+                      reducedMotion={reducedMotion}
                     />
                   );
                 })()}
@@ -1745,7 +1832,8 @@ export function LifeTimeline() {
                       top: 0,
                       bottom: 0,
                       width: `${Math.min(100, bonkCharge)}%`,
-                      backgroundColor: alpha(tk.shimmer, 0.45),
+                      // a fresh token makes the fill gulp visibly brighter
+                      backgroundColor: alpha(tk.shimmer, coinFlash > 0 ? 0.9 : 0.45),
                     }}
                   />
                 )}

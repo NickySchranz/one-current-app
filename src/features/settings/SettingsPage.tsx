@@ -168,6 +168,7 @@ export function SettingsSections() {
   const setTimeRate = useAppStore((s) => s.setTimeRate);
   const resetTimeSkew = useAppStore((s) => s.resetTimeSkew);
   const isPro = useAppStore((s) => s.isPro);
+  const coinAlways = useAppStore((s) => s.coinAlways);
   const setPro = useAppStore((s) => s.setPro);
   const effectivePro = useAppStore(selectEffectivePro);
   const apiOnline = useAppStore((s) => s.apiOnline);
@@ -527,6 +528,13 @@ export function SettingsSections() {
           <Button
             label={t("Fill super bonk (testing)")}
             onPress={() => useAppStore.getState().addBonkCharge(100)}
+          />
+        </View>
+        <View style={{ marginTop: 12 }}>
+          <CheckboxRow
+            label={t("Always drop tokens (testing)")}
+            checked={coinAlways}
+            onChange={(v) => useAppStore.getState().setCoinAlways(v)}
           />
         </View>
       </Card>

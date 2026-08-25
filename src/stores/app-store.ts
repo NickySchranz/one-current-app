@@ -10,7 +10,7 @@ import {
   createBranch,
   easeLoudness,
   trackLoudness,
-  type CreateBranchInput, effectiveLoudness } from "@/domain/branches/logic";
+  type CreateBranchInput, effectiveLoudness, isClosed } from "@/domain/branches/logic";
 import { advanceSkew, appNow, getSkewMs, setRate, setSkewMs } from "@/domain/time/clock";
 import { addMomentToBranch, createMoment, type CreateMomentInput } from "@/domain/moments/logic";
 import { detectRecurrence, recordRecurrence } from "@/domain/branches/recurrence";
@@ -119,6 +119,10 @@ type AppState = {
   burn?: { key: number; branchId: string; items: string[]; lesson: string };
   /** Pip just struck a thread (drives the attack animation). */
   hit?: { key: number; branchId: string; calm: boolean };
+  /** A token popped out of a thread and waits to be collected. One at a time. */
+  coin?: { key: number; branchId: string };
+  /** Testing: every qualifying drop yields a token (no chance roll). */
+  coinAlways: boolean;
   /** An optimistic, unsaved line shown while the create form is open. */
   draftBranchId: string | null;
   /**
@@ -178,6 +182,17 @@ type AppState = {
   /** Fire the super bonk: the meter empties and starts growing again. */
   consumeSuperBonk(): void;
   clearHit(): void;
+  /**
+   * A loudness dial just moved down: maybe a token jumps out. Call BEFORE the
+   * change is committed, so the thread's loudness log still ends at the old
+   * value — the log is the anti-farm memory (see loudnessFloorToday).
+   */
+  maybeDropCoin(branchId: string, prevLevel: number, newLevel: number): void;
+  /** The token was collected (by Pip or by patience): it becomes charge. */
+  collectCoin(): void;
+  clearCoin(): void;
+  /** Testing: force every qualifying drop to yield a token. */
+  setCoinAlways(v: boolean): void;
   /** Phase 1 of a burn: light the fire. Nothing is written or deleted yet. */
   burnBranch(branchId: string, items: string[], lesson: string): void;
   /** Phase 2: the fire is done — keep the lesson, remove the thread entirely. */
@@ -252,10 +267,31 @@ const CHARGE_INTEGRATE = 25;
 const CHARGE_BURN = 25;
 const CHARGE_HANDOFF = 20;
 const CHARGE_BONK = 3;
+/** A collected token is a real bite of the meter. */
+const CHARGE_COIN = 10;
+/** Chance a genuine loudness drop shakes a token loose. */
+const COIN_CHANCE_DIAL = 0.5;
+/** Chance a charging bonk also drops a token. */
+const COIN_CHANCE_BONK = 0.35;
+const COIN_ALWAYS_KEY = "one-current-coin-always";
 /** A thread yields bonk-charge at most once per this window (ms). */
 const BONK_CHARGE_COOLDOWN_MS = 60 * 60 * 1000;
 /** Session-only: when each thread last yielded bonk-charge. */
 const bonkChargeStamps = new Map<string, number>();
+
+/**
+ * The lowest loudness this thread has already stood at today, per its own
+ * log. Tokens only fall on the way past this mark — dialing up and back
+ * down revisits old ground and shakes nothing loose. The log survives
+ * reloads, so the mark does too.
+ */
+function loudnessFloorToday(branch: PsychologicalBranch, day: string): number {
+  let floor = Infinity;
+  for (const entry of branch.loudnessLog ?? []) {
+    if (entry.at.slice(0, 10) === day) floor = Math.min(floor, Math.round(entry.loudness));
+  }
+  return floor;
+}
 const MASCOT_TYPES: MascotType[] = ["chronicler", "wisp", "wanderer"];
 
 function parseAuthUser(raw: string | null): AuthUser | null {
@@ -284,6 +320,7 @@ async function loadSettings(): Promise<{
   authUser: AuthUser | null;
   mascotType: MascotType;
   bonkCharge: number;
+  coinAlways: boolean;
 }> {
   let theme = defaultTheme();
   let language: "en" | "es" | "es-CO" = "en";
@@ -292,8 +329,9 @@ async function loadSettings(): Promise<{
   let authUser: AuthUser | null = null;
   let mascotType: MascotType = MASCOT_TYPES[Math.floor(Math.random() * MASCOT_TYPES.length)];
   let bonkCharge = 0;
+  let coinAlways = false;
   try {
-    const [savedTheme, savedLanguage, savedPro, savedAuth, reduceMotion, savedMascot, savedCharge] = await Promise.all([
+    const [savedTheme, savedLanguage, savedPro, savedAuth, reduceMotion, savedMascot, savedCharge, savedCoinAlways] = await Promise.all([
       AsyncStorage.getItem(THEME_KEY),
       AsyncStorage.getItem(LANGUAGE_KEY),
       AsyncStorage.getItem(PRO_KEY),
@@ -301,9 +339,11 @@ async function loadSettings(): Promise<{
       AccessibilityInfo.isReduceMotionEnabled(),
       AsyncStorage.getItem(MASCOT_KEY),
       AsyncStorage.getItem(BONK_CHARGE_KEY),
+      AsyncStorage.getItem(COIN_ALWAYS_KEY),
     ]);
     const parsedCharge = Number(savedCharge);
     if (Number.isFinite(parsedCharge)) bonkCharge = Math.max(0, Math.min(100, parsedCharge));
+    coinAlways = savedCoinAlways === "1";
     isPro = savedPro === "1";
     authUser = parseAuthUser(savedAuth);
     if (savedTheme && isThemeId(savedTheme) && (isPro || !isProTheme(savedTheme)))
@@ -319,7 +359,7 @@ async function loadSettings(): Promise<{
   } catch {
     // storage unavailable; defaults apply
   }
-  return { theme, language, reducedMotion, isPro, authUser, mascotType, bonkCharge };
+  return { theme, language, reducedMotion, isPro, authUser, mascotType, bonkCharge, coinAlways };
 }
 
 /**
@@ -354,6 +394,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   statusFilter: "all",
   reducedMotion: false,
   bonkCharge: 0,
+  coinAlways: false,
   theme: defaultTheme(),
   mascotType: "chronicler" as MascotType,
   isPro: false,
@@ -648,7 +689,40 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (Date.now() - last >= BONK_CHARGE_COOLDOWN_MS) {
       bonkChargeStamps.set(branchId, Date.now());
       get().addBonkCharge(CHARGE_BONK);
+      // A charging hit can shake a token loose too — same hourly gate, so
+      // it inherits the anti-farm for free.
+      if (!get().coin && (get().coinAlways || Math.random() < COIN_CHANCE_BONK)) {
+        set({ coin: { key: Date.now(), branchId } });
+      }
     }
+  },
+
+  maybeDropCoin(branchId, prevLevel, newLevel) {
+    const prev = Math.round(prevLevel);
+    const next = Math.round(newLevel);
+    if (next >= prev) return;
+    const branch = get().branches.find((b) => b.id === branchId);
+    if (!branch || isClosed(branch)) return;
+    // Only ground this thread has not stood on today counts. The floor is
+    // read before the dial commits, so it still ends at the old value.
+    const floor = Math.min(loudnessFloorToday(branch, todayIso()), prev);
+    if (next >= floor) return;
+    if (get().coin) return;
+    if (!get().coinAlways && Math.random() >= COIN_CHANCE_DIAL) return;
+    set({ coin: { key: Date.now(), branchId } });
+  },
+
+  collectCoin() {
+    if (!get().coin) return;
+    get().addBonkCharge(CHARGE_COIN);
+    set({ coin: undefined });
+  },
+
+  clearCoin: () => set({ coin: undefined }),
+
+  setCoinAlways(v) {
+    set({ coinAlways: v });
+    AsyncStorage.setItem(COIN_ALWAYS_KEY, v ? "1" : "0").catch(() => {});
   },
 
   addBonkCharge(amount) {

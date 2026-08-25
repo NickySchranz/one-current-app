@@ -90,6 +90,13 @@ export function QuickBranchMenu({ branchId, startExpanded = false, dialOnly = fa
   const reopenBranch = useAppStore((s) => s.reopenBranch);
   const easeBranch = useAppStore((s) => s.easeBranch);
   const dialLoudness = useAppStore((s) => s.dialLoudness);
+  const maybeDropCoin = useAppStore((s) => s.maybeDropCoin);
+  // A genuine turn-down can shake a token loose. Rolled before the commit so
+  // the loudness log still ends at the level the thumb started from.
+  const dialWithCoin = (v: number) => {
+    if (branch) maybeDropCoin(branchId, effectiveLoudness(branch, appNow()), v);
+    void dialLoudness(branchId, v as Loudness);
+  };
   const [eased, setEased] = useState(false);
   // Reopening counts against the free open-thread limit like creating does.
   const canOpenThread = useThreadGate();
@@ -201,7 +208,7 @@ export function QuickBranchMenu({ branchId, startExpanded = false, dialOnly = fa
               word: t(loudnessWord(feltNow)),
               level: Math.round(feltNow),
             })}
-            onChange={(v) => void dialLoudness(branchId, v as Loudness)}
+            onChange={(v) => dialWithCoin(v)}
           />
           {feltNow > branch.loudness && (
             <Hint style={{ marginBottom: 0 }}>
@@ -264,7 +271,7 @@ export function QuickBranchMenu({ branchId, startExpanded = false, dialOnly = fa
               word: t(loudnessWord(felt)),
               level: Math.round(felt),
             })}
-            onChange={(v) => void dialLoudness(branchId, v as Loudness)}
+            onChange={(v) => dialWithCoin(v)}
           />
           {felt > branch.loudness && (
             <Hint style={{ marginBottom: 0 }}>{t("Days without an answer make it ask louder.")}</Hint>

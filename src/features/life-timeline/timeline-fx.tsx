@@ -19,6 +19,7 @@ import Svg, { Circle, Defs, Ellipse, G, LinearGradient, Path, Rect, Stop, Text a
 import type { PathProps } from "react-native-svg";
 import type { ThemeId } from "@/visualization/theme";
 import { pathLength, samplePath } from "@/visualization/path-sample";
+import { mix } from "@/ui/color";
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 export const AnimatedPath = Animated.createAnimatedComponent(Path);
@@ -1862,5 +1863,210 @@ export function ThemeScenery({
           })}
       </Svg>
     </Animated.View>
+  );
+}
+
+// ─── Token drop ──────────────────────────────────────────────────────────────
+// A genuine turn-down (or a charging bonk) can shake a token out of the
+// thread: it pops off the line, hangs there flipping like the coin it is,
+// and waits for Pip. Collecting it turns it into super-bonk charge.
+
+/** 8×8 pixel coin, same language as Pip. '.'=empty G=gold H=shine S=shade D=rim */
+const COIN_ROWS = [
+  "..DDDD..",
+  ".DGGHGD.",
+  "DGGHHSGD",
+  "DGHHGSGD",
+  "DGHHGSGD",
+  "DGGHHSGD",
+  ".DGGSGD.",
+  "..DDDD..",
+];
+const COIN_PX = 2.6;
+
+function CoinPixels({ gold }: { gold: string }) {
+  const pal: Record<string, string> = {
+    G: gold,
+    H: mix(gold, "#ffffff", 55),
+    S: mix(gold, "#000000", 30),
+    D: mix(gold, "#000000", 58),
+  };
+  const half = (COIN_ROWS.length * COIN_PX) / 2;
+  const cells: { x: number; y: number; k: string }[] = [];
+  COIN_ROWS.forEach((row, r) => {
+    row.split("").forEach((k, c) => {
+      if (k !== ".") cells.push({ x: c * COIN_PX - half, y: r * COIN_PX - half, k });
+    });
+  });
+  return (
+    <>
+      {cells.map((p, i) => (
+        <Rect key={i} x={p.x} y={p.y} width={COIN_PX - 0.12} height={COIN_PX - 0.12} fill={pal[p.k]} />
+      ))}
+    </>
+  );
+}
+
+/** The "+10" that floats off a collected token — the reward, made visible. */
+function PlusCharge({ x, y, label, color, t }: {
+  x: number;
+  y: number;
+  label: string;
+  color: string;
+  t: SharedValue<number>;
+}) {
+  const props = useAnimatedProps(() => ({
+    y: y - 10 - t.value * 34,
+    opacity: t.value < 0.12 ? t.value * 8 : Math.max(0, 1.2 - t.value * 1.2),
+    fontSize: 15 + t.value * 6,
+  }));
+  return (
+    <AnimatedSvgText
+      x={x}
+      fill={color}
+      stroke="#ffffff"
+      strokeWidth={0.7}
+      fontWeight="700"
+      textAnchor="middle"
+      animatedProps={props}
+    >
+      {label}
+    </AnimatedSvgText>
+  );
+}
+
+/** How high above the line a waiting token hovers — clear of Pip's hat, under the main line. */
+export const COIN_HOVER = 30;
+/** How far ahead of the line's endpoint the token lands (a step to Pip's right). */
+export const COIN_LEAD = 24;
+
+/**
+ * `.coin-token` — the token itself, anchored to the thread's endpoint
+ * (x, y are world coords; re-render moves it with pans). Pops up off the
+ * line, flips in place while it waits, and bursts into charge when
+ * `collected` flips true. Transient FX: full-rate motion is intentional.
+ */
+export function CoinToken({ x, y, gold, accent, label, collected, fade = 1, reducedMotion }: {
+  x: number;
+  y: number;
+  gold: string;
+  accent: string;
+  /** The floating reward text, e.g. "+10". */
+  label: string;
+  collected: boolean;
+  /** Canvas-edge fade, 0..1 (same math as Pip). */
+  fade?: number;
+  reducedMotion: boolean;
+}) {
+  const ty = useSharedValue(0);
+  const spin = useSharedValue(0.25); // start face-on
+  const bob = useSharedValue(0);
+  const spawnT = useSharedValue(0);
+  const burst = useSharedValue(0);
+  const appear = useSharedValue(0);
+
+  useEffect(() => {
+    appear.value = withTiming(1, { duration: reducedMotion ? 400 : 120 });
+    if (reducedMotion) {
+      ty.value = -COIN_HOVER;
+      return () => cancelAnimation(appear);
+    }
+    // the block moment: launch past the hover point, then settle onto it
+    ty.value = 0;
+    ty.value = withSequence(
+      withTiming(-COIN_HOVER - 16, { duration: 280, easing: Easing.out(Easing.quad) }),
+      withTiming(-COIN_HOVER, { duration: 300, easing: Easing.bounce }),
+    );
+    spawnT.value = 0;
+    spawnT.value = withTiming(1, { duration: 750, easing: Easing.out(Easing.quad) });
+    // the idle flip — a coin is a coin
+    spin.value = 0;
+    spin.value = withRepeat(withTiming(1, { duration: 760, easing: Easing.linear }), -1);
+    bob.value = 0;
+    bob.value = withDelay(
+      580,
+      withRepeat(withTiming(1, { duration: 850, easing: Easing.inOut(Easing.quad) }), -1, true),
+    );
+    return () => {
+      cancelAnimation(ty);
+      cancelAnimation(spin);
+      cancelAnimation(bob);
+      cancelAnimation(spawnT);
+      cancelAnimation(appear);
+    };
+  }, [ty, spin, bob, spawnT, appear, reducedMotion]);
+
+  useEffect(() => {
+    if (!collected) return;
+    burst.value = 0;
+    burst.value = withTiming(1, { duration: 820, easing: Easing.out(Easing.quad) });
+    if (reducedMotion) return () => cancelAnimation(burst);
+    // snap up and spin into a blur before vanishing
+    cancelAnimation(ty);
+    cancelAnimation(bob);
+    cancelAnimation(spin);
+    ty.value = withTiming(ty.value - 30, { duration: 240, easing: Easing.out(Easing.quad) });
+    spin.value = withRepeat(withTiming(spin.value + 1, { duration: 200, easing: Easing.linear }), -1);
+    return () => cancelAnimation(burst);
+  }, [collected, burst, ty, bob, spin, reducedMotion]);
+
+  const coinProps = useAnimatedProps(() => {
+    const flip = reducedMotion ? 1 : Math.cos(spin.value * Math.PI * 2);
+    const gone = collected ? Math.max(0, 1 - Math.max(0, burst.value - 0.3) / 0.3) : 1;
+    return {
+      translateX: x,
+      translateY: y + ty.value + bob.value * 3,
+      scaleX: Math.max(0.08, Math.abs(flip)) * gone || 0.08,
+      scaleY: gone,
+      opacity: appear.value * gone * fade,
+    };
+  });
+
+  return (
+    <G pointerEvents="none">
+      <AnimatedGFx animatedProps={coinProps}>
+        <CoinPixels gold={gold} />
+      </AnimatedGFx>
+      {/* spawn spray: the line letting go of it */}
+      {!reducedMotion &&
+        [0, 1, 2, 3, 4].map((i) => (
+          <Fleck
+            key={`s${i}`}
+            x={x}
+            y={y - 4}
+            angle={-Math.PI / 2 + (i - 2) * 0.55}
+            dist={16}
+            size={1.7}
+            color={i % 2 === 0 ? gold : accent}
+            rise={6}
+            delay={i * 0.06}
+            t={spawnT}
+          />
+        ))}
+      {collected && (
+        <>
+          {!reducedMotion && (
+            <>
+              <Shockwave x={x} y={y - COIN_HOVER} color={gold} t={burst} scale={0.8} />
+              {Array.from({ length: 8 }, (_, i) => (
+                <Fleck
+                  key={`c${i}`}
+                  x={x}
+                  y={y - COIN_HOVER}
+                  angle={(i / 8) * Math.PI * 2 - Math.PI / 2}
+                  dist={26}
+                  size={2.1}
+                  color={i % 3 === 2 ? "#ffffff" : gold}
+                  rise={10}
+                  delay={0}
+                  t={burst}
+                />
+              ))}
+            </>
+          )}
+          <PlusCharge x={x} y={y - COIN_HOVER} label={label} color={gold} t={burst} />
+        </>
+      )}
+    </G>
   );
 }

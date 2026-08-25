@@ -52,6 +52,12 @@ export type MascotState = {
    * Under reduced motion the bonks land staggered with no run.
    */
   superBonk: (branchIds: string[], onBonk: (branchId: string) => void, onDone?: () => void) => void;
+  /**
+   * A token popped out of a thread: Pip dashes to stand under it and fires
+   * `onArrive` on landing (the collect moment). Returns false when he is
+   * busy (super bonk / already fetching) so the caller can retry.
+   */
+  collectCoin: (branchId: string, onArrive: () => void) => boolean;
   /** Localised phrase pools — use for reactions dispatched from outside the hook. */
   phrases: Phrases;
   visible: boolean;
@@ -73,6 +79,8 @@ type Phrases = {
   allDone: string[];
   /** The grand finale of a super bonk sweep. */
   superBonk: string[];
+  /** Snatching a dropped token — small delight, credit to the user. */
+  coinGrab: string[];
   attack: string[];
   attackCalm: string[];
   action_loud: string;
@@ -98,6 +106,7 @@ const EN: Phrases = {
   handled:    ["This one's answered, boss. Nice.", "Already handled this one. That was you.", "This thread got what it needed today.", "Answered and resting. Good work, boss."],
   allDone:    ["Every thread answered. Enjoy the quiet, boss.", "All handled today. That was you.", "Nothing pulling right now. We handled it.", "Whole current today, boss. I'm just chilling."],
   superBonk:  ["SUPERBONK!! Everybody settle down!", "FULL SWEEP, boss! All quiet on every line!", "BONK BONK BONK. That felt amazing.", "Every thread soothed in one run. We're unstoppable."],
+  coinGrab:   ["Ooh, shiny! You shook that loose, boss.", "GOT IT! Straight into the meter.", "A little shine — you earned that.", "Token secured! The bonk fund grows."],
   action_loud:       "This one's LOUD, boss. Give it an answer?",
   action_ready:      "Boss, this one's ready to come home!",
   action_waiting:    "Still waiting on this one…",
@@ -123,6 +132,7 @@ const ES: Phrases = {
   handled:    ["Este ya está respondido, jefe. Bien.", "Este ya lo manejaste hoy. Eso fue todo tuyo.", "Este hilo ya recibió lo suyo hoy.", "Respondido y en calma. Buen trabajo, jefe."],
   allDone:    ["Todos los hilos respondidos. Disfruta la calma, jefe.", "Todo manejado hoy. Eso fuiste tú.", "Nada jala ahora mismo. Lo manejamos.", "Corriente entera hoy, jefe. Aquí descansando."],
   superBonk:  ["¡¡SUPERBONK!! ¡Todos en calma!", "¡BARRIDA COMPLETA, jefe! ¡Todo tranquilo!", "BONK BONK BONK. Qué gusto dio eso.", "Cada hilo calmado en una sola carrera. Imparables."],
+  coinGrab:   ["¡Uy, brilla! Tú lo soltaste, jefe.", "¡LA TENGO! Directo al medidor.", "Un brillito — te lo ganaste.", "¡Ficha asegurada! El fondo del bonk crece."],
   action_loud:       "¡Este hilo está FUERTE, jefe! ¿Lo resolvemos?",
   action_ready:      "¡Jefe, este ya está listo para cerrar!",
   action_waiting:    "Todavía esperando por este…",
@@ -146,6 +156,7 @@ const ES_CO: Phrases = {
   handled:    ["Este ya está respondido, parce. Bien.", "Este ya lo manejaste hoy. Todo tuyo.", "Este hilo ya recibió lo suyo hoy.", "Respondido y en calma. Buen trabajo, parce."],
   allDone:    ["Todos los hilos respondidos. Disfruta la calma, parce.", "Todo manejado hoy. Eso fuiste tú.", "Nada jala ahora, parcero. Lo manejamos.", "Corriente entera hoy, parce. Sin afán."],
   superBonk:  ["¡¡SUPERBONK!! ¡Todos en calma, parce!", "¡BARRIDA COMPLETA! ¡Todo tranquilo, parcero!", "BONK BONK BONK. ¡Qué chimba!", "Cada hilo calmado de una. Imparables, parce."],
+  coinGrab:   ["¡Uy, qué brillo! Tú lo soltaste, parce.", "¡LA COGÍ! Directo al medidor.", "Un brillito — te lo ganaste, parcero.", "¡Ficha asegurada! El fondo del bonk crece."],
   action_loud:       "¡Este hilo está TENAZ, parce! ¿Lo resolvemos?",
   action_default:    "¿Cómo va este, parce?",
 };
@@ -735,6 +746,57 @@ export function useMascot(
     [fadeBubble, runWaypoints, scheduleJump],
   );
 
+  // ── Token fetch: dash to a dropped token and snatch it ──
+  const collectingCoinRef = useRef(false);
+  const collectCoin = useCallback(
+    (branchId: string, onArrive: () => void): boolean => {
+      if (superBonkActiveRef.current || collectingCoinRef.current) return false;
+      const geo = geometriesRef.current.find((g) => g.branchId === branchId);
+      if (!geo) return false;
+      collectingCoinRef.current = true;
+      clearTimer(); cancelRaf();
+      chillingRef.current = false;
+      setPendingIdState(null);
+      setArrivedIdState(null);
+      fadeBubble(0, 120);
+
+      // The token lands a step ahead of the endpoint (COIN_LEAD in the FX):
+      // Pip hops over to stand right under it.
+      const tx = geo.endX + 24;
+      const ty = geo.endY - PX * 10;
+      phase.current = 'jumping';
+      inspectedId.current = branchId;
+      setInspectedIdState(branchId);
+      jumpDestRef.current = { x: tx, y: ty, branchId };
+      setFrame('RUN_A');
+      runWaypoints(makeZigWaypoints(posRef.current.x, posRef.current.y, tx, ty, 1, 14), () => {
+        // Stand exactly under the token even if the timeline panned mid-run.
+        const live = geometriesRef.current.find((g) => g.branchId === branchId);
+        placeRef.current(live ? live.endX + 24 : tx, live ? live.endY - PX * 10 : ty, true);
+        jumpDestRef.current = null;
+        collectingCoinRef.current = false;
+        setFrame('LAND_A');
+        onArrive();
+        timerRef.current = setTimeout(() => {
+          setFrame('REACT');
+          setBubbleText(randomFrom(langRef.current.coinGrab));
+          fadeBubble(1, 180);
+          timerRef.current = setTimeout(() => {
+            fadeBubble(0, 300);
+            timerRef.current = setTimeout(() => {
+              phase.current = 'idle';
+              setFrame('IDLE_A');
+              scheduleJump(2500);
+            }, 350);
+          }, 2200);
+        }, 160);
+      }, 0.34);
+      return true;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs and stable callbacks
+    [fadeBubble, runWaypoints, scheduleJump],
+  );
+
   // ── Focus: run to a specific branch when user taps it ──
   const focusBranch = useCallback((branchId: string) => {
     const geo = geometriesRef.current.find(g => g.branchId === branchId);
@@ -883,6 +945,6 @@ export function useMascot(
     inspectedBranchId: inspectedIdState,
     pendingBranchId: pendingIdState,
     arrivedBranchId: arrivedIdState,
-    onPress, showReaction, focusBranch, superBonk, phrases: lang, visible,
+    onPress, showReaction, focusBranch, superBonk, collectCoin, phrases: lang, visible,
   };
 }
