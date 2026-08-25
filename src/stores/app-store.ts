@@ -96,6 +96,8 @@ type AppState = {
   typeFilter: Set<PsychologicalBranch["type"]>;
   statusFilter: StatusFilter;
   reducedMotion: boolean;
+  /** Super bonk meter, 0..100 — grows with every real answer. */
+  bonkCharge: number;
   theme: ThemeId;
   mascotType: MascotType;
   /** Pro entitlement. A local flag for now; a payment provider sets it later. */
@@ -171,6 +173,10 @@ type AppState = {
   clearReclaim(): void;
   /** Pip attacks a thread: loudness eases one notch (a touch, not a decision). */
   attackBranch(branchId: string): Promise<void>;
+  /** Dealing with threads charges the super bonk meter (clamped at 100). */
+  addBonkCharge(amount: number): void;
+  /** Fire the super bonk: the meter empties and starts growing again. */
+  consumeSuperBonk(): void;
   clearHit(): void;
   /** Phase 1 of a burn: light the fire. Nothing is written or deleted yet. */
   burnBranch(branchId: string, items: string[], lesson: string): void;
@@ -236,6 +242,20 @@ const THEME_KEY = "one-current-theme";
 const PRO_KEY = "one-current-pro";
 const AUTH_KEY = "one-current-auth";
 const MASCOT_KEY = "one-current-mascot";
+const BONK_CHARGE_KEY = "one-current-bonk-charge";
+
+// Super bonk: dealing with threads charges the meter; at 100 Pip can sweep
+// every open timeline in one glorious run. Values are easy to tune.
+const CHARGE_ACT = 20;
+const CHARGE_REST = 15;
+const CHARGE_INTEGRATE = 25;
+const CHARGE_BURN = 25;
+const CHARGE_HANDOFF = 20;
+const CHARGE_BONK = 3;
+/** A thread yields bonk-charge at most once per this window (ms). */
+const BONK_CHARGE_COOLDOWN_MS = 60 * 60 * 1000;
+/** Session-only: when each thread last yielded bonk-charge. */
+const bonkChargeStamps = new Map<string, number>();
 const MASCOT_TYPES: MascotType[] = ["chronicler", "wisp", "wanderer"];
 
 function parseAuthUser(raw: string | null): AuthUser | null {
@@ -263,6 +283,7 @@ async function loadSettings(): Promise<{
   isPro: boolean;
   authUser: AuthUser | null;
   mascotType: MascotType;
+  bonkCharge: number;
 }> {
   let theme = defaultTheme();
   let language: "en" | "es" | "es-CO" = "en";
@@ -270,15 +291,19 @@ async function loadSettings(): Promise<{
   let isPro = false;
   let authUser: AuthUser | null = null;
   let mascotType: MascotType = MASCOT_TYPES[Math.floor(Math.random() * MASCOT_TYPES.length)];
+  let bonkCharge = 0;
   try {
-    const [savedTheme, savedLanguage, savedPro, savedAuth, reduceMotion, savedMascot] = await Promise.all([
+    const [savedTheme, savedLanguage, savedPro, savedAuth, reduceMotion, savedMascot, savedCharge] = await Promise.all([
       AsyncStorage.getItem(THEME_KEY),
       AsyncStorage.getItem(LANGUAGE_KEY),
       AsyncStorage.getItem(PRO_KEY),
       AsyncStorage.getItem(AUTH_KEY),
       AccessibilityInfo.isReduceMotionEnabled(),
       AsyncStorage.getItem(MASCOT_KEY),
+      AsyncStorage.getItem(BONK_CHARGE_KEY),
     ]);
+    const parsedCharge = Number(savedCharge);
+    if (Number.isFinite(parsedCharge)) bonkCharge = Math.max(0, Math.min(100, parsedCharge));
     isPro = savedPro === "1";
     authUser = parseAuthUser(savedAuth);
     if (savedTheme && isThemeId(savedTheme) && (isPro || !isProTheme(savedTheme)))
@@ -294,7 +319,7 @@ async function loadSettings(): Promise<{
   } catch {
     // storage unavailable; defaults apply
   }
-  return { theme, language, reducedMotion, isPro, authUser, mascotType };
+  return { theme, language, reducedMotion, isPro, authUser, mascotType, bonkCharge };
 }
 
 /**
@@ -328,6 +353,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   typeFilter: new Set(),
   statusFilter: "all",
   reducedMotion: false,
+  bonkCharge: 0,
   theme: defaultTheme(),
   mascotType: "chronicler" as MascotType,
   isPro: false,
@@ -562,6 +588,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // leaving the line for today withdraws its open actions.
     let removedActionIds: string[] = [];
     if (patch?.leftOn) {
+      get().addBonkCharge(CHARGE_REST);
       const stale = get().actions.filter(
         (a) => !a.completedAt && a.branchesIntegrated.some((x) => x.branchId === id),
       );
@@ -615,6 +642,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     await get().dialLoudness(branchId, Math.max(1, felt - 1) as Loudness);
     set({ hit: { key: Date.now(), branchId, calm: false } });
+    // A real hit charges the meter — but each thread only once an hour, so
+    // bonking stays a treat, not a farm.
+    const last = bonkChargeStamps.get(branchId) ?? 0;
+    if (Date.now() - last >= BONK_CHARGE_COOLDOWN_MS) {
+      bonkChargeStamps.set(branchId, Date.now());
+      get().addBonkCharge(CHARGE_BONK);
+    }
+  },
+
+  addBonkCharge(amount) {
+    const next = Math.max(0, Math.min(100, get().bonkCharge + amount));
+    set({ bonkCharge: next });
+    AsyncStorage.setItem(BONK_CHARGE_KEY, String(next)).catch(() => {});
+  },
+
+  consumeSuperBonk() {
+    set({ bonkCharge: 0 });
+    AsyncStorage.setItem(BONK_CHARGE_KEY, "0").catch(() => {});
   },
 
   clearHit: () => set({ hit: undefined }),
@@ -644,6 +689,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }));
     await repo.saveLesson(record);
     await repo.deleteBranch(branchId);
+    get().addBonkCharge(CHARGE_BURN);
     for (const a of deadActions) await repo.deleteAction(a.id);
     // its waiting container, if any, goes with it
     const waitingRows = (await repo.loadAll()).waiting.filter((w) => w.branchId === branchId);
@@ -678,6 +724,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({ actions: [...s.actions, action] }));
     // Deciding an action lifts "nothing can be done" — they cannot coexist.
     await get().easeBranch(branchId, { leftOn: undefined });
+    get().addBonkCharge(CHARGE_ACT);
   },
 
   async markActionDone(actionId) {
@@ -746,12 +793,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       view: nowView(s.view),
       operation: { kind: "idle" },
     }));
+    get().addBonkCharge(CHARGE_INTEGRATE);
     return merge;
   },
 
   async handOffBranch(branchId) {
     const branch = get().branches.find((b) => b.id === branchId);
     if (!branch) return;
+    get().addBonkCharge(CHARGE_HANDOFF);
     const today = todayIso();
     const freed = heldFeelings(branch);
     const next: PsychologicalBranch = trackLoudness(

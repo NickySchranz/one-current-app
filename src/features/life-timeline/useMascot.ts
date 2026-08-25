@@ -46,6 +46,12 @@ export type MascotState = {
   onPress: () => void;
   showReaction: (text: string) => void;
   focusBranch: (branchId: string) => void;
+  /**
+   * The full sweep: Pip sprints through every given thread's endpoint,
+   * calling `onBonk` at each, then finishes at Now with a triumphant line.
+   * Under reduced motion the bonks land staggered with no run.
+   */
+  superBonk: (branchIds: string[], onBonk: (branchId: string) => void, onDone?: () => void) => void;
   /** Localised phrase pools — use for reactions dispatched from outside the hook. */
   phrases: Phrases;
   visible: boolean;
@@ -65,6 +71,8 @@ type Phrases = {
   handled: string[];
   /** Every open thread answered: Pip chills at Now and says these. */
   allDone: string[];
+  /** The grand finale of a super bonk sweep. */
+  superBonk: string[];
   attack: string[];
   attackCalm: string[];
   action_loud: string;
@@ -89,6 +97,7 @@ const EN: Phrases = {
   focus:      ["On it, boss!", "Right, I see this one.", "Got you!", "Let's look at this."],
   handled:    ["This one's answered, boss. Nice.", "Already handled this one. That was you.", "This thread got what it needed today.", "Answered and resting. Good work, boss."],
   allDone:    ["Every thread answered. Enjoy the quiet, boss.", "All handled today. That was you.", "Nothing pulling right now. We handled it.", "Whole current today, boss. I'm just chilling."],
+  superBonk:  ["SUPERBONK!! Everybody settle down!", "FULL SWEEP, boss! All quiet on every line!", "BONK BONK BONK. That felt amazing.", "Every thread soothed in one run. We're unstoppable."],
   action_loud:       "This one's LOUD, boss. Give it an answer?",
   action_ready:      "Boss, this one's ready to come home!",
   action_waiting:    "Still waiting on this one…",
@@ -113,6 +122,7 @@ const ES: Phrases = {
   focus:      ["¡Aquí estoy, jefe!", "Claro, a ver este.", "¡Te tengo!", "Veamos esto juntos."],
   handled:    ["Este ya está respondido, jefe. Bien.", "Este ya lo manejaste hoy. Eso fue todo tuyo.", "Este hilo ya recibió lo suyo hoy.", "Respondido y en calma. Buen trabajo, jefe."],
   allDone:    ["Todos los hilos respondidos. Disfruta la calma, jefe.", "Todo manejado hoy. Eso fuiste tú.", "Nada jala ahora mismo. Lo manejamos.", "Corriente entera hoy, jefe. Aquí descansando."],
+  superBonk:  ["¡¡SUPERBONK!! ¡Todos en calma!", "¡BARRIDA COMPLETA, jefe! ¡Todo tranquilo!", "BONK BONK BONK. Qué gusto dio eso.", "Cada hilo calmado en una sola carrera. Imparables."],
   action_loud:       "¡Este hilo está FUERTE, jefe! ¿Lo resolvemos?",
   action_ready:      "¡Jefe, este ya está listo para cerrar!",
   action_waiting:    "Todavía esperando por este…",
@@ -135,6 +145,7 @@ const ES_CO: Phrases = {
   focus:      ["¡Aquí estoy, parce!", "Claro, a ver este.", "¡Te tengo, parcero!", "Veamos esto juntos."],
   handled:    ["Este ya está respondido, parce. Bien.", "Este ya lo manejaste hoy. Todo tuyo.", "Este hilo ya recibió lo suyo hoy.", "Respondido y en calma. Buen trabajo, parce."],
   allDone:    ["Todos los hilos respondidos. Disfruta la calma, parce.", "Todo manejado hoy. Eso fuiste tú.", "Nada jala ahora, parcero. Lo manejamos.", "Corriente entera hoy, parce. Sin afán."],
+  superBonk:  ["¡¡SUPERBONK!! ¡Todos en calma, parce!", "¡BARRIDA COMPLETA! ¡Todo tranquilo, parcero!", "BONK BONK BONK. ¡Qué chimba!", "Cada hilo calmado de una. Imparables, parce."],
   action_loud:       "¡Este hilo está TENAZ, parce! ¿Lo resolvemos?",
   action_default:    "¿Cómo va este, parce?",
 };
@@ -661,6 +672,69 @@ export function useMascot(
     return () => clearInterval(id);
   }, []);
 
+  // ── Super bonk: the charged sweep across every open timeline ──
+  const superBonkActiveRef = useRef(false);
+  const superBonk = useCallback(
+    (branchIds: string[], onBonk: (branchId: string) => void, onDone?: () => void) => {
+      if (superBonkActiveRef.current || branchIds.length === 0) return;
+      superBonkActiveRef.current = true;
+      clearTimer(); cancelRaf();
+      chillingRef.current = false;
+      setPendingIdState(null);
+      setArrivedIdState(null);
+      fadeBubble(0, 120);
+
+      const finish = () => {
+        superBonkActiveRef.current = false;
+        // Victory lap ends at the Now point with the big line.
+        const tx = nowXRef.current - PX * 12 - 10;
+        const ty = nowYRef.current - PX * 10;
+        phase.current = 'jumping';
+        inspectedId.current = null;
+        setInspectedIdState(null);
+        jumpDestRef.current = { x: tx, y: ty, branchId: "__now__" };
+        chillingRef.current = true;
+        setFrame('RUN_A');
+        runWaypoints(makeZigWaypoints(posRef.current.x, posRef.current.y, tx, ty, 1, 16), () => {
+          jumpDestRef.current = null;
+          phase.current = 'idle';
+          setFrame('REACT');
+          setBubbleText(randomFrom(langRef.current.superBonk));
+          fadeBubble(1, 200);
+          timerRef.current = setTimeout(() => {
+            fadeBubble(0, 350);
+            timerRef.current = setTimeout(() => {
+              setFrame('IDLE_A');
+              scheduleJump(2500);
+              onDone?.();
+            }, 400);
+          }, 2600);
+        }, 0.5);
+      };
+
+      const hop = (i: number) => {
+        if (i >= branchIds.length) { finish(); return; }
+        const id = branchIds[i];
+        const geo = geometriesRef.current.find((g) => g.branchId === id);
+        if (!geo) { hop(i + 1); return; }
+        const tx = geo.endX + 10;
+        const ty = geo.endY - PX * 10;
+        phase.current = 'jumping';
+        inspectedId.current = id;
+        jumpDestRef.current = { x: tx, y: ty, branchId: id };
+        setFrame('RUN_A');
+        runWaypoints(makeZigWaypoints(posRef.current.x, posRef.current.y, tx, ty, 1, 14), () => {
+          setFrame('LAND_A');
+          onBonk(id);
+          timerRef.current = setTimeout(() => hop(i + 1), 220);
+        }, 0.5);
+      };
+      hop(0);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs and stable callbacks
+    [fadeBubble, runWaypoints, scheduleJump],
+  );
+
   // ── Focus: run to a specific branch when user taps it ──
   const focusBranch = useCallback((branchId: string) => {
     const geo = geometriesRef.current.find(g => g.branchId === branchId);
@@ -809,6 +883,6 @@ export function useMascot(
     inspectedBranchId: inspectedIdState,
     pendingBranchId: pendingIdState,
     arrivedBranchId: arrivedIdState,
-    onPress, showReaction, focusBranch, phrases: lang, visible,
+    onPress, showReaction, focusBranch, superBonk, phrases: lang, visible,
   };
 }

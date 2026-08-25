@@ -356,6 +356,8 @@ export function LifeTimeline() {
   const hit = useAppStore((s) => s.hit);
   const clearHit = useAppStore((s) => s.clearHit);
   const attackBranch = useAppStore((s) => s.attackBranch);
+  const bonkCharge = useAppStore((s) => s.bonkCharge);
+  const consumeSuperBonk = useAppStore((s) => s.consumeSuperBonk);
   const finalizeBurn = useAppStore((s) => s.finalizeBurn);
   const reducedMotion = useAppStore((s) => s.reducedMotion);
   const mascotTypePref = useAppStore((s) => s.mascotType);
@@ -1663,6 +1665,23 @@ export function LifeTimeline() {
             pompom: "Ruffle!",
           };
           const verb = VERBS[theme] ?? "Bonk!";
+          // Dealing with threads charges the meter; full = SUPER BONK.
+          const openTargets = activeLines
+            .map((b) => ({ b, g: layout.geometries.find((x) => x.branchId === b.id) }))
+            .filter((x) => x.g && x.g.inWindow)
+            .sort((a, bx) => (a.g!.endY ?? 0) - (bx.g!.endY ?? 0));
+          const superReady = bonkCharge >= 100 && openTargets.length > 0;
+          const fireSuperBonk = () => {
+            if (!superReady) return;
+            consumeSuperBonk();
+            const ids = openTargets.map((x) => x.b.id);
+            if (reducedMotion) {
+              // No run — the bonks land one after another on their own.
+              ids.forEach((id, i) => setTimeout(() => void attackBranch(id), i * 160));
+              return;
+            }
+            mascot.superBonk(ids, (id) => void attackBranch(id));
+          };
           return (
             <View
               style={{
@@ -1689,21 +1708,56 @@ export function LifeTimeline() {
             >
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={t("Have Pip calm this thread")}
-                disabled={cooling}
+                accessibilityLabel={
+                  superReady
+                    ? t("Super bonk: Pip calms every thread")
+                    : t("Have Pip calm this thread")
+                }
+                disabled={superReady ? false : cooling}
                 onPress={() => {
+                  if (superReady) {
+                    fireSuperBonk();
+                    return;
+                  }
                   if (!target) return;
                   setAttackCooldownUntil(Date.now() + 500);
                   void attackBranch(target.id);
                 }}
                 style={{
-                  backgroundColor: cooling ? alpha(tk.accent, 0.5) : tk.accent,
+                  backgroundColor: superReady
+                    ? tk.shimmer
+                    : cooling
+                      ? alpha(tk.accent, 0.5)
+                      : tk.accent,
                   borderRadius: 999,
                   paddingHorizontal: 16,
                   paddingVertical: 9,
+                  overflow: "hidden",
                 }}
               >
-                <T style={{ color: tk.accentInk, fontWeight: "700", fontSize: 14 }}>{t(verb)}</T>
+                {/* the meter: charge creeps across the pill toward SUPER BONK */}
+                {!superReady && bonkCharge > 0 && (
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: `${Math.min(100, bonkCharge)}%`,
+                      backgroundColor: alpha(tk.shimmer, 0.45),
+                    }}
+                  />
+                )}
+                <T
+                  style={{
+                    color: superReady ? "#3a2c10" : tk.accentInk,
+                    fontWeight: "700",
+                    fontSize: 14,
+                  }}
+                >
+                  {superReady ? t("SUPER BONK!") : t(verb)}
+                </T>
               </Pressable>
             </View>
           );
