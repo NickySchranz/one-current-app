@@ -119,8 +119,8 @@ type AppState = {
   burn?: { key: number; branchId: string; items: string[]; lesson: string };
   /** Pip just struck a thread (drives the attack animation). */
   hit?: { key: number; branchId: string; calm: boolean };
-  /** A token popped out of a thread and waits to be collected. One at a time. */
-  coin?: { key: number; branchId: string };
+  /** Tokens that popped out of threads and wait to be collected (fly to the meter). */
+  coins: { key: number; branchId: string }[];
   /** Testing: every qualifying drop yields a token (no chance roll). */
   coinAlways: boolean;
   /** An optimistic, unsaved line shown while the create form is open. */
@@ -188,9 +188,9 @@ type AppState = {
    * value — the log is the anti-farm memory (see loudnessFloorToday).
    */
   maybeDropCoin(branchId: string, prevLevel: number, newLevel: number): void;
-  /** The token was collected (by Pip or by patience): it becomes charge. */
-  collectCoin(): void;
-  clearCoin(): void;
+  /** A token landed in the meter: it becomes charge. */
+  collectCoin(key: number): void;
+  clearCoins(): void;
   /** Testing: force every qualifying drop to yield a token. */
   setCoinAlways(v: boolean): void;
   /** Phase 1 of a burn: light the fire. Nothing is written or deleted yet. */
@@ -274,6 +274,14 @@ const COIN_CHANCE_DIAL = 0.5;
 /** Chance a charging bonk also drops a token. */
 const COIN_CHANCE_BONK = 0.35;
 const COIN_ALWAYS_KEY = "one-current-coin-always";
+/** At most this many tokens in the air at once (a super bonk can rain them). */
+const MAX_COINS = 6;
+let coinKeyCounter = 0;
+/** Unique per-token key even inside a same-millisecond sweep. */
+function nextCoinKey(): number {
+  coinKeyCounter += 1;
+  return Date.now() * 100 + (coinKeyCounter % 100);
+}
 /** A thread yields bonk-charge at most once per this window (ms). */
 const BONK_CHARGE_COOLDOWN_MS = 60 * 60 * 1000;
 /** Session-only: when each thread last yielded bonk-charge. */
@@ -394,6 +402,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   statusFilter: "all",
   reducedMotion: false,
   bonkCharge: 0,
+  coins: [],
   coinAlways: false,
   theme: defaultTheme(),
   mascotType: "chronicler" as MascotType,
@@ -690,9 +699,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       bonkChargeStamps.set(branchId, Date.now());
       get().addBonkCharge(CHARGE_BONK);
       // A charging hit can shake a token loose too — same hourly gate, so
-      // it inherits the anti-farm for free.
-      if (!get().coin && (get().coinAlways || Math.random() < COIN_CHANCE_BONK)) {
-        set({ coin: { key: Date.now(), branchId } });
+      // it inherits the anti-farm for free. A super bonk sweep can rain
+      // several (one per charging hop), each flying to the meter on its own.
+      const coins = get().coins;
+      if (
+        coins.length < MAX_COINS &&
+        !coins.some((c) => c.branchId === branchId) &&
+        (get().coinAlways || Math.random() < COIN_CHANCE_BONK)
+      ) {
+        set({ coins: [...coins, { key: nextCoinKey(), branchId }] });
       }
     }
   },
@@ -707,18 +722,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     // read before the dial commits, so it still ends at the old value.
     const floor = Math.min(loudnessFloorToday(branch, todayIso()), prev);
     if (next >= floor) return;
-    if (get().coin) return;
+    const coins = get().coins;
+    if (coins.length >= MAX_COINS || coins.some((c) => c.branchId === branchId)) return;
     if (!get().coinAlways && Math.random() >= COIN_CHANCE_DIAL) return;
-    set({ coin: { key: Date.now(), branchId } });
+    set({ coins: [...coins, { key: nextCoinKey(), branchId }] });
   },
 
-  collectCoin() {
-    if (!get().coin) return;
+  collectCoin(key) {
+    const coins = get().coins;
+    if (!coins.some((c) => c.key === key)) return;
     get().addBonkCharge(CHARGE_COIN);
-    set({ coin: undefined });
+    set({ coins: coins.filter((c) => c.key !== key) });
   },
 
-  clearCoin: () => set({ coin: undefined }),
+  clearCoins: () => set({ coins: [] }),
 
   setCoinAlways(v) {
     set({ coinAlways: v });

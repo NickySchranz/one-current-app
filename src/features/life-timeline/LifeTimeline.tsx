@@ -41,7 +41,7 @@ import { useTheme } from "@/ui/theme";
 import { alpha, mix } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
 import { loudnessWord } from "@/ui/LoudnessSlider";
-import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, CoinToken, COIN_LEAD, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, ThemeBackdrop, ThemeScenery, useDashFlow } from "./timeline-fx";
+import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, ChargePop, CoinToken, COIN_FLY_MS, COIN_HOVER, COIN_LEAD, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, ThemeBackdrop, ThemeScenery, TokenFly, useDashFlow } from "./timeline-fx";
 import { Mascot } from "./Mascot";
 import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
@@ -364,7 +364,7 @@ export function LifeTimeline() {
   const draftBranchId = useAppStore((s) => s.draftBranchId);
   const dialLoudness = useAppStore((s) => s.dialLoudness);
   const maybeDropCoin = useAppStore((s) => s.maybeDropCoin);
-  const coin = useAppStore((s) => s.coin);
+  const coins = useAppStore((s) => s.coins);
   const actions = useAppStore((s) => s.actions);
   const language = useAppStore((s) => s.language);
   const t = useT();
@@ -442,7 +442,11 @@ export function LifeTimeline() {
   const scrollRef = useRef<ScrollView>(null);
   const scrollYRef = useRef(0);
   const [scrollH, setScrollH] = useState(0);
+  const scrollHRef = useRef(0);
+  scrollHRef.current = scrollH;
   const [size, setSize] = useState({ width: 960, height: 480 });
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
 
   // When the quick tray rises over the stage as a bottom sheet, the view
   // scrolls so the selected line and Now stay visible together above it —
@@ -881,6 +885,18 @@ export function LifeTimeline() {
 
   // Mascot: visible always unless reduced motion (hides when no open branches).
   const showMascot = !reducedMotion;
+  // The camera follows Pip: whenever he sets off for a lane outside the
+  // visible band (a super bonk hop, a focus run, a patrol jump), the
+  // vertical scroll pans along with his dash. Once per run, never per frame.
+  const followPip = useCallback((_x: number, destY: number) => {
+    const vh = scrollHRef.current;
+    if (vh <= 0) return;
+    const sy = scrollYRef.current;
+    if (destY > sy + 70 && destY < sy + vh - 90) return;
+    const maxScroll = Math.max(0, layoutRef.current.height + 84 - vh);
+    const y = Math.max(0, Math.min(maxScroll, destY - vh / 2));
+    scrollRef.current?.scrollTo({ y, animated: true });
+  }, []);
   const mascot = useMascot(
     visible,
     layout.geometries,
@@ -893,60 +909,82 @@ export function LifeTimeline() {
     heldBranchId,
     burn?.branchId ?? null,
     layout.mainY,
+    followPip,
   );
 
   // Keep reaction ref current so effects below can call it
   mascotReactionRef.current = mascot.showReaction;
+  const mascotRef = useRef(mascot);
+  mascotRef.current = mascot;
 
-  // ── Token drop: a coin pops off a thread; Pip dashes over to snatch it ──
-  // Local FX state outlives the store's `coin` (which clears at collect) so
-  // the burst and the floating "+10" can finish playing.
-  const [coinFx, setCoinFx] = useState<{ key: number; branchId: string; collected: boolean } | null>(null);
-  const coinFxRef = useRef(coinFx);
-  coinFxRef.current = coinFx;
+  // ── Token drops: they pop off their threads, then fly into the meter ──
+  // Each store coin becomes a waiting token (SVG, over its thread), then a
+  // flight (screen overlay, into the bonk pill), then charge. Pip never
+  // fetches — a super bonk can rain several at once while he sweeps.
   const [coinFlash, setCoinFlash] = useState(0);
-  const doCollect = useCallback(() => {
-    const cur = coinFxRef.current;
-    if (!cur || cur.collected) return;
-    setCoinFx({ ...cur, collected: true });
+  const [flights, setFlights] = useState<{ key: number; branchId: string; x0: number; y0: number }[]>([]);
+  const [chargePops, setChargePops] = useState<number[]>([]);
+  const scheduledCoinsRef = useRef(new Set<number>());
+  const coinTimersRef = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  const lastCheerRef = useRef(0);
+  const finishCoin = useCallback((key: number) => {
+    coinTimersRef.current.delete(key);
+    scheduledCoinsRef.current.delete(key);
+    setFlights((f) => f.filter((x) => x.key !== key));
+    useAppStore.getState().collectCoin(key);
     setCoinFlash((k) => k + 1);
-    useAppStore.getState().collectCoin();
+    setChargePops((p) => [...p, key]);
+    setTimeout(() => setChargePops((p) => p.filter((k) => k !== key)), 950);
+    // Pip cheers a landing when he is free — a sweep never gets bubble spam.
+    const now = Date.now();
+    if (now - lastCheerRef.current > 3000 && mascotRef.current?.visible) {
+      lastCheerRef.current = now;
+      mascotRef.current.showReaction(randomFrom(mascotRef.current.phrases.coinGrab));
+    }
   }, []);
-  const coinKey = coin?.key;
   useEffect(() => {
-    if (!coinKey || !coin) return;
-    setCoinFx({ key: coin.key, branchId: coin.branchId, collected: false });
-  }, [coinKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Send Pip for it; keep trying while he is mid-super-bonk. If he can't
-  // reach it (thread scrolled away, motion reduced), patience collects it —
-  // the reward is never lost.
-  useEffect(() => {
-    if (!coinFx || coinFx.collected) return;
-    // While a sheet is up the token just bobs in place — the payoff deserves
-    // the open stage, and the wait is the anticipation.
+    // While a sheet is up (the pill is hidden) tokens just flip in place —
+    // the wait is the anticipation. Once idle, each schedules its flight.
     if (operation.kind !== "idle") return;
-    if (!showMascot || reducedMotion) {
-      const id = setTimeout(doCollect, 900);
-      return () => clearTimeout(id);
+    for (const c of coins) {
+      if (scheduledCoinsRef.current.has(c.key)) continue;
+      scheduledCoinsRef.current.add(c.key);
+      const hoverBeat = reducedMotion ? 900 : 800;
+      coinTimersRef.current.set(
+        c.key,
+        setTimeout(() => {
+          if (!useAppStore.getState().coins.some((x) => x.key === c.key)) return;
+          const g = layoutRef.current.geometries.find((x) => x.branchId === c.branchId);
+          if (reducedMotion || !g || !g.inWindow) {
+            // no flight to draw — the reward still lands
+            finishCoin(c.key);
+            return;
+          }
+          setFlights((f) => [
+            ...f,
+            { key: c.key, branchId: c.branchId, x0: g.endX + COIN_LEAD, y0: g.endY - COIN_HOVER - scrollYRef.current },
+          ]);
+          coinTimersRef.current.set(c.key, setTimeout(() => finishCoin(c.key), COIN_FLY_MS));
+        }, hoverBeat),
+      );
     }
-    let retry: ReturnType<typeof setInterval> | null = null;
-    if (!mascot.collectCoin(coinFx.branchId, doCollect)) {
-      retry = setInterval(() => {
-        if (mascot.collectCoin(coinFx.branchId, doCollect) && retry) clearInterval(retry);
-      }, 900);
-    }
-    const failsafe = setTimeout(doCollect, 9000);
-    return () => {
-      if (retry) clearInterval(retry);
-      clearTimeout(failsafe);
-    };
-  }, [coinFx?.key, coinFx?.collected, operation.kind]); // eslint-disable-line react-hooks/exhaustive-deps
-  // The burst finished: take the token off the stage.
+  }, [coins, operation.kind, reducedMotion, finishCoin]);
+  // Never lose a token to an edge case: anything still uncollected after 12s
+  // banks itself.
   useEffect(() => {
-    if (!coinFx?.collected) return;
-    const id = setTimeout(() => setCoinFx(null), 1200);
+    if (coins.length === 0) return;
+    const id = setTimeout(() => {
+      const stale = Date.now() - 12000;
+      for (const c of useAppStore.getState().coins) {
+        if (c.key / 100 < stale) finishCoin(c.key);
+      }
+    }, 12500);
     return () => clearTimeout(id);
-  }, [coinFx?.collected]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [coins, finishCoin]);
+  useEffect(() => {
+    const timers = coinTimersRef.current;
+    return () => timers.forEach((t) => clearTimeout(t));
+  }, []);
   // The meter's little gulp: the pill fill glows for a beat after a token.
   useEffect(() => {
     if (coinFlash === 0) return;
@@ -1376,31 +1414,30 @@ export function LifeTimeline() {
                   );
                 })()}
 
-              {/* a dropped token, hovering over its thread until collected */}
-              {coinFx &&
-                (() => {
-                  const g = layout.geometries.find((x) => x.branchId === coinFx.branchId);
-                  if (!g || !g.inWindow) return null;
-                  const cx = g.endX + COIN_LEAD;
-                  const fade = Math.max(
-                    0,
-                    Math.min(1, (layout.metrics.width - 40 - cx) / 45, (cx + 20) / 45),
-                  );
-                  if (fade <= 0) return null;
-                  return (
-                    <CoinToken
-                      key={coinFx.key}
-                      x={cx}
-                      y={g.endY}
-                      gold={tk.shimmer}
-                      accent={tk.accent}
-                      label="+10"
-                      collected={coinFx.collected}
-                      fade={fade}
-                      reducedMotion={reducedMotion}
-                    />
-                  );
-                })()}
+              {/* dropped tokens, flipping over their threads until they fly */}
+              {coins.map((c) => {
+                if (flights.some((f) => f.key === c.key)) return null;
+                const g = layout.geometries.find((x) => x.branchId === c.branchId);
+                if (!g || !g.inWindow) return null;
+                const cx = g.endX + COIN_LEAD;
+                const fade = Math.max(
+                  0,
+                  Math.min(1, (layout.metrics.width - 40 - cx) / 45, (cx + 20) / 45),
+                );
+                if (fade <= 0) return null;
+                return (
+                  <CoinToken
+                    key={c.key}
+                    x={cx}
+                    y={g.endY}
+                    gold={tk.shimmer}
+                    accent={tk.accent}
+                    theme={theme}
+                    fade={fade}
+                    reducedMotion={reducedMotion}
+                  />
+                );
+              })}
 
               {/* a merge being considered: the lines curve toward Now, reversibly */}
               {operation.kind === "confirming-merge" && (
@@ -1592,6 +1629,43 @@ export function LifeTimeline() {
             </Svg>
           </View>
         </ScrollView>
+
+        {/* tokens in flight to the meter, and the +10s that pop off it */}
+        {(flights.length > 0 || chargePops.length > 0) && (
+          <View
+            pointerEvents="none"
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              overflow: "hidden",
+              zIndex: 11,
+            }}
+          >
+            {flights.map((f) => (
+              <TokenFly
+                key={f.key}
+                x0={f.x0}
+                y0={f.y0}
+                x1={size.width - (showFab ? 92 : 8) - 44}
+                y1={size.height - 26}
+                gold={tk.shimmer}
+                theme={theme}
+              />
+            ))}
+            {chargePops.map((k, i) => (
+              <ChargePop
+                key={k}
+                right={(showFab ? 92 : 8) + 12 + (i % 3) * 16}
+                bottom={44}
+                label="+10"
+                color={mix(tk.shimmer, "#000000", 22)}
+              />
+            ))}
+          </View>
+        )}
 
         {/* reaching the sacred state: the themed completion spectacle */}
         {celebration > 0 && (

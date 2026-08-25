@@ -1868,11 +1868,17 @@ export function ThemeScenery({
 
 // ─── Token drop ──────────────────────────────────────────────────────────────
 // A genuine turn-down (or a charging bonk) can shake a token out of the
-// thread: it pops off the line, hangs there flipping like the coin it is,
-// and waits for Pip. Collecting it turns it into super-bonk charge.
+// thread: it pops off the line, hangs there flipping like the treasure it
+// is, then flies into the bonk pill and becomes charge. Every theme drops
+// its own kind of treasure — same pixel language as Pip.
 
-/** 8×8 pixel coin, same language as Pip. '.'=empty G=gold H=shine S=shade D=rim */
-const COIN_ROWS = [
+/**
+ * Pixel grids per theme. Letters: G base · H shine · S shade · D rim/dark ·
+ * W white · '.' empty. All colors derive from the theme's shimmer gold, so
+ * a token always looks native to its map.
+ */
+const DEFAULT_TOKEN = [
+  // the gold coin
   "..DDDD..",
   ".DGGHGD.",
   "DGGHHSGD",
@@ -1882,20 +1888,139 @@ const COIN_ROWS = [
   ".DGGSGD.",
   "..DDDD..",
 ];
+
+const TOKENS: Partial<Record<ThemeId, string[]>> = {
+  midnight: [
+    // four-point star
+    "....G....",
+    "....H....",
+    "...GHG...",
+    ".GGHWHGG.",
+    "GHHWWWHHG",
+    ".GGHWHGG.",
+    "...GHG...",
+    "....H....",
+    "....G....",
+  ],
+  sunprint: [
+    // little sun, rays out (solid core: white washes out on light maps)
+    "G...G...G",
+    ".G.GHG.G.",
+    "..GHHHG..",
+    ".GHHHHHG.",
+    "GHHHWHHHG",
+    ".GHHHHHG.",
+    "..GHHHG..",
+    ".G.GHG.G.",
+    "G...G...G",
+  ],
+  duskwood: [
+    // acorn from the dusk woods
+    "...DDD...",
+    "..DSSSD..",
+    ".DSSSSSD.",
+    "DSSSSSSSD",
+    ".GGGGGGG.",
+    ".GHHHHHG.",
+    "..GHHHG..",
+    "...GGG...",
+  ],
+  demonfire: [
+    // a stray ember
+    "....G....",
+    "...GG....",
+    "...GHG...",
+    "..GHHG.G.",
+    ".GHHHHGG.",
+    ".GHWWHHG.",
+    "GHWWWWHG.",
+    ".GHWWHG..",
+    "..GGGG...",
+  ],
+  koipond: [
+    // a golden koi
+    "..GGGG...",
+    ".GHHHHG.G",
+    "GHWDHHHGG",
+    "GHHHHHHGG",
+    ".GHHHHG.G",
+    "..GGGG...",
+  ],
+  carnival: [
+    // a ticket stub, perforation down the middle
+    "GGGGGGGGG",
+    "GHHHHHHHG",
+    ".HHSHSHH.",
+    ".HHSHSHH.",
+    "GHHHHHHHG",
+    "GGGGGGGGG",
+  ],
+  catnap: [
+    // a ball of yarn, two strands sweeping around it
+    "..DDDD..",
+    ".DGGGSD.",
+    "DGSSSGGD",
+    "DSGGGGSD",
+    "DGGSSSGD",
+    ".DSGGGD.",
+    "..DDDD..",
+  ],
+  abyss: [
+    // an air bubble
+    "..DDDD..",
+    ".D....D.",
+    "D.WW...D",
+    "D.W....D",
+    "D......D",
+    "D....W.D",
+    ".D....D.",
+    "..DDDD..",
+  ],
+  gravemist: [
+    // a will-o'-wisp
+    "....G...",
+    "...GH...",
+    "...GHG..",
+    "..GHHG..",
+    "..GHWHG.",
+    ".GHWWHG.",
+    ".GHWWG..",
+    "..GGG...",
+  ],
+  pompom: [
+    // a pompom puff — solid fluff, ragged edge, a top shine
+    ".G.GG.G.",
+    "GGGHHGGG",
+    ".GHHGGG.",
+    "GGHGGGSG",
+    "GGGGGGSG",
+    ".GGGSSG.",
+    "GGGGGGGG",
+    ".G.GG.G.",
+  ],
+};
+
+export function tokenRowsFor(theme: ThemeId): string[] {
+  return TOKENS[theme] ?? DEFAULT_TOKEN;
+}
+
 const COIN_PX = 2.6;
 
-function CoinPixels({ gold }: { gold: string }) {
+/** The token's pixel body, centered on (0,0) so a flip can spin it in place. */
+function TokenPixels({ rows, gold }: { rows: string[]; gold: string }) {
   const pal: Record<string, string> = {
     G: gold,
     H: mix(gold, "#ffffff", 55),
     S: mix(gold, "#000000", 30),
     D: mix(gold, "#000000", 58),
+    W: "#ffffff",
   };
-  const half = (COIN_ROWS.length * COIN_PX) / 2;
+  const halfH = (rows.length * COIN_PX) / 2;
+  const halfW = (rows[0].length * COIN_PX) / 2;
   const cells: { x: number; y: number; k: string }[] = [];
-  COIN_ROWS.forEach((row, r) => {
+  rows.forEach((row, r) => {
     row.split("").forEach((k, c) => {
-      if (k !== ".") cells.push({ x: c * COIN_PX - half, y: r * COIN_PX - half, k });
+      if (k !== ".") cells.push({ x: c * COIN_PX - halfW, y: r * COIN_PX - halfH, k });
     });
   });
   return (
@@ -1907,53 +2032,24 @@ function CoinPixels({ gold }: { gold: string }) {
   );
 }
 
-/** The "+10" that floats off a collected token — the reward, made visible. */
-function PlusCharge({ x, y, label, color, t }: {
-  x: number;
-  y: number;
-  label: string;
-  color: string;
-  t: SharedValue<number>;
-}) {
-  const props = useAnimatedProps(() => ({
-    y: y - 10 - t.value * 34,
-    opacity: t.value < 0.12 ? t.value * 8 : Math.max(0, 1.2 - t.value * 1.2),
-    fontSize: 15 + t.value * 6,
-  }));
-  return (
-    <AnimatedSvgText
-      x={x}
-      fill={color}
-      stroke="#ffffff"
-      strokeWidth={0.7}
-      fontWeight="700"
-      textAnchor="middle"
-      animatedProps={props}
-    >
-      {label}
-    </AnimatedSvgText>
-  );
-}
-
 /** How high above the line a waiting token hovers — clear of Pip's hat, under the main line. */
 export const COIN_HOVER = 30;
 /** How far ahead of the line's endpoint the token lands (a step to Pip's right). */
 export const COIN_LEAD = 24;
 
 /**
- * `.coin-token` — the token itself, anchored to the thread's endpoint
+ * `.coin-token` — a waiting token, anchored to its thread's endpoint
  * (x, y are world coords; re-render moves it with pans). Pops up off the
- * line, flips in place while it waits, and bursts into charge when
- * `collected` flips true. Transient FX: full-rate motion is intentional.
+ * line and flips in place until the flight to the meter takes over
+ * (the parent swaps this for a TokenFly). Transient FX: full-rate motion
+ * is intentional.
  */
-export function CoinToken({ x, y, gold, accent, label, collected, fade = 1, reducedMotion }: {
+export function CoinToken({ x, y, gold, accent, theme, fade = 1, reducedMotion }: {
   x: number;
   y: number;
   gold: string;
   accent: string;
-  /** The floating reward text, e.g. "+10". */
-  label: string;
-  collected: boolean;
+  theme: ThemeId;
   /** Canvas-edge fade, 0..1 (same math as Pip). */
   fade?: number;
   reducedMotion: boolean;
@@ -1962,8 +2058,8 @@ export function CoinToken({ x, y, gold, accent, label, collected, fade = 1, redu
   const spin = useSharedValue(0.25); // start face-on
   const bob = useSharedValue(0);
   const spawnT = useSharedValue(0);
-  const burst = useSharedValue(0);
   const appear = useSharedValue(0);
+  const rows = tokenRowsFor(theme);
 
   useEffect(() => {
     appear.value = withTiming(1, { duration: reducedMotion ? 400 : 120 });
@@ -1979,7 +2075,7 @@ export function CoinToken({ x, y, gold, accent, label, collected, fade = 1, redu
     );
     spawnT.value = 0;
     spawnT.value = withTiming(1, { duration: 750, easing: Easing.out(Easing.quad) });
-    // the idle flip — a coin is a coin
+    // the idle flip — every treasure flips like the coin it stands in for
     spin.value = 0;
     spin.value = withRepeat(withTiming(1, { duration: 760, easing: Easing.linear }), -1);
     bob.value = 0;
@@ -1996,36 +2092,20 @@ export function CoinToken({ x, y, gold, accent, label, collected, fade = 1, redu
     };
   }, [ty, spin, bob, spawnT, appear, reducedMotion]);
 
-  useEffect(() => {
-    if (!collected) return;
-    burst.value = 0;
-    burst.value = withTiming(1, { duration: 820, easing: Easing.out(Easing.quad) });
-    if (reducedMotion) return () => cancelAnimation(burst);
-    // snap up and spin into a blur before vanishing
-    cancelAnimation(ty);
-    cancelAnimation(bob);
-    cancelAnimation(spin);
-    ty.value = withTiming(ty.value - 30, { duration: 240, easing: Easing.out(Easing.quad) });
-    spin.value = withRepeat(withTiming(spin.value + 1, { duration: 200, easing: Easing.linear }), -1);
-    return () => cancelAnimation(burst);
-  }, [collected, burst, ty, bob, spin, reducedMotion]);
-
   const coinProps = useAnimatedProps(() => {
     const flip = reducedMotion ? 1 : Math.cos(spin.value * Math.PI * 2);
-    const gone = collected ? Math.max(0, 1 - Math.max(0, burst.value - 0.3) / 0.3) : 1;
     return {
       translateX: x,
       translateY: y + ty.value + bob.value * 3,
-      scaleX: Math.max(0.08, Math.abs(flip)) * gone || 0.08,
-      scaleY: gone,
-      opacity: appear.value * gone * fade,
+      scaleX: Math.max(0.08, Math.abs(flip)),
+      opacity: appear.value * fade,
     };
   });
 
   return (
     <G pointerEvents="none">
       <AnimatedGFx animatedProps={coinProps}>
-        <CoinPixels gold={gold} />
+        <TokenPixels rows={rows} gold={gold} />
       </AnimatedGFx>
       {/* spawn spray: the line letting go of it */}
       {!reducedMotion &&
@@ -2043,30 +2123,85 @@ export function CoinToken({ x, y, gold, accent, label, collected, fade = 1, redu
             t={spawnT}
           />
         ))}
-      {collected && (
-        <>
-          {!reducedMotion && (
-            <>
-              <Shockwave x={x} y={y - COIN_HOVER} color={gold} t={burst} scale={0.8} />
-              {Array.from({ length: 8 }, (_, i) => (
-                <Fleck
-                  key={`c${i}`}
-                  x={x}
-                  y={y - COIN_HOVER}
-                  angle={(i / 8) * Math.PI * 2 - Math.PI / 2}
-                  dist={26}
-                  size={2.1}
-                  color={i % 3 === 2 ? "#ffffff" : gold}
-                  rise={10}
-                  delay={0}
-                  t={burst}
-                />
-              ))}
-            </>
-          )}
-          <PlusCharge x={x} y={y - COIN_HOVER} label={label} color={gold} t={burst} />
-        </>
-      )}
     </G>
+  );
+}
+
+/** Flight time of a token into the meter (the parent collects on this beat). */
+export const COIN_FLY_MS = 650;
+
+/**
+ * `.token-fly` — the collect: the token leaves its thread and accelerates
+ * into the bonk pill, spinning into a blur, NSMB-coin style. Screen-space
+ * overlay (like ReclaimFly); the parent unmounts it after COIN_FLY_MS and
+ * banks the charge.
+ */
+export function TokenFly({ x0, y0, x1, y1, gold, theme }: {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  gold: string;
+  theme: ThemeId;
+}) {
+  const p = useSharedValue(0);
+  const spin = useSharedValue(0);
+  useEffect(() => {
+    p.value = 0;
+    p.value = withTiming(1, { duration: COIN_FLY_MS, easing: Easing.in(Easing.quad) });
+    spin.value = 0;
+    spin.value = withRepeat(withTiming(1, { duration: 180, easing: Easing.linear }), -1);
+    return () => {
+      cancelAnimation(p);
+      cancelAnimation(spin);
+    };
+  }, [p, spin]);
+  const style = useAnimatedStyle(() => {
+    const t = p.value;
+    return {
+      opacity: t > 0.86 ? Math.max(0, 1 - (t - 0.86) / 0.14) : 1,
+      transform: [
+        { translateX: x0 + (x1 - x0) * t },
+        // a light upward arc before the dive into the pill
+        { translateY: y0 + (y1 - y0) * t - 30 * Math.sin(t * Math.PI) },
+        { scale: 1 - 0.5 * t },
+        { scaleX: Math.max(0.12, Math.abs(Math.cos(spin.value * Math.PI * 2))) },
+      ],
+    };
+  });
+  const rows = tokenRowsFor(theme);
+  return (
+    <Animated.View pointerEvents="none" style={[{ position: "absolute", left: -14, top: -14 }, style]}>
+      <Svg width={28} height={28} viewBox="-14 -14 28 28">
+        <TokenPixels rows={rows} gold={gold} />
+      </Svg>
+    </Animated.View>
+  );
+}
+
+/**
+ * `.charge-pop` — the "+10" that hops off the bonk pill as a token lands:
+ * the reward, made visible where it now lives.
+ */
+export function ChargePop({ right, bottom, label, color }: {
+  right: number;
+  bottom: number;
+  label: string;
+  color: string;
+}) {
+  const t = useSharedValue(0);
+  useEffect(() => {
+    t.value = 0;
+    t.value = withTiming(1, { duration: 900, easing: Easing.out(Easing.quad) });
+    return () => cancelAnimation(t);
+  }, [t]);
+  const style = useAnimatedStyle(() => ({
+    opacity: t.value < 0.12 ? t.value * 8 : Math.max(0, 1.2 - t.value * 1.2),
+    transform: [{ translateY: -t.value * 30 }, { scale: 1 + t.value * 0.25 }],
+  }));
+  return (
+    <Animated.View pointerEvents="none" style={[{ position: "absolute", right, bottom }, style]}>
+      <Animated.Text style={{ color, fontWeight: "800", fontSize: 15 }}>{label}</Animated.Text>
+    </Animated.View>
   );
 }

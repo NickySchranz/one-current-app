@@ -52,12 +52,6 @@ export type MascotState = {
    * Under reduced motion the bonks land staggered with no run.
    */
   superBonk: (branchIds: string[], onBonk: (branchId: string) => void, onDone?: () => void) => void;
-  /**
-   * A token popped out of a thread: Pip dashes to stand under it and fires
-   * `onArrive` on landing (the collect moment). Returns false when he is
-   * busy (super bonk / already fetching) so the caller can retry.
-   */
-  collectCoin: (branchId: string, onArrive: () => void) => boolean;
   /** Localised phrase pools — use for reactions dispatched from outside the hook. */
   phrases: Phrases;
   visible: boolean;
@@ -251,6 +245,11 @@ export function useMascot(
   avoidBranchId: string | null = null,
   /** The main line's y — where Pip chills when every thread is answered. */
   nowY = 0,
+  /**
+   * Fires once whenever Pip sets off for a new destination (its final x/y in
+   * world coords) — the stage can pan its camera to keep him on screen.
+   */
+  onTravel?: (x: number, y: number) => void,
 ): MascotState {
   const lang = getLang(language);
   const langRef = useRef(lang);
@@ -260,6 +259,10 @@ export function useMascot(
   branchesRef.current = branches;
   const geometriesRef = useRef(geometries);
   geometriesRef.current = geometries;
+  const onTravelRef = useRef(onTravel);
+  onTravelRef.current = onTravel;
+  // Declared early: several callbacks below refuse to interrupt the sweep.
+  const superBonkActiveRef = useRef(false);
   const nowXRef = useRef(nowX);
   nowXRef.current = nowX;
   const nowYRef = useRef(nowY);
@@ -364,6 +367,11 @@ export function useMascot(
     // after that lives in panShiftRef and is added at render time, so the
     // whole run stays glued to the timeline, not the screen.
     panShiftRef.current = { x: 0, y: 0 };
+
+    // Every travel funnels through here: tell the stage where he is headed
+    // (once per run, never per frame) so the camera can follow him.
+    const dest = waypoints[waypoints.length - 1];
+    if (dest) onTravelRef.current?.(dest.x, dest.y);
 
     const step = () => {
       if (idx >= waypoints.length) { onDone(); return; }
@@ -655,6 +663,7 @@ export function useMascot(
 
   // ── External reaction trigger (called by LifeTimeline on actions) ──
   const showReaction = useCallback((text: string) => {
+    if (superBonkActiveRef.current) return; // the sweep owns him until it ends
     if (phase.current === 'jumping') return; // don't interrupt mid-air
     clearTimer(); cancelRaf();
     phase.current = 'reacting';
@@ -684,7 +693,6 @@ export function useMascot(
   }, []);
 
   // ── Super bonk: the charged sweep across every open timeline ──
-  const superBonkActiveRef = useRef(false);
   const superBonk = useCallback(
     (branchIds: string[], onBonk: (branchId: string) => void, onDone?: () => void) => {
       if (superBonkActiveRef.current || branchIds.length === 0) return;
@@ -746,59 +754,11 @@ export function useMascot(
     [fadeBubble, runWaypoints, scheduleJump],
   );
 
-  // ── Token fetch: dash to a dropped token and snatch it ──
-  const collectingCoinRef = useRef(false);
-  const collectCoin = useCallback(
-    (branchId: string, onArrive: () => void): boolean => {
-      if (superBonkActiveRef.current || collectingCoinRef.current) return false;
-      const geo = geometriesRef.current.find((g) => g.branchId === branchId);
-      if (!geo) return false;
-      collectingCoinRef.current = true;
-      clearTimer(); cancelRaf();
-      chillingRef.current = false;
-      setPendingIdState(null);
-      setArrivedIdState(null);
-      fadeBubble(0, 120);
-
-      // The token lands a step ahead of the endpoint (COIN_LEAD in the FX):
-      // Pip hops over to stand right under it.
-      const tx = geo.endX + 24;
-      const ty = geo.endY - PX * 10;
-      phase.current = 'jumping';
-      inspectedId.current = branchId;
-      setInspectedIdState(branchId);
-      jumpDestRef.current = { x: tx, y: ty, branchId };
-      setFrame('RUN_A');
-      runWaypoints(makeZigWaypoints(posRef.current.x, posRef.current.y, tx, ty, 1, 14), () => {
-        // Stand exactly under the token even if the timeline panned mid-run.
-        const live = geometriesRef.current.find((g) => g.branchId === branchId);
-        placeRef.current(live ? live.endX + 24 : tx, live ? live.endY - PX * 10 : ty, true);
-        jumpDestRef.current = null;
-        collectingCoinRef.current = false;
-        setFrame('LAND_A');
-        onArrive();
-        timerRef.current = setTimeout(() => {
-          setFrame('REACT');
-          setBubbleText(randomFrom(langRef.current.coinGrab));
-          fadeBubble(1, 180);
-          timerRef.current = setTimeout(() => {
-            fadeBubble(0, 300);
-            timerRef.current = setTimeout(() => {
-              phase.current = 'idle';
-              setFrame('IDLE_A');
-              scheduleJump(2500);
-            }, 350);
-          }, 2200);
-        }, 160);
-      }, 0.34);
-      return true;
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs and stable callbacks
-    [fadeBubble, runWaypoints, scheduleJump],
-  );
-
   // ── Focus: run to a specific branch when user taps it ──
   const focusBranch = useCallback((branchId: string) => {
+    // A tap mid-sweep must not hijack the hop chain — the sheet still opens
+    // in the stage; Pip simply finishes his sweep first.
+    if (superBonkActiveRef.current) return;
     const geo = geometriesRef.current.find(g => g.branchId === branchId);
     if (!geo) return;
 
@@ -945,6 +905,6 @@ export function useMascot(
     inspectedBranchId: inspectedIdState,
     pendingBranchId: pendingIdState,
     arrivedBranchId: arrivedIdState,
-    onPress, showReaction, focusBranch, superBonk, collectCoin, phrases: lang, visible,
+    onPress, showReaction, focusBranch, superBonk, phrases: lang, visible,
   };
 }
