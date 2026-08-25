@@ -1397,6 +1397,7 @@ export function LifeTimeline() {
                 <Mascot
                   posX={mascot.posX}
                   posY={mascot.posY}
+                  viewW={layout.metrics.width}
                   runPhase={mascot.runPhase}
                   frame={hit && !hit.calm ? "LAND_A" : mascot.frame}
                   flip={mascot.flip}
@@ -1423,6 +1424,14 @@ export function LifeTimeline() {
                   if (!b || isClosed(b)) return null;
                   const spriteW = PX * 12;
                   const spriteH = PX * 16;
+                  // Pip fades out at the canvas edges (viewing the past);
+                  // his offers must never linger there half-clipped either.
+                  if (
+                    mascot.pos.x > layout.metrics.width - 70 ||
+                    mascot.pos.x < -10
+                  ) {
+                    return null;
+                  }
                   // To his right; near the right edge it comes out his left —
                   // but only while he's actually on screen. Once he scrolls
                   // out of view, the bubble scrolls out with him (it belongs

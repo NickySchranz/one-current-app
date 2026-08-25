@@ -171,6 +171,9 @@ type Props = {
   /** Per-frame position on the UI thread — the sprite never re-renders to move. */
   posX: SharedValue<number>;
   posY: SharedValue<number>;
+  /** Visible canvas width: he fades out as his anchor nears the edges, so
+   * no half-clipped sprite or bubble ever lingers at the boundary. */
+  viewW?: number;
   frame: FrameName;
   flip: number;
   mascotType: MascotType;
@@ -189,6 +192,7 @@ const AnimatedG = Animated.createAnimatedComponent(G);
 export function Mascot({
   posX, posY, frame, flip, mascotType,
   bubbleO, bubbleText, showTapHint, theme, onPress, runPhase,
+  viewW = 0,
 }: Props) {
   const palette = useMemo(() => resolveColors(theme.accent), [theme.accent]);
   const frames = CHARACTER_FRAMES[mascotType];
@@ -207,8 +211,19 @@ export function Mascot({
   );
 
   // The whole group (bubble included) rides the shared position; everything
-  // inside is drawn relative to (0,0) = the sprite's top-left.
-  const rideProps = useAnimatedProps(() => ({ x: posX.value, y: posY.value }), [posX, posY]);
+  // inside is drawn relative to (0,0) = the sprite's top-left. Near the
+  // canvas edges the group fades out — when the view sits in the past, Pip
+  // belongs to Now, and no half-bubble should hover at the boundary.
+  const rideProps = useAnimatedProps(() => {
+    const x = posX.value;
+    let o = 1;
+    if (viewW > 0) {
+      const rightFade = Math.max(0, Math.min(1, (viewW - 60 - x) / 45));
+      const leftFade = Math.max(0, Math.min(1, (x + 20) / 45));
+      o = Math.min(rightFade, leftFade);
+    }
+    return { x, y: posY.value, opacity: o };
+  }, [posX, posY, viewW]);
 
   const transform = flip === -1 ? `translate(${spriteW}, 0) scale(-1, 1)` : undefined;
 
