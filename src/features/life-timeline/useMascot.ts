@@ -417,14 +417,30 @@ export function useMascot(
     if (viewingIntegratedRef.current) return;
     const id = inspectedId.current;
     if (!id) {
-      // Chilling at Now: the Now point pans with the timeline, and so does he.
-      if (chillingRef.current && phase.current !== 'jumping') {
-        const tx = nowXRef.current - PX * 12 - 10;
-        const ty = nowYRef.current - PX * 10;
-        const cur = posRef.current;
-        if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
-          placeRef.current(tx, ty, true);
+      if (!chillingRef.current) return;
+      const tx = nowXRef.current - PX * 12 - 10;
+      const ty = nowYRef.current - PX * 10;
+      if (phase.current === 'jumping') {
+        // Mid-walk to Now while the world pans: fold the drift into the run,
+        // exactly like a jump toward a thread.
+        const dest = jumpDestRef.current;
+        if (dest?.branchId === "__now__") {
+          const dx = tx - dest.x, dy = ty - dest.y;
+          if (dx !== 0 || dy !== 0) {
+            jumpDestRef.current = { x: tx, y: ty, branchId: "__now__" };
+            panShiftRef.current = {
+              x: panShiftRef.current.x + dx,
+              y: panShiftRef.current.y + dy,
+            };
+            placeRef.current(posRef.current.x + dx, posRef.current.y + dy, false);
+          }
         }
+        return;
+      }
+      // Chilling at Now: the Now point pans with the timeline, and so does he.
+      const cur = posRef.current;
+      if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
+        placeRef.current(tx, ty, true);
       }
       return;
     }
@@ -560,9 +576,12 @@ export function useMascot(
       const cur = posRef.current;
       if (Math.hypot(tx - cur.x, ty - cur.y) > 8) {
         phase.current = 'jumping';
-        jumpDestRef.current = null;
+        // A live destination, so a pan during the walk folds into the run
+        // like any other jump — he keeps heading for Now, not for a stale x.
+        jumpDestRef.current = { x: tx, y: ty, branchId: "__now__" };
         setFrame('RUN_A');
         runWaypoints(makeZigWaypoints(cur.x, cur.y, tx, ty, 2, 24), () => {
+          jumpDestRef.current = null;
           phase.current = 'idle';
           setFrame('IDLE_A');
           say();
