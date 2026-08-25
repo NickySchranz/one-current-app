@@ -15,7 +15,7 @@ import Animated, {
   type EasingFunctionFactory,
 } from "react-native-reanimated";
 import type { SharedValue } from "react-native-reanimated";
-import { Circle, G, Path, Text as SvgText } from "react-native-svg";
+import Svg, { Circle, Defs, Ellipse, G, LinearGradient, Path, Rect, Stop, Text as SvgText } from "react-native-svg";
 import type { PathProps } from "react-native-svg";
 import type { ThemeId } from "@/visualization/theme";
 import { pathLength, samplePath } from "@/visualization/path-sample";
@@ -1195,5 +1195,642 @@ export function ThemeBackdrop({
         />
       ))}
     </>
+  );
+}
+
+// ─── Theme scenery: the place behind the timeline ────────────────────────────
+// Each theme dresses the stage as somewhere real, in layers: a gradient
+// wash of air or water, light (rays, sun, moon, lantern), a far and a near
+// silhouette for depth, and living foreground pieces — seaweed with leaves
+// under the koi pond, kelp bulbs in the abyss, cattails on the riverbed,
+// bunting and tents at the carnival, brush-stroke mountains with a red seal
+// on porcelain. Everything sits at whisper opacity and brightens as the day
+// gathers itself.
+
+type SceneColors = {
+  shimmer: string;
+  accent: string;
+  inkFaint: string;
+  bg: string;
+  danger: string;
+};
+
+type FrondSpec = {
+  count: number;
+  height: [number, number];
+  sway: number;
+  width: number;
+  colors: (c: SceneColors) => string[];
+  /** leaf nodes along each blade */
+  leaves?: boolean;
+  /** what grows at the tip */
+  tip?: "bulb" | "cattail";
+};
+
+type SilhouetteKind = "pines" | "rocks" | "hills" | "slabs" | "tents" | "towers";
+type SilhouetteLayer = {
+  kind: SilhouetteKind;
+  heightFrac: number;
+  color: (c: SceneColors) => string;
+  /** seed salt, so far and near layers differ */
+  salt: number;
+};
+
+export type SceneSpec = {
+  /** scene opacity at [scattered, whole] */
+  opacity: [number, number];
+  /** vertical gradient wash over the whole stage */
+  wash?: { top: (c: SceneColors) => string; bottom: (c: SceneColors) => string; topO: number; bottomO: number };
+  /** slow diagonal light beams (underwater / god rays) */
+  rays?: { count: number; color: (c: SceneColors) => string };
+  /** far-to-near bottom silhouettes */
+  silhouettes?: SilhouetteLayer[];
+  fronds?: FrondSpec;
+  orb?: { xFrac: number; yFrac: number; r: number; color: (c: SceneColors) => string; sunRays?: boolean };
+  crescent?: { xFrac: number; yFrac: number; r: number; color: (c: SceneColors) => string };
+  /** rows of carnival bunting */
+  garlands?: number;
+  garlandColors?: (c: SceneColors) => [string, string];
+  deco?: "brushMountains" | "tree";
+};
+
+const SCENES: Partial<Record<ThemeId, SceneSpec>> = {
+  riverbed: {
+    opacity: [0.08, 0.18],
+    silhouettes: [{ kind: "hills", heightFrac: 0.07, color: (c) => c.inkFaint, salt: 2 }],
+    fronds: { count: 7, height: [40, 100], sway: 8, width: 3, colors: (c) => [c.accent, "#7a935f"], tip: "cattail" },
+  },
+  midnight: {
+    opacity: [0.06, 0.15],
+    crescent: { xFrac: 0.86, yFrac: 0.15, r: 26, color: (c) => c.shimmer },
+    silhouettes: [{ kind: "towers", heightFrac: 0.12, color: (c) => c.inkFaint, salt: 3 }],
+  },
+  sunprint: {
+    opacity: [0.09, 0.2],
+    orb: { xFrac: 0.14, yFrac: 0.18, r: 40, color: (c) => c.shimmer, sunRays: true },
+    silhouettes: [
+      { kind: "hills", heightFrac: 0.1, color: () => "#d9a06b", salt: 4 },
+      { kind: "hills", heightFrac: 0.06, color: () => "#c07a4a", salt: 5 },
+    ],
+  },
+  duskwood: {
+    opacity: [0.08, 0.18],
+    crescent: { xFrac: 0.12, yFrac: 0.14, r: 20, color: (c) => c.shimmer },
+    silhouettes: [
+      { kind: "pines", heightFrac: 0.26, color: () => "#3f5d46", salt: 6 },
+      { kind: "pines", heightFrac: 0.16, color: () => "#243b2c", salt: 7 },
+    ],
+  },
+  porcelain: { opacity: [0.06, 0.13], deco: "brushMountains" },
+  demonfire: {
+    opacity: [0.09, 0.19],
+    wash: { top: () => "#000000", bottom: () => "#3a0f08", topO: 0, bottomO: 0.5 },
+    orb: { xFrac: 0.5, yFrac: 1.04, r: 80, color: () => "#ff6a2d" },
+    silhouettes: [
+      { kind: "rocks", heightFrac: 0.2, color: () => "#4a1b10", salt: 8 },
+      { kind: "rocks", heightFrac: 0.12, color: () => "#2f0f08", salt: 9 },
+    ],
+  },
+  koipond: {
+    opacity: [0.11, 0.24],
+    wash: { top: () => "#8fc3d4", bottom: () => "#1d5a4c", topO: 0.05, bottomO: 0.3 },
+    rays: { count: 3, color: (c) => c.shimmer },
+    fronds: { count: 9, height: [60, 160], sway: 14, width: 4.5, colors: () => ["#2e6b5a", "#3f8a6f"], leaves: true },
+  },
+  carnival: {
+    opacity: [0.1, 0.21],
+    garlands: 2,
+    garlandColors: (c) => [c.accent, c.shimmer],
+    silhouettes: [{ kind: "tents", heightFrac: 0.12, color: () => "#c2694a", salt: 10 }],
+  },
+  catnap: {
+    opacity: [0.07, 0.16],
+    crescent: { xFrac: 0.85, yFrac: 0.13, r: 22, color: (c) => c.shimmer },
+    silhouettes: [
+      { kind: "hills", heightFrac: 0.1, color: () => "#cbbfe4", salt: 11 },
+      { kind: "hills", heightFrac: 0.06, color: () => "#b7a5d6", salt: 12 },
+    ],
+  },
+  abyss: {
+    opacity: [0.12, 0.26],
+    wash: { top: () => "#000000", bottom: () => "#02121a", topO: 0, bottomO: 0.55 },
+    rays: { count: 2, color: (c) => c.shimmer },
+    fronds: { count: 8, height: [90, 210], sway: 10, width: 5.5, colors: () => ["#155264", "#1d6a7d"], leaves: true, tip: "bulb" },
+  },
+  pompom: {
+    opacity: [0.08, 0.18],
+    silhouettes: [
+      { kind: "hills", heightFrac: 0.09, color: () => "#f7ddc4", salt: 13 },
+      { kind: "hills", heightFrac: 0.055, color: () => "#f2c9a8", salt: 14 },
+    ],
+  },
+  gravemist: {
+    opacity: [0.06, 0.16],
+    wash: { top: () => "#000000", bottom: (c) => c.inkFaint, topO: 0, bottomO: 0.18 },
+    orb: { xFrac: 0.12, yFrac: 0.76, r: 18, color: (c) => c.shimmer },
+    silhouettes: [
+      { kind: "slabs", heightFrac: 0.09, color: (c) => c.inkFaint, salt: 15 },
+      { kind: "slabs", heightFrac: 0.12, color: (c) => c.inkFaint, salt: 16 },
+    ],
+    deco: "tree",
+  },
+};
+
+export function sceneFor(theme: ThemeId): SceneSpec | undefined {
+  return SCENES[theme];
+}
+
+/** Bottom silhouettes, built deterministically from the stage size. */
+function silhouettePath(kind: SilhouetteKind, w: number, bottom: number, hMax: number, salt: number): string {
+  let d = `M 0 ${bottom}`;
+  let x = 0;
+  let i = salt * 17;
+  if (kind === "pines") {
+    while (x < w) {
+      const pw = 30 + seeded(i, 21) * 44;
+      const ph = hMax * (0.45 + seeded(i, 22) * 0.55);
+      d += ` L ${x + pw * 0.5} ${bottom - ph} L ${x + pw} ${bottom}`;
+      x += pw * (0.7 + seeded(i, 20) * 0.5);
+      i++;
+    }
+  } else if (kind === "tents") {
+    while (x < w) {
+      const pw = 70 + seeded(i, 21) * 60;
+      const ph = hMax * (0.6 + seeded(i, 22) * 0.4);
+      // a tent: curved sides meeting at a peak
+      d += ` L ${x + 4} ${bottom}`;
+      d += ` Q ${x + pw * 0.32} ${bottom - ph * 0.75} ${x + pw * 0.5} ${bottom - ph}`;
+      d += ` Q ${x + pw * 0.68} ${bottom - ph * 0.75} ${x + pw - 4} ${bottom}`;
+      x += pw + 26 + seeded(i, 23) * 60;
+      i++;
+    }
+  } else if (kind === "towers") {
+    while (x < w) {
+      const tw = 18 + seeded(i, 24) * 30;
+      const th = hMax * (0.25 + seeded(i, 25) * 0.75);
+      d += ` L ${x} ${bottom} L ${x} ${bottom - th} L ${x + tw} ${bottom - th} L ${x + tw} ${bottom}`;
+      x += tw + 8 + seeded(i, 26) * 26;
+      i++;
+    }
+  } else if (kind === "rocks") {
+    while (x < w) {
+      const pw = 40 + seeded(i, 23) * 70;
+      const ph = hMax * (0.3 + seeded(i, 24) * 0.7);
+      d += ` L ${x + pw * (0.3 + seeded(i, 25) * 0.4)} ${bottom - ph} L ${x + pw} ${bottom - hMax * 0.12 * seeded(i, 26)}`;
+      x += pw;
+      i++;
+    }
+    d += ` L ${w} ${bottom}`;
+  } else if (kind === "hills") {
+    while (x < w) {
+      const pw = 90 + seeded(i, 27) * 130;
+      const ph = hMax * (0.5 + seeded(i, 28) * 0.5);
+      d += ` Q ${x + pw / 2} ${bottom - ph * 2} ${x + pw} ${bottom}`;
+      x += pw;
+      i++;
+    }
+  } else {
+    // slabs: quiet rounded stones, spaced apart in the grass
+    x = 18 + seeded(i, 32) * 50;
+    while (x < w - 30) {
+      const sw = 24 + seeded(i, 29) * 16;
+      const sh = hMax * (0.55 + seeded(i, 30) * 0.45) * 1.4;
+      d += ` L ${x} ${bottom} L ${x} ${bottom - sh + 6} Q ${x} ${bottom - sh} ${x + sw / 2} ${bottom - sh}`;
+      d += ` Q ${x + sw} ${bottom - sh} ${x + sw} ${bottom - sh + 6} L ${x + sw} ${bottom}`;
+      x += sw + 70 + seeded(i, 31) * 140;
+      i++;
+    }
+  }
+  d += ` L ${w} ${bottom} Z`;
+  return d;
+}
+
+/** Peaks of the tent row (same seeds as the silhouette), for the flags. */
+function tentPeaks(w: number, bottom: number, hMax: number, salt: number): { x: number; y: number }[] {
+  const peaks: { x: number; y: number }[] = [];
+  let x = 0;
+  let i = salt * 17;
+  while (x < w) {
+    const pw = 70 + seeded(i, 21) * 60;
+    const ph = hMax * (0.6 + seeded(i, 22) * 0.4);
+    peaks.push({ x: x + pw * 0.5, y: bottom - ph });
+    x += pw + 26 + seeded(i, 23) * 60;
+    i++;
+  }
+  return peaks;
+}
+
+/** Point on the frond's quadratic at t, given the animated bend. */
+function frondPoint(x: number, baseY: number, h: number, b: number, t: number): { x: number; y: number } {
+  "worklet";
+  const cx = x + b * 0.35;
+  const cy = baseY - h * 0.55;
+  const ex = x + b;
+  const ey = baseY - h;
+  const u = 1 - t;
+  return {
+    x: u * u * x + 2 * u * t * cx + t * t * ex,
+    y: u * u * baseY + 2 * u * t * cy + t * t * ey,
+  };
+}
+
+function SceneFrond({
+  x,
+  baseY,
+  h,
+  sway,
+  width,
+  color,
+  leafColor,
+  leaves,
+  tip,
+  phase,
+  speed,
+  clock,
+  still,
+}: {
+  x: number;
+  baseY: number;
+  h: number;
+  sway: number;
+  width: number;
+  color: string;
+  leafColor: string;
+  leaves: boolean;
+  tip?: "bulb" | "cattail";
+  phase: number;
+  speed: number;
+  clock: SharedValue<number>;
+  still: boolean;
+}) {
+  const bend = useDerivedValue(
+    () => (still ? sway * 0.35 : sway * Math.sin(clock.value * speed + phase)),
+    [still, sway, speed, phase],
+  );
+  const blade = useAnimatedProps(() => {
+    const b = bend.value;
+    return { d: `M ${x} ${baseY} Q ${x + b * 0.35} ${baseY - h * 0.55} ${x + b} ${baseY - h}` };
+  }, [x, baseY, h, bend]);
+  const leafA = useAnimatedProps(() => {
+    const p = frondPoint(x, baseY, h, bend.value, 0.45);
+    return { cx: p.x, cy: p.y };
+  }, [x, baseY, h, bend]);
+  const leafB = useAnimatedProps(() => {
+    const p = frondPoint(x, baseY, h, bend.value, 0.72);
+    return { cx: p.x, cy: p.y };
+  }, [x, baseY, h, bend]);
+  const tipProps = useAnimatedProps(() => {
+    const p = frondPoint(x, baseY, h, bend.value, 1);
+    return { cx: p.x, cy: p.y };
+  }, [x, baseY, h, bend]);
+  return (
+    <>
+      <AnimatedPath animatedProps={blade} stroke={color} strokeWidth={width} strokeLinecap="round" fill="none" />
+      {leaves && (
+        <>
+          <AnimatedCircle animatedProps={leafA} cx={x} cy={baseY} r={width * 0.9} fill={leafColor} />
+          <AnimatedCircle animatedProps={leafB} cx={x} cy={baseY} r={width * 0.75} fill={leafColor} />
+        </>
+      )}
+      {tip === "bulb" && (
+        <AnimatedCircle animatedProps={tipProps} cx={x} cy={baseY} r={width * 0.95} fill={leafColor} />
+      )}
+      {tip === "cattail" && (
+        <AnimatedCircle animatedProps={tipProps} cx={x} cy={baseY} r={width * 1.15} fill="#8a6b4a" />
+      )}
+    </>
+  );
+}
+
+/** A slow diagonal light beam, swelling and fading like light through water. */
+function SceneRay({
+  x0,
+  width,
+  height,
+  color,
+  phase,
+  clock,
+  still,
+}: {
+  x0: number;
+  width: number;
+  height: number;
+  color: string;
+  phase: number;
+  clock: SharedValue<number>;
+  still: boolean;
+}) {
+  const props = useAnimatedProps(() => {
+    const o = still ? 0.06 : 0.04 + 0.05 * (0.5 + 0.5 * Math.sin(clock.value * 0.25 + phase));
+    return { opacity: o };
+  }, [still, phase]);
+  const slant = height * 0.35;
+  return (
+    <AnimatedPath
+      animatedProps={props}
+      d={`M ${x0} 0 L ${x0 + width} 0 L ${x0 + width + slant} ${height} L ${x0 + slant} ${height} Z`}
+      fill={color}
+    />
+  );
+}
+
+function SceneOrb({
+  cx,
+  cy,
+  r,
+  color,
+  sunRays,
+  still,
+}: {
+  cx: number;
+  cy: number;
+  r: number;
+  color: string;
+  sunRays?: boolean;
+  still: boolean;
+}) {
+  const p = useSharedValue(0);
+  useEffect(() => {
+    if (still) {
+      cancelAnimation(p);
+      p.value = 0.5;
+      return;
+    }
+    p.value = 0;
+    p.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 4200, easing: easeInOut }),
+        withTiming(0, { duration: 4200, easing: easeInOut }),
+      ),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(p);
+  }, [still, p]);
+  const inner = useAnimatedProps(() => ({ opacity: 0.55 + 0.25 * p.value, r: r * (0.94 + 0.08 * p.value) }), [r]);
+  const outer = useAnimatedProps(() => ({ opacity: 0.2 + 0.12 * p.value, r: r * (1.6 + 0.15 * p.value) }), [r]);
+  const rayEls: React.JSX.Element[] = [];
+  if (sunRays) {
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const r1 = r * 1.35;
+      const r2 = r * (1.9 + seeded(i, 51) * 0.5);
+      const spread = 0.09;
+      rayEls.push(
+        <Path
+          key={i}
+          d={`M ${cx + Math.cos(a - spread) * r1} ${cy + Math.sin(a - spread) * r1} L ${cx + Math.cos(a) * r2} ${cy + Math.sin(a) * r2} L ${cx + Math.cos(a + spread) * r1} ${cy + Math.sin(a + spread) * r1} Z`}
+          fill={color}
+          opacity={0.35}
+        />,
+      );
+    }
+  }
+  return (
+    <>
+      <AnimatedCircle animatedProps={outer} cx={cx} cy={cy} r={r * 1.6} fill={color} />
+      {rayEls}
+      <AnimatedCircle animatedProps={inner} cx={cx} cy={cy} r={r} fill={color} />
+    </>
+  );
+}
+
+/**
+ * The theme's stage dressing, in depth layers. Mount behind the weather;
+ * opacity glides with the wholeness mood. Under reduced motion everything
+ * renders, but perfectly still.
+ */
+export function ThemeScenery({
+  theme,
+  width,
+  height,
+  mood,
+  shimmer,
+  accent,
+  inkFaint,
+  bg,
+  danger,
+  reducedMotion,
+}: {
+  theme: ThemeId;
+  width: number;
+  height: number;
+  mood: number;
+  shimmer: string;
+  accent: string;
+  inkFaint: string;
+  bg: string;
+  danger: string;
+  reducedMotion: boolean;
+}) {
+  const spec = sceneFor(theme);
+  const moodSV = useSharedValue(mood);
+  useEffect(() => {
+    moodSV.value = withTiming(mood, { duration: 1200, easing: easeInOut });
+    return () => cancelAnimation(moodSV);
+  }, [mood, moodSV]);
+  const clock = useSharedValue(0);
+  const animated = !reducedMotion && !!(spec?.fronds || spec?.rays);
+  useEffect(() => {
+    if (!animated) {
+      cancelAnimation(clock);
+      clock.value = 0;
+      return;
+    }
+    clock.value = 0;
+    clock.value = withRepeat(withTiming(3600, { duration: 3600_000, easing: Easing.linear }), -1, false);
+    return () => cancelAnimation(clock);
+  }, [animated, clock]);
+
+  const [o0, o1] = spec?.opacity ?? [0, 0];
+  const wrapStyle = useAnimatedStyle(() => ({ opacity: o0 + (o1 - o0) * moodSV.value }), [o0, o1]);
+
+  if (!spec || width <= 0 || height <= 0) return null;
+  const colors: SceneColors = { shimmer, accent, inkFaint, bg, danger };
+  const bottom = height - 24; // the pinned date strip owns the last band
+
+  return (
+    <Animated.View pointerEvents="none" style={[{ position: "absolute", left: 0, top: 0 }, wrapStyle]}>
+      <Svg width={width} height={height}>
+        {spec.wash && (
+          <>
+            <Defs>
+              <LinearGradient id="scene-wash" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={spec.wash.top(colors)} stopOpacity={spec.wash.topO} />
+                <Stop offset="1" stopColor={spec.wash.bottom(colors)} stopOpacity={spec.wash.bottomO} />
+              </LinearGradient>
+            </Defs>
+            <Rect x={0} y={0} width={width} height={height} fill="url(#scene-wash)" />
+          </>
+        )}
+        {spec.rays &&
+          Array.from({ length: spec.rays.count }, (_, i) => (
+            <SceneRay
+              key={i}
+              x0={width * (0.12 + 0.7 * seeded(i, 52))}
+              width={26 + seeded(i, 53) * 40}
+              height={height}
+              color={spec.rays!.color(colors)}
+              phase={seeded(i, 54) * Math.PI * 2}
+              clock={clock}
+              still={reducedMotion}
+            />
+          ))}
+        {spec.crescent &&
+          (() => {
+            const c = spec.crescent!;
+            const cx = width * c.xFrac;
+            const cy = height * c.yFrac;
+            return (
+              <>
+                <Circle cx={cx} cy={cy} r={c.r * 1.7} fill={c.color(colors)} opacity={0.18} />
+                <Circle cx={cx} cy={cy} r={c.r} fill={c.color(colors)} />
+                <Circle cx={cx + c.r * 0.42} cy={cy - c.r * 0.18} r={c.r * 0.88} fill={bg} />
+              </>
+            );
+          })()}
+        {spec.silhouettes?.map((layer, li) => (
+          <Path
+            key={li}
+            d={silhouettePath(layer.kind, width, bottom, height * layer.heightFrac, layer.salt)}
+            fill={layer.color(colors)}
+            opacity={li === 0 && spec.silhouettes!.length > 1 ? 0.55 : 1}
+          />
+        ))}
+        {spec.silhouettes
+          ?.filter((l) => l.kind === "tents")
+          .map((layer, li) =>
+            tentPeaks(width, bottom, height * layer.heightFrac, layer.salt).map((p, i) => (
+              <Path
+                key={`${li}-${i}`}
+                d={`M ${p.x} ${p.y} L ${p.x} ${p.y - 10} L ${p.x + 9} ${p.y - 7} L ${p.x} ${p.y - 4}`}
+                stroke={layer.color(colors)}
+                strokeWidth={1.5}
+                fill={colors.shimmer}
+              />
+            )),
+          )}
+        {spec.deco === "brushMountains" && (
+          <>
+            {/* two sumi-e mountain strokes and the painter's red seal */}
+            <Path
+              d={`M ${-20} ${bottom - height * 0.13} C ${width * 0.2} ${bottom - height * 0.3}, ${width * 0.34} ${bottom - height * 0.05}, ${width * 0.55} ${bottom - height * 0.18} S ${width * 0.85} ${bottom - height * 0.08} ${width + 20} ${bottom - height * 0.22}`}
+              stroke={colors.inkFaint}
+              strokeWidth={7}
+              strokeLinecap="round"
+              fill="none"
+              opacity={0.6}
+            />
+            <Path
+              d={`M ${-20} ${bottom - height * 0.1} C ${width * 0.3} ${bottom - height * 0.2}, ${width * 0.5} ${bottom - height * 0.02}, ${width + 20} ${bottom - height * 0.14}`}
+              stroke={colors.inkFaint}
+              strokeWidth={2.5}
+              strokeLinecap="round"
+              fill="none"
+            />
+            <Rect x={width - 46} y={bottom - 40} width={16} height={16} rx={2} fill={colors.danger} opacity={0.8} />
+          </>
+        )}
+        {spec.deco === "tree" && (
+          <G opacity={0.85}>
+            {/* a bare tree keeping watch by the stones */}
+            <Path
+              d={`M ${width * 0.82} ${bottom} C ${width * 0.82 - 4} ${bottom - 40}, ${width * 0.82 + 3} ${bottom - 58}, ${width * 0.82 - 6} ${bottom - 86}`}
+              stroke={inkFaint}
+              strokeWidth={5}
+              strokeLinecap="round"
+              fill="none"
+            />
+            <Path
+              d={`M ${width * 0.82 - 2} ${bottom - 48} C ${width * 0.82 + 18} ${bottom - 60}, ${width * 0.82 + 26} ${bottom - 76}, ${width * 0.82 + 38} ${bottom - 82}`}
+              stroke={inkFaint}
+              strokeWidth={3}
+              strokeLinecap="round"
+              fill="none"
+            />
+            <Path
+              d={`M ${width * 0.82 - 4} ${bottom - 66} C ${width * 0.82 - 22} ${bottom - 76}, ${width * 0.82 - 26} ${bottom - 92}, ${width * 0.82 - 40} ${bottom - 98}`}
+              stroke={inkFaint}
+              strokeWidth={3}
+              strokeLinecap="round"
+              fill="none"
+            />
+          </G>
+        )}
+        {spec.fronds &&
+          (() => {
+            const f = spec.fronds!;
+            const cols = f.colors(colors);
+            return Array.from({ length: f.count }, (_, i) => {
+              // clumped along the bottom, like real growth
+              const clump = Math.floor(seeded(i, 40) * 3);
+              const x = width * (0.08 + 0.36 * clump + 0.18 * seeded(i, 41));
+              const h = f.height[0] + seeded(i, 42) * (f.height[1] - f.height[0]);
+              return (
+                <SceneFrond
+                  key={i}
+                  x={Math.min(x, width - 12)}
+                  baseY={bottom}
+                  h={h}
+                  sway={f.sway * (0.7 + seeded(i, 43) * 0.6)}
+                  width={f.width * (0.8 + seeded(i, 46) * 0.5)}
+                  color={cols[i % cols.length]}
+                  leafColor={cols[(i + 1) % cols.length]}
+                  leaves={!!f.leaves}
+                  tip={f.tip && seeded(i, 47) > 0.45 ? f.tip : undefined}
+                  phase={seeded(i, 44) * Math.PI * 2}
+                  speed={0.55 + seeded(i, 45) * 0.5}
+                  clock={clock}
+                  still={reducedMotion}
+                />
+              );
+            });
+          })()}
+        {spec.orb && (
+          <SceneOrb
+            cx={width * spec.orb.xFrac}
+            cy={height * spec.orb.yFrac}
+            r={spec.orb.r}
+            color={spec.orb.color(colors)}
+            sunRays={spec.orb.sunRays}
+            still={reducedMotion}
+          />
+        )}
+        {spec.garlands &&
+          Array.from({ length: spec.garlands }, (_, row) => {
+            const gcols = (spec.garlandColors ?? ((c: SceneColors) => [c.accent, c.shimmer] as [string, string]))(colors);
+            const y0 = 10 + row * 26;
+            const sag = 30 + row * 10;
+            const N = Math.max(6, Math.round(width / 90));
+            const flags: React.JSX.Element[] = [];
+            for (let i = 0; i < N; i++) {
+              const t = i / N;
+              const t2 = (i + 0.5) / N;
+              const px = width * t;
+              const py = y0 + sag * 4 * t * (1 - t);
+              const qx = width * t2;
+              const qy = y0 + sag * 4 * t2 * (1 - t2);
+              flags.push(
+                <Path
+                  key={i}
+                  d={`M ${px} ${py} L ${qx} ${qy} L ${(px + qx) / 2} ${py + 15} Z`}
+                  fill={(i + row) % 2 === 0 ? gcols[0] : gcols[1]}
+                />,
+              );
+            }
+            return (
+              <G key={row} opacity={row === 0 ? 1 : 0.6}>
+                <Path
+                  d={`M 0 ${y0} Q ${width / 2} ${y0 + sag * 2} ${width} ${y0}`}
+                  stroke={gcols[0]}
+                  strokeWidth={2}
+                  fill="none"
+                />
+                {flags}
+              </G>
+            );
+          })}
+      </Svg>
+    </Animated.View>
   );
 }

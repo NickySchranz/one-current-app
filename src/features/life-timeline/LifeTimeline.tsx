@@ -40,7 +40,7 @@ import { useTheme } from "@/ui/theme";
 import { alpha, mix } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
 import { loudnessWord } from "@/ui/LoudnessSlider";
-import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, ThemeBackdrop, useDashFlow } from "./timeline-fx";
+import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, ThemeBackdrop, ThemeScenery, useDashFlow } from "./timeline-fx";
 import { Mascot } from "./Mascot";
 import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
@@ -944,6 +944,18 @@ export function LifeTimeline() {
           testID="backdrop"
           style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0 }}
         >
+          <ThemeScenery
+            theme={theme}
+            width={size.width}
+            height={size.height}
+            mood={wholeness}
+            shimmer={tk.shimmer}
+            accent={tk.accent}
+            inkFaint={tk.inkFaint}
+            bg={tk.bg}
+            danger={tk.danger}
+            reducedMotion={reducedMotion}
+          />
           <ThemeBackdrop
             theme={theme}
             width={size.width}
