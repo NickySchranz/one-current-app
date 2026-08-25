@@ -41,7 +41,7 @@ import { useTheme } from "@/ui/theme";
 import { alpha, mix } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
 import { loudnessWord } from "@/ui/LoudnessSlider";
-import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, ChargePop, CoinToken, COIN_FLY_MS, COIN_HOVER, COIN_LEAD, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, ThemeBackdrop, ThemeScenery, TokenFly, useDashFlow } from "./timeline-fx";
+import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, ChargePop, CoinToken, COIN_FLY_MS, COIN_HOVER, COIN_LEAD, LungeG, MergePreviewTarget, NowGlow, PopBurst, ReclaimFly, SmokeFly, ThemeBackdrop, ThemeScenery, TokenFly, useDashFlow } from "./timeline-fx";
 import { Mascot, estTextWidth } from "./Mascot";
 import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
@@ -201,87 +201,6 @@ function MascotOptionsBubble({
   );
 }
 
-/**
- * The single quiet pill shown at an already-answered thread: no offers, no
- * prompts — just the sign that pressing again opens the panel. Same spring
- * out of Pip's side as the offer bubble.
- */
-function MascotOpenPill({
-  originX,
-  cy,
-  dir,
-  tailDy,
-  label,
-  onPress,
-  tk,
-  reducedMotion,
-}: {
-  originX: number;
-  cy: number;
-  dir: 1 | -1;
-  tailDy: number;
-  label: string;
-  onPress: () => void;
-  tk: ReturnType<typeof useTheme>;
-  reducedMotion: boolean;
-}) {
-  const p = useSharedValue(reducedMotion ? 1 : 0);
-  useEffect(() => {
-    if (reducedMotion) {
-      p.value = 1;
-      return;
-    }
-    p.value = 0;
-    p.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.back(1.6)) });
-  }, [p, reducedMotion]);
-  const animatedProps = useAnimatedProps(() => ({
-    opacity: Math.min(1, Math.max(0, p.value * 1.5)),
-    scale: 0.4 + 0.6 * p.value,
-  }));
-  const W = Math.max(78, Math.min(142, Math.ceil(28 + estTextWidth(label, tk.fontBody, ROW_FONT) + 10)));
-  const H = 27;
-  const left = dir === 1 ? 8 : -8 - W;
-  const stroke = alpha(tk.lineAxis, 0.9);
-  const eye = {
-    stroke: tk.accent,
-    strokeWidth: 1.9,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    fill: "none" as const,
-  };
-  return (
-    <G x={originX} y={cy}>
-      <AnimatedOptionG animatedProps={animatedProps}>
-        <Path
-          d={`M 0 ${tailDy} L ${dir * 10.5} -5 L ${dir * 10.5} 6 Z`}
-          fill={alpha(tk.bgRaised, 0.97)}
-          stroke={stroke}
-          strokeWidth={1}
-        />
-        <G onPress={onPress}>
-          <Rect x={left - 8} y={-H / 2 - 6} width={W + 16} height={H + 12} fill="transparent" />
-          <Rect
-            x={left}
-            y={-H / 2}
-            width={W}
-            height={H}
-            rx={H / 2}
-            fill={alpha(tk.bgRaised, 0.97)}
-            stroke={stroke}
-            strokeWidth={1}
-          />
-          <G x={left + 9} y={-7.5} scale={15 / 24}>
-            <Path d="M3 12 C6.5 6.8, 17.5 6.6, 21 12 C17.5 17.3, 6.5 17.4, 3 12 Z" {...eye} />
-            <Circle cx={12} cy={12} r={2.6} {...eye} />
-          </G>
-          <SvgText x={left + 28} y={4.1} fontSize={11.5} fontWeight="600" fill={tk.ink}>
-            {label}
-          </SvgText>
-        </G>
-      </AnimatedOptionG>
-    </G>
-  );
-}
 
 /** Movement below this is still a tap; beyond it the gesture picks an axis. */
 const DECIDE_PX = 8;
@@ -584,11 +503,47 @@ export function LifeTimeline() {
     setPreviewState(p);
   };
 
+  // ── Press-and-hold: the Facebook-emoji move. Holding a line makes it
+  // swell (holdP drives the BranchLine scale + bulge); at HOLD_MS it pops
+  // straight into the loudness dial sheet. Any drag or early release
+  // cancels through resetGesture, the single gesture funnel.
+  const HOLD_MS = 380;
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [holdBranchId, setHoldBranchId] = useState<string | null>(null);
+  const holdBranchRef = useRef<string | null>(null);
+  const holdP = useSharedValue(0);
+  const [holdPop, setHoldPop] = useState<{ key: number; branchId: string } | null>(null);
+  const cancelHold = () => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    if (holdBranchRef.current) {
+      holdBranchRef.current = null;
+      setHoldBranchId(null);
+      cancelAnimation(holdP);
+      holdP.value = 0;
+    }
+  };
+
+  /** A hold already consumed this touch: its release must not read as a tap. */
+  const holdFiredRef = useRef(false);
+
   const resetGesture = () => {
     modeRef.current = "idle";
     candidateRef.current = null;
     if (previewRef.current) setPreview(null);
     setScrollLocked(false);
+    cancelHold();
+  };
+
+  /** The touch ended: swallow the release-click of a fired hold, then reset. */
+  const endGesture = () => {
+    if (holdFiredRef.current) {
+      holdFiredRef.current = false;
+      blockTapsUntilRef.current = Date.now() + 350;
+    }
+    resetGesture();
   };
 
   // Web mice never fire the wrapper's onTouchEnd, so a plain click on a line
@@ -597,7 +552,7 @@ export function LifeTimeline() {
   useEffect(() => {
     if (!scrollLocked || Platform.OS !== "web") return;
     const up = () => {
-      if (modeRef.current === "idle") resetGesture();
+      if (modeRef.current === "idle") endGesture();
     };
     window.addEventListener("pointerup", up, true);
     return () => window.removeEventListener("pointerup", up, true);
@@ -708,6 +663,10 @@ export function LifeTimeline() {
       if (Date.now() < blockTapsUntilRef.current) return;
       const b = branchesRef.current.find((x) => x.id === branchId);
       if (!b) return;
+      // A tap sends Pip over and holds the thread — it opens nothing. The
+      // panels have their own gestures: press-and-hold pops the loudness
+      // dial, a second tap opens the full decisions. Pip makes no offer
+      // either way; the user already said which thread they mean.
       if (isClosed(b) || armedBranchId === branchId) {
         setArmedBranchId(null);
         setOperation({ kind: "quick-touch", branchId });
@@ -741,7 +700,42 @@ export function LifeTimeline() {
         startLevel: Math.round(effectiveLoudness(b, nowRef.current)),
       };
       setScrollLocked(true);
+      // Arm the hold: if the finger stays put past HOLD_MS, the line pops
+      // open its loudness dial. Any drag or early release cancels it.
+      cancelHold();
+      const reduced = useAppStore.getState().reducedMotion;
+      if (!reduced) {
+        holdBranchRef.current = branchId;
+        setHoldBranchId(branchId);
+        holdP.value = 0;
+        holdP.value = withTiming(1, { duration: HOLD_MS, easing: Easing.out(Easing.quad) });
+      }
+      holdTimerRef.current = setTimeout(() => {
+        holdTimerRef.current = null;
+        if (modeRef.current !== "idle") return;
+        if (candidateRef.current?.branchId !== branchId) return;
+        // The pop. The finger may stay down a while longer — endGesture
+        // swallows the eventual release-click via holdFiredRef.
+        holdFiredRef.current = true;
+        blockTapsUntilRef.current = Date.now() + 450;
+        if (!reduced) {
+          const key = Date.now();
+          setHoldPop({ key, branchId });
+          setTimeout(() => setHoldPop((p) => (p?.key === key ? null : p)), 750);
+        }
+        // The open sheet holds Pip by itself; arming as well would leave the
+        // thread armed after the sheet closes, so the next plain tap would
+        // spring the panel open with no hold at all.
+        setArmedBranchId(null);
+        setOperation({ kind: "quick-touch", branchId, dialOnly: true });
+        // partial reset: scroll stays locked so the web pointerup listener
+        // survives to see the release; cancelHold ends the swell.
+        modeRef.current = "idle";
+        candidateRef.current = null;
+        cancelHold();
+      }, HOLD_MS);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs and stable setters
     [],
   );
 
@@ -1168,8 +1162,9 @@ export function LifeTimeline() {
           <View
             {...panResponder.panHandlers}
             onTouchEnd={() => {
-              // a candidate that never picked an axis stays a tap
-              if (modeRef.current === "idle") resetGesture();
+              // a candidate that never picked an axis stays a tap — unless a
+              // fired hold already consumed this touch
+              if (modeRef.current === "idle") endGesture();
             }}
           >
             <Svg
@@ -1380,6 +1375,8 @@ export function LifeTimeline() {
                     // rests with the line until tomorrow (or until it reopens).
                     dialEnabled={!isClosed(branch) && !decidedToday(branch, now)}
                     onDialTouchStart={dialTouchStart}
+                    holding={holdBranchId === branch.id}
+                    holdP={holdP}
                     focused={false}
                     emphasizedId={top?.id}
                     highlighted={isUserFocused || mascotHighlight}
@@ -1420,6 +1417,14 @@ export function LifeTimeline() {
                       calm={hit.calm}
                     />
                   );
+                })()}
+
+              {/* the pop at the end of a press-and-hold: the dial's arrival */}
+              {holdPop &&
+                (() => {
+                  const g = layout.geometries.find((x) => x.branchId === holdPop.branchId);
+                  if (!g || !g.inWindow) return null;
+                  return <PopBurst key={holdPop.key} x={g.endX - 3} y={g.endY} color={tk.accent} />;
                 })()}
 
               {/* dropped tokens, flipping over their threads until they fly */}
@@ -1554,8 +1559,13 @@ export function LifeTimeline() {
                 (() => {
                   const optId = mascot.arrivedBranchId;
                   if (!optId) return null;
+                  // Offers only when Pip walked here on his own patrol — a
+                  // thread the user opened themselves needs no suggestion.
+                  if (mascot.arrivedVia !== "patrol") return null;
                   const b = branches.find((x) => x.id === optId);
                   if (!b || isClosed(b)) return null;
+                  // Patrol only ever lands where an answer is still open.
+                  if (decidedToday(b, now) || restingToday(b, now)) return null;
                   const spriteW = PX * 12;
                   const spriteH = PX * 16;
                   // Pip fades out at the canvas edges (viewing the past);
@@ -1592,27 +1602,6 @@ export function LifeTimeline() {
                   // The tail aims back at Pip's middle (capped to stay a beak).
                   const pipMidY = mascot.pos.y + spriteH / 2;
                   const tailDy = Math.max(-12, Math.min(12, pipMidY - cy));
-                  // An answered thread gets no offers — only the quiet sign
-                  // that pressing again opens its panel.
-                  const answered = decidedToday(b, now) || restingToday(b, now);
-                  if (answered) {
-                    return (
-                      <MascotOpenPill
-                        key={`open-${optId}`}
-                        originX={originX}
-                        cy={cy}
-                        dir={dir}
-                        tailDy={tailDy}
-                        label={t("Open it")}
-                        onPress={() => {
-                          setArmedBranchId(null);
-                          setOperation({ kind: "quick-touch", branchId: optId });
-                        }}
-                        tk={tk}
-                        reducedMotion={reducedMotion}
-                      />
-                    );
-                  }
                   const open = (dialOnly: boolean) => {
                     setArmedBranchId(null);
                     setOperation(

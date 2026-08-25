@@ -43,6 +43,8 @@ export type MascotState = {
   pendingBranchId: string | null;
   /** Set only once Pip is actually standing at the thread — not while travelling. */
   arrivedBranchId: string | null;
+  /** How he got there: only 'patrol' arrivals earn his offer pills. */
+  arrivedVia: "patrol" | "user";
   onPress: () => void;
   showReaction: (text: string) => void;
   focusBranch: (branchId: string) => void;
@@ -326,6 +328,14 @@ export function useMascot(
   const [inspectedIdState, setInspectedIdState] = useState<string | null>(null);
   const [pendingIdState, setPendingIdState] = useState<string | null>(null);
   const [arrivedIdState, setArrivedIdState] = useState<string | null>(null);
+  // Why he is standing there: his own patrol earns an offer; a user tap
+  // does not (the tap already opened the panel itself).
+  const arrivedViaRef = useRef<"patrol" | "user">("patrol");
+  const [arrivedVia, setArrivedVia] = useState<"patrol" | "user">("patrol");
+  const markArrival = (via: "patrol" | "user") => {
+    arrivedViaRef.current = via;
+    setArrivedVia(via);
+  };
 
   const clearTimer = () => {
     if (timerRef.current !== null) { clearTimeout(timerRef.current); timerRef.current = null; }
@@ -556,6 +566,7 @@ export function useMascot(
     phase.current = 'landing';
     inspectedId.current = branchId;
     setInspectedIdState(branchId);
+    markArrival('patrol');
     setArrivedIdState(branchId);
     setFrame('LAND_A');
     timerRef.current = setTimeout(() => {
@@ -774,6 +785,7 @@ export function useMascot(
     if (inspectedId.current === branchId && phase.current !== 'jumping') {
       inspectedId.current = branchId;
       setInspectedIdState(branchId);
+      markArrival('user');
       setArrivedIdState(branchId);
       return;
     }
@@ -799,6 +811,7 @@ export function useMascot(
       jumpDestRef.current = null;
       setFrame('INSPECT_A');
       phase.current = 'inspecting';
+      markArrival('user');
       setArrivedIdState(branchId);
       // A thread already answered today gets praise, not a prompt.
       const focused = branchesRef.current.find(x => x.id === branchId);
@@ -844,6 +857,7 @@ export function useMascot(
     placeRef.current(startPos.x, startPos.y, true);
     inspectedId.current = best.id;
     setInspectedIdState(best.id);
+    markArrival('patrol');
     setArrivedIdState(best.id); // he starts the session standing at it
 
     // Greet on first appearance
@@ -910,6 +924,7 @@ export function useMascot(
     inspectedBranchId: inspectedIdState,
     pendingBranchId: pendingIdState,
     arrivedBranchId: arrivedIdState,
+    arrivedVia,
     onPress, showReaction, focusBranch, superBonk, phrases: lang, visible,
   };
 }

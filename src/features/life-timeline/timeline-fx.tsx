@@ -581,7 +581,7 @@ export function attackVariantFor(theme: ThemeId): AttackVariant {
 }
 
 /** One flying particle of an impact: shoots outward, arcs, fades. */
-function Fleck({ x, y, angle, dist, size, color, rise, delay, t }: {
+export function Fleck({ x, y, angle, dist, size, color, rise, delay, t }: {
   x: number;
   y: number;
   angle: number;
@@ -606,7 +606,7 @@ function Fleck({ x, y, angle, dist, size, color, rise, delay, t }: {
 }
 
 /** The expanding shockwave at the point of impact. */
-function Shockwave({ x, y, color, t, scale = 1 }: {
+export function Shockwave({ x, y, color, t, scale = 1 }: {
   x: number;
   y: number;
   color: string;
@@ -2203,5 +2203,38 @@ export function ChargePop({ right, bottom, label, color }: {
     <Animated.View pointerEvents="none" style={[{ position: "absolute", right, bottom }, style]}>
       <Animated.Text style={{ color, fontWeight: "800", fontSize: 15 }}>{label}</Animated.Text>
     </Animated.View>
+  );
+}
+
+/**
+ * `.pop-burst` — the release of a completed press-and-hold: one soft ring
+ * and a few flecks where the thread just "popped" into its panel. Self-
+ * driving; the parent mounts it keyed and clears it on a short timer.
+ */
+export function PopBurst({ x, y, color }: { x: number; y: number; color: string }) {
+  const t = useSharedValue(0);
+  useEffect(() => {
+    t.value = 0;
+    t.value = withTiming(1, { duration: 600, easing: Easing.out(Easing.quad) });
+    return () => cancelAnimation(t);
+  }, [t]);
+  return (
+    <G pointerEvents="none">
+      <Shockwave x={x} y={y} color={color} t={t} scale={0.55} />
+      {[0, 1, 2, 3, 4].map((i) => (
+        <Fleck
+          key={i}
+          x={x}
+          y={y}
+          angle={-Math.PI / 2 + (i - 2) * 0.62}
+          dist={18}
+          size={1.8}
+          color={color}
+          rise={7}
+          delay={i * 0.05}
+          t={t}
+        />
+      ))}
+    </G>
   );
 }

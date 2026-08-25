@@ -105,6 +105,12 @@ export function QuickBranchMenu({ branchId, startExpanded = false, dialOnly = fa
   // Pulling it up (or tapping the question) reveals the decisions. Coming
   // Back from a sub-panel reopens straight onto them.
   const [expanded, setExpanded] = useState(startExpanded);
+  // The tray keys this menu by branch id only, so moving from the dial-only
+  // sheet to the full decisions re-renders without remounting — follow the
+  // prop instead of only reading it once.
+  useEffect(() => {
+    if (startExpanded) setExpanded(true);
+  }, [startExpanded]);
   const touchRef = useRef<{ x: number; y: number } | null>(null);
   const t = useT();
   const theme = useTheme();
@@ -216,12 +222,20 @@ export function QuickBranchMenu({ branchId, startExpanded = false, dialOnly = fa
             </Hint>
           )}
         </View>
-        <Button
-          variant="quiet"
-          label={t("Return to timeline")}
-          onPress={() => setOperation({ kind: "idle" })}
-          style={{ alignSelf: "flex-start", marginTop: 8 }}
-        />
+        {/* the deeper panel is always one tap away from the dial */}
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+          <Button
+            label={t("Reflect")}
+            onPress={() =>
+              setOperation({ kind: "quick-touch", branchId, expanded: true })
+            }
+          />
+          <Button
+            variant="quiet"
+            label={t("Return to timeline")}
+            onPress={() => setOperation({ kind: "idle" })}
+          />
+        </View>
       </Panel>
     );
   }

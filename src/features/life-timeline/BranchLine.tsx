@@ -9,6 +9,7 @@ import Animated, {
   withSequence,
   withTiming,
   Easing,
+  type SharedValue,
 } from "react-native-reanimated";
 import { Circle, G, Path, Text as SvgText } from "react-native-svg";
 import type { PsychologicalBranch } from "@/domain/branches/types";
@@ -79,6 +80,10 @@ type Props = {
   /** A press starts here; sliding up or down dials this thread's loudness. */
   dialEnabled?: boolean;
   onDialTouchStart?: (branchId: string, e: GestureResponderEvent) => void;
+  /** A press-and-hold is charging on this line: it swells until the pop. */
+  holding?: boolean;
+  /** Hold progress 0..1 on the UI thread (only read while `holding`). */
+  holdP?: SharedValue<number>;
   onSelect: (branchId: string) => void;
   onSelectMoment: (branchId: string, momentId: string) => void;
   onSelectMergePoint: (branchId: string) => void;
@@ -110,6 +115,8 @@ export const BranchLine = memo(function BranchLine({
   wave = null,
   waveNowX = 0,
   wavePeriodMs = 1,
+  holding = false,
+  holdP,
 }: Props) {
   const t = useT();
   const tk = useTheme();
@@ -117,6 +124,17 @@ export const BranchLine = memo(function BranchLine({
   const resting = restingToday(branch, now);
   // A decision was taken on this line today: it rests, marked with a quiet check.
   const acted = isOpen(branch) && decidedToday(branch, now);
+
+  // Press-and-hold: the line grows under the finger until the pop opens its
+  // dial. Costs nothing unless `holding` — the props read 0 and never change.
+  const holdScaleProps = useAnimatedProps(() => {
+    const p = holding && holdP ? holdP.value : 0;
+    return { scale: 1 + 0.055 * p };
+  }, [holding, holdP]);
+  const holdGlowProps = useAnimatedProps(() => {
+    const p = holding && holdP ? holdP.value : 0;
+    return { r: Math.max(0.1, 4 + p * 16), opacity: 0.32 * p };
+  }, [holding, holdP]);
 
   // Local closures over the id-keyed stable handlers (recreated only when
   // THIS branch renders — the parent's identity stays stable).
@@ -265,7 +283,14 @@ export const BranchLine = memo(function BranchLine({
       />
 
       {/* only the strokes slither with loudness; the endpoints, dots, hit
-          area, fork dot, merge point and label stay still and readable */}
+          area, fork dot, merge point and label stay still and readable.
+          A press-and-hold scales them gently around the endpoint — the
+          Facebook-emoji swell before the pop. */}
+      <AnimatedG
+        animatedProps={holdScaleProps}
+        origin={`${g.endX}, ${g.endY}`}
+        pointerEvents="none"
+      >
 
       {/* soft halo behind the line of the action being viewed */}
       {highlighted && (
@@ -301,6 +326,18 @@ export const BranchLine = memo(function BranchLine({
           opacity={0.85}
           fill="none"
           strokeLinecap="round"
+          pointerEvents="none"
+        />
+      )}
+      </AnimatedG>
+
+      {/* the charging bulge of a press-and-hold, right where it will pop */}
+      {holding && (
+        <AnimatedCircle
+          animatedProps={holdGlowProps}
+          cx={g.endX - 3}
+          cy={g.endY}
+          fill={color}
           pointerEvents="none"
         />
       )}

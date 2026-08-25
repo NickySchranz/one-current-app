@@ -29,7 +29,6 @@ export const sweep: Record<string, string> = {
   "SUPER BONK!": "¡SÚPER BONK!",
   "Super bonk: Pip calms every thread": "Súper bonk: Pip calma todos los hilos",
   "bonk = Pip soothes a thread, easing its loudness for today": "bonk = Pip arrulla un hilo y le baja el volumen por hoy",
-  "Open it": "Ábrelo",
   "Now. Select to see integrated threads.": "Ahora. Selecciona para ver los hilos integrados.",
   "No integrated threads yet.": "Todavía no hay hilos integrados.",
   "When you integrate a thread it appears here — tap to revisit it on the timeline.": "Cuando integras un hilo aparece aquí — tócalo para volver a verlo en la línea de tiempo.",
