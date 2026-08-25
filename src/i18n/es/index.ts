@@ -1,3 +1,7 @@
+/**
+ * Spanish (Spain) app copy, keyed by the English source strings.
+ * A missing key simply falls back to English.
+ */
 import { common } from "./common";
 import { wholeness } from "./wholeness";
 import { timeline } from "./timeline";
@@ -6,11 +10,9 @@ import { inspection } from "./inspection";
 import { history } from "./history";
 import { paywall } from "./paywall";
 import { auth } from "./auth";
+import { tutorial } from "./tutorial";
+import { sweep } from "./sweep";
 
-/**
- * Spanish app copy, keyed by the English source strings.
- * Split per feature; a missing key simply falls back to English.
- */
 export const es: Record<string, string> = {
   ...common,
   ...wholeness,
@@ -20,4 +22,6 @@ export const es: Record<string, string> = {
   ...history,
   ...paywall,
   ...auth,
+  ...tutorial,
+  ...sweep,
 };

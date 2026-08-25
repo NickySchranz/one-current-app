@@ -25,7 +25,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'main-line',
     text: "This horizontal line is your 'Now'.",
     subtext:
-      "Your present moment flows along it. Everything on your mind gets its own line from here.",
+      "Your present flows along it. Anything holding part of your attention gets its own line from here.",
     frame: 'INSPECT_A',
     highlight: 'now',
   },
@@ -33,7 +33,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'branches',
     text: 'These lines are your threads.',
     subtext:
-      'Each one is something pulling your attention — a worry, project, or waiting situation.',
+      'Each one is something you are carrying — a worry, a project, a wait. Drawn out here, it becomes something you can hold.',
     frame: 'INSPECT_B',
     highlight: 'branch',
   },
@@ -41,7 +41,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'tap',
     text: 'Tap any thread to work with it.',
     subtext:
-      'You can add notes, make a decision, set how loud it feels, or let it go.',
+      'Add a note, take one small step, set how loud it feels — or let it rest. Every one of those is a real answer.',
     frame: 'TALK_A',
     highlight: 'branch',
   },
@@ -49,7 +49,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'loudness',
     text: 'Drag a thread up or down to adjust its loudness.',
     subtext:
-      'Louder means it\'s taking more mental space right now. Setting it honestly helps you see clearly.',
+      "Louder means it's asking for more of your attention right now. Setting it honestly helps you see clearly.",
     frame: 'INSPECT_A',
     highlight: 'branch',
   },
@@ -73,7 +73,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'history',
     text: "History shows each day's progress.",
     subtext:
-      'Integrations, notes, actions taken — all recorded. Reviewing it builds self-knowledge.',
+      'Integrations, notes, steps you took — all kept. Looking back, you can watch yourself getting better at this.',
     frame: 'INSPECT_B',
     highlight: 'history',
   },
@@ -89,7 +89,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'done',
     text: "That's everything!",
     subtext:
-      "I'll keep watch over your threads. Tap me anytime to interact with a specific thread. You've got this.",
+      "I'll keep an eye on your threads. Tap me anytime to look at one together. You've got this.",
     frame: 'REACT',
     highlight: null,
   },

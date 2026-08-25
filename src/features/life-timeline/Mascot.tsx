@@ -50,43 +50,97 @@ function PixelGrid({ pixels, palette }: { pixels: Pixel[]; palette: Record<Color
 // ─── Text wrapping ────────────────────────────────────────────────────────────
 
 const FONT_SIZE = 9.5;
-const CHAR_W    = 5.2;   // average pixel-width per char at FONT_SIZE
 const LINE_H    = 13;
-const MAX_BUBBLE_W = 165;
+const MAX_BUBBLE_W = 180;
 const MIN_BUBBLE_W = 60;
-const H_PAD = 14;        // horizontal padding (both sides total)
+const H_PAD = 16;        // horizontal padding (both sides total)
 const V_PAD_TOP = 5;
 const V_PAD_BOT = 6;
+const MAX_LINES = 4;
 
-function wrapText(text: string, maxW: number): string[] {
-  const maxChars = Math.floor((maxW - H_PAD) / CHAR_W);
-  const words = text.split(' ');
-  const lines: string[] = [];
-  let cur = '';
-  for (const w of words) {
-    const next = cur ? cur + ' ' + w : w;
-    if (next.length > maxChars && cur) {
-      lines.push(cur);
-      cur = w;
-    } else {
-      cur = next;
-    }
-  }
-  if (cur) lines.push(cur);
-  return lines.slice(0, 3);
+// ── Width estimation ──
+// react-native-svg cannot measure text before rendering, so the bubble is
+// sized from a per-glyph estimate instead of one average. The table errs
+// wide on purpose (plus a safety margin): a bubble a few px roomy is
+// invisible; a line poking out of the border is not.
+const GLYPH_NARROW = new Set([..."ijl!.,;:'’|¡· "]);
+const GLYPH_SLIM = new Set([..."ftr()[]\"-—…"]);
+const GLYPH_WIDE = new Set([..."mwMW@%"]);
+const CAP_RE = /[A-ZÁÉÍÓÚÑÜÀ-Þ]/;
+
+function glyphW(ch: string): number {
+  if (ch === " ") return 2.8;
+  if (GLYPH_NARROW.has(ch)) return 3.0;
+  if (GLYPH_SLIM.has(ch)) return 4.0;
+  if (GLYPH_WIDE.has(ch)) return 8.6;
+  if (CAP_RE.test(ch)) return 6.9;
+  if (ch >= "0" && ch <= "9") return 5.6;
+  return 5.1; // lowercase and everything else
 }
 
-function measureBubble(text: string): { lines: string[]; w: number; h: number } {
-  // First try single line
-  const singleLen = text.length * CHAR_W + H_PAD;
-  if (singleLen <= MAX_BUBBLE_W) {
-    const w = Math.max(MIN_BUBBLE_W, singleLen);
+/** How much wider than the reference sans a theme's body face runs. */
+export function fontWidthFactor(fontBody = ""): number {
+  const f = fontBody.toLowerCase();
+  if (f.includes("courier") || f.includes("mono")) return 1.12;
+  if (f.includes("futura") || f.includes("century") || f.includes("rounded") || f.includes("avenir"))
+    return 1.16;
+  if (f.includes("georgia") || f.includes("palatino") || f.includes("times") || f.includes("serif"))
+    return 1.06;
+  return 1.0;
+}
+
+const SAFETY = 1.08;
+
+/** Estimated rendered width of `text` at `fontSize`, in the given face. */
+export function estTextWidth(text: string, fontBody = "", fontSize = FONT_SIZE): number {
+  let w = 0;
+  for (const ch of text) w += glyphW(ch);
+  return w * fontWidthFactor(fontBody) * SAFETY * (fontSize / FONT_SIZE);
+}
+
+function wrapText(text: string, budgetPx: number, fontBody?: string): string[] {
+  const fits = (s: string) => estTextWidth(s, fontBody) <= budgetPx;
+  const lines: string[] = [];
+  let cur = "";
+  const push = (s: string) => { if (s) lines.push(s); };
+  for (const word of text.split(" ")) {
+    const next = cur ? cur + " " + word : word;
+    if (fits(next)) {
+      cur = next;
+      continue;
+    }
+    push(cur);
+    if (fits(word)) {
+      cur = word;
+    } else {
+      // A single word wider than the bubble: break it by characters.
+      let piece = "";
+      for (const ch of word) {
+        if (fits(piece + ch)) piece += ch;
+        else { push(piece); piece = ch; }
+      }
+      cur = piece;
+    }
+  }
+  push(cur);
+  if (lines.length > MAX_LINES) {
+    const kept = lines.slice(0, MAX_LINES);
+    kept[MAX_LINES - 1] = kept[MAX_LINES - 1].replace(/.{2}$/, "") + "…";
+    return kept;
+  }
+  return lines;
+}
+
+function measureBubble(text: string, fontBody?: string): { lines: string[]; w: number; h: number } {
+  const budget = MAX_BUBBLE_W - H_PAD;
+  const single = estTextWidth(text, fontBody);
+  if (single <= budget) {
+    const w = Math.max(MIN_BUBBLE_W, single + H_PAD);
     return { lines: [text], w, h: V_PAD_TOP + LINE_H + V_PAD_BOT };
   }
-  // Multi-line wrap
-  const lines = wrapText(text, MAX_BUBBLE_W);
-  const longestLen = Math.max(...lines.map(l => l.length)) * CHAR_W + H_PAD;
-  const w = Math.max(MIN_BUBBLE_W, Math.min(MAX_BUBBLE_W, longestLen));
+  const lines = wrapText(text, budget, fontBody);
+  const longest = Math.max(...lines.map((l) => estTextWidth(l, fontBody)));
+  const w = Math.max(MIN_BUBBLE_W, Math.min(MAX_BUBBLE_W, longest + H_PAD));
   const h = V_PAD_TOP + lines.length * LINE_H + V_PAD_BOT;
   return { lines, w, h };
 }
@@ -94,16 +148,30 @@ function measureBubble(text: string): { lines: string[]; w: number; h: number } 
 // ─── Speech bubble ────────────────────────────────────────────────────────────
 
 function SpeechBubble({
-  spriteX, spriteY, opacity, text, theme,
+  spriteX, spriteY, opacity, text, theme, posX, viewW,
 }: {
   spriteX: number; spriteY: number;
   opacity: SharedValue<number>; text: string;
   theme: ThemeTokens;
+  /** Sprite anchor on the UI thread + canvas width: a wide bubble fades as
+   * its own edge (not just the sprite) starts to overhang the canvas. */
+  posX?: SharedValue<number>;
+  viewW?: number;
 }) {
-  const fade = useAnimatedProps(() => ({ opacity: opacity.value }), [opacity]);
+  const { lines, w: bubbleW, h: bubbleH } = measureBubble(text || " ", theme.fontBody);
+  const half = bubbleW / 2;
+  const fade = useAnimatedProps(() => {
+    let edge = 1;
+    if (posX && viewW && viewW > 0) {
+      const cx = posX.value + (PX * 12) / 2;
+      const fr = Math.max(0, Math.min(1, (viewW - (cx + half)) / 40 + 1));
+      const fl = Math.max(0, Math.min(1, (cx - half) / 40 + 1));
+      edge = Math.min(fr, fl);
+    }
+    return { opacity: opacity.value * edge };
+  }, [opacity, posX, viewW, half]);
   if (!text) return null;
 
-  const { lines, w: bubbleW, h: bubbleH } = measureBubble(text);
   const spriteW = PX * 12;
   const bx = spriteX + spriteW / 2 - bubbleW / 2;
   const by = spriteY - bubbleH - 10;
@@ -229,7 +297,17 @@ export function Mascot({
 
   return (
     <AnimatedG animatedProps={rideProps}>
-      {bubbleO && <SpeechBubble spriteX={0} spriteY={0} opacity={bubbleO} text={bubbleText} theme={theme} />}
+      {bubbleO && (
+        <SpeechBubble
+          spriteX={0}
+          spriteY={0}
+          opacity={bubbleO}
+          text={bubbleText}
+          theme={theme}
+          posX={posX}
+          viewW={viewW}
+        />
+      )}
       <G
         transform={transform}
         onPress={onPress}

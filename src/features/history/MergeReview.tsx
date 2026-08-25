@@ -67,7 +67,7 @@ export function MergeReview({ mergeId }: Props) {
       <Panel>
         <H1>{t("Integrated")}</H1>
         <Hint>
-          {new Date(merge.createdAt).toLocaleDateString(language === "es" ? "es" : undefined, {
+          {new Date(merge.createdAt).toLocaleDateString(language === "en" ? undefined : language, {
             weekday: "long",
             month: "long",
             day: "numeric",

@@ -1,10 +1,15 @@
 // Copy lint (report-only): checks the app's user-facing English against the
-// wording principles from the 2026-08 copy pass, and lists t() keys that the
-// Spanish dictionaries don't cover (English strings ARE the keys, so any
-// English edit orphans its translation silently — this surfaces the gap for
-// the next translation pass).
+// wording principles from the 2026-08 copy pass, and reconciles both Spanish
+// dictionaries against the source (English strings ARE the keys, so any
+// English edit orphans its translation silently).
 //
-// Usage: node scripts/copy-lint.mjs
+// Checks:
+//   1. banned words in user-facing string literals
+//   2. t() keys missing from es and from es-CO (each dictionary separately)
+//   3. dynamic keys missing (word tables the t()-regex can't see)
+//   4. dead dictionary keys (their English no longer exists anywhere in src)
+//
+// Usage: node scripts/copy-lint.mjs   (exit code 1 if anything is off)
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -32,6 +37,24 @@ const BANNED = [
 // voice (example beliefs, a thread's demand) so the user can see it as a
 // thought, not a truth. Banned words are the point there.
 const ALLOW = [/who you are and who you should be/i];
+
+// Keys reached through variables (t(loudnessWord(v)), t(verb), t(copy.title)…)
+// that the t("literal") regex can never see. Each entry must stay translated.
+const DYNAMIC_KEYS = [
+  // LOUDNESS_WORDS (src/ui/LoudnessSlider.tsx)
+  "quiet", "murmuring", "speaking", "calling", "loud",
+  // bonk verbs + super state (src/features/life-timeline/LifeTimeline.tsx)
+  "Bonk!", "Douse!", "Splash!", "Whoosh!", "Boop!", "Dim it!", "Shoo!", "Ruffle!",
+  "SUPER BONK!",
+  // paywall COPY table (src/features/paywall/PaywallPrompt.tsx)
+  "This look is part of Pro",
+  "The free current holds {n} threads",
+  "Sharing is part of Pro",
+  // tutorial steps render via t(step.text) (src/features/tutorial/useTutorial.ts)
+  "Hi! I'm Pip!",
+  "That's everything!",
+  "These lines are your threads.",
+];
 
 function* walk(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -65,23 +88,32 @@ function tKeys(sourceText) {
   return keys;
 }
 
-const esDir = join(SRC, "i18n", "es");
-const esKeys = new Set();
-for (const f of readdirSync(esDir)) {
-  if (!/\.ts$/.test(f)) continue;
-  const text = readFileSync(join(esDir, f), "utf8");
-  const re = /^\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([A-Za-z_$][\w$]*))\s*:/gm;
-  let m;
-  while ((m = re.exec(text)))
-    esKeys.add((m[1] ?? m[2] ?? m[3]).replace(/\\(.)/g, "$1"));
+function dictKeys(dir) {
+  const keys = new Set();
+  for (const f of readdirSync(dir)) {
+    if (!/\.ts$/.test(f) || f === "index.ts") continue;
+    const text = readFileSync(join(dir, f), "utf8");
+    const re = /^\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([A-Za-z_$][\w$]*))\s*:/gm;
+    let m;
+    while ((m = re.exec(text)))
+      keys.add((m[1] ?? m[2] ?? m[3]).replace(/\\(.)/g, "$1"));
+  }
+  return keys;
 }
 
+const dicts = {
+  es: dictKeys(join(SRC, "i18n", "es")),
+  "es-CO": dictKeys(join(SRC, "i18n", "es-co")),
+};
+
 let bannedHits = 0;
-const missing = new Set();
+const usedKeys = new Set(DYNAMIC_KEYS);
+const srcChunks = [];
 for (const file of walk(SRC)) {
   const rel = relative(process.cwd(), file);
   if (rel.startsWith(join("src", "i18n") + "/")) continue;
   const text = readFileSync(file, "utf8");
+  srcChunks.push(text);
   for (const { text: lit, line } of stringLiterals(text)) {
     if (ALLOW.some((rule) => rule.test(lit))) continue;
     for (const rule of BANNED) {
@@ -91,9 +123,26 @@ for (const file of walk(SRC)) {
       }
     }
   }
-  for (const key of tKeys(text)) if (!esKeys.has(key)) missing.add(key);
+  for (const key of tKeys(text)) usedKeys.add(key);
+}
+const allSrc = srcChunks.join("\n");
+
+let problems = bannedHits;
+console.log(`\n${bannedHits} banned-word hit(s) in user-facing strings.`);
+
+for (const [name, keys] of Object.entries(dicts)) {
+  const missing = [...usedKeys].filter((k) => !keys.has(k)).sort();
+  problems += missing.length;
+  console.log(`${missing.length} key(s) missing from the ${name} dictionary (fall back to English):`);
+  for (const key of missing) console.log(`  MISSING(${name})  ${key}`);
 }
 
-console.log(`\n${bannedHits} banned-word hit(s) in user-facing strings.`);
-console.log(`${missing.size} t() key(s) missing from the es dictionary (fall back to English):`);
-for (const key of [...missing].sort()) console.log(`  MISSING  ${key}`);
+// Dead keys: translations whose English source string no longer exists.
+for (const [name, keys] of Object.entries(dicts)) {
+  const dead = [...keys].filter((k) => !allSrc.includes(k)).sort();
+  problems += dead.length;
+  console.log(`${dead.length} dead key(s) in the ${name} dictionary (English source gone):`);
+  for (const key of dead) console.log(`  DEAD(${name})  ${key.slice(0, 90)}`);
+}
+
+process.exit(problems > 0 ? 1 : 0);

@@ -1,70 +1,54 @@
-/** The login gate: sign in, register, forgot password, and the account section. */
+/** Login and account copy. Keys are English source strings. */
 export const auth: Record<string, string> = {
   "Welcome back": "Qué bueno verte de nuevo",
-  Email: "Correo electrónico",
-  Password: "Contraseña",
+  "Email": "Correo electrónico",
+  "Password": "Contraseña",
   "Sign in": "Iniciar sesión",
   "Forgot your password?": "¿Olvidaste tu contraseña?",
   "New here?": "¿Primera vez por acá?",
   "Create an account": "Crear una cuenta",
-  "Your name": "Tu nombre",
-  Register: "Registrarse",
+  "Register": "Registrarse",
   "I already have an account": "Ya tengo una cuenta",
-  "Tell us your email and we will send a code to set a new password.":
-    "Cuéntanos tu correo y te mandamos un código para poner una contraseña nueva.",
+  "Tell us your email and we will send a code to set a new password.": "Cuéntanos tu correo y te mandamos un código para poner una contraseña nueva.",
   "Send the code": "Mandar el código",
   "Back to sign in": "Volver a iniciar sesión",
-  "If an account exists for {email}, a code is on its way. Paste it here with a new password.":
-    "Si existe una cuenta para {email}, el código ya va en camino. Pégalo acá con una contraseña nueva.",
+  "If an account exists for {email}, a code is on its way. Paste it here with a new password.": "Si existe una cuenta para {email}, el código ya va en camino. Pégalo acá con una contraseña nueva.",
   "Code from the email": "Código del correo",
   "New password": "Contraseña nueva",
   "Set the new password": "Guardar la contraseña nueva",
-  "Your password is updated — sign in with it now.":
-    "Tu contraseña quedó actualizada — inicia sesión con ella ya.",
-  "That reset code is not valid any more — request a new one.":
-    "Ese código ya no sirve — pide uno nuevo.",
+  "Your password is updated — sign in with it now.": "Tu contraseña quedó actualizada — inicia sesión con ella ya.",
+  "That reset code is not valid any more — request a new one.": "Ese código ya no sirve — pide uno nuevo.",
   "Check your email": "Revisa tu correo",
-  "We sent a code to {email}. Paste it here to finish signing up.":
-    "Te mandamos un código a {email}. Pégalo acá para terminar el registro.",
+  "We sent a code to {email}. Paste it here to finish signing up.": "Te mandamos un código a {email}. Pégalo acá para terminar el registro.",
   "Verification code": "Código de verificación",
-  Verify: "Verificar",
+  "Verify": "Verificar",
   "Resend the code": "Reenviar el código",
   "A new code is on its way.": "Un código nuevo va en camino.",
-  "That code is not valid — request a new one and try again.":
-    "Ese código no sirve — pide uno nuevo y vuelve a intentar.",
+  "That code is not valid — request a new one and try again.": "Ese código no sirve — pide uno nuevo y vuelve a intentar.",
   "Paste the code from the email first.": "Primero pega el código del correo.",
-  "Email delivery is not set up yet — use this code: {code}":
-    "El envío de correos todavía no está configurado — usa este código: {code}",
+  "Email delivery is not set up yet — use this code: {code}": "El envío de correos todavía no está configurado — usa este código: {code}",
   "That does not look like an email address.": "Eso no parece una dirección de correo.",
   "The password needs at least 4 characters.": "La contraseña necesita mínimo 4 caracteres.",
-  "What should we call you?": "¿Cómo te decimos?",
-  "Your threads never leave this device — the account only signs you in.":
-    "Tus hilos nunca salen de este dispositivo — la cuenta solo te da la entrada.",
-  Account: "Cuenta",
+  "Your threads never leave this device — the account only signs you in.": "Tus hilos nunca salen de este dispositivo — la cuenta solo te da la entrada.",
+  "Account": "Cuenta",
   "Signed in as {email}": "Sesión iniciada como {email}",
   "Signed in as {name} ({email})": "Sesión iniciada como {name} ({email})",
   "Sign out": "Cerrar sesión",
-  "Signing out only closes the door — every thread stays on this device.":
-    "Cerrar sesión solo cierra la puerta — cada hilo se queda en este dispositivo.",
-  "Too many attempts. Wait a moment and try again.":
-    "Demasiados intentos. Espera un momento y vuelve a intentar.",
+  "Signing out only closes the door — every thread stays on this device.": "Cerrar sesión solo cierra la puerta — cada hilo se queda en este dispositivo.",
+  "Too many attempts. Wait a moment and try again.": "Demasiados intentos. Espera un momento y vuelve a intentar.",
   "That email and password do not match.": "Ese correo y esa contraseña no coinciden.",
   "An account with that email already exists.": "Ya hay una cuenta con ese correo.",
   "The account could not be created.": "No pudimos crear la cuenta.",
   "Signing in…": "Iniciando sesión…",
   "One moment…": "Un momentico…",
-  Offline: "Sin conexión",
-  "Offline — signed in on this device only.":
-    "Sin conexión — la sesión quedó solo en este dispositivo.",
+  "Offline": "Sin conexión",
+  "Offline — signed in on this device only.": "Sin conexión — la sesión quedó solo en este dispositivo.",
   "Account & sync": "Cuenta y sincronización",
-  "Cloud backup keeps a copy of everything on your account so a new device can pick it up. Part of Pro.":
-    "La copia en la nube guarda todo en tu cuenta para que un dispositivo nuevo lo recoja. Parte de Pro.",
-  "Sign in while the server is reachable to use cloud backup.":
-    "Inicia sesión cuando el servidor esté disponible para usar la copia en la nube.",
+  "Cloud backup keeps a copy of everything on your account so a new device can pick it up. Part of Pro.": "La copia en la nube guarda todo en tu cuenta para que un dispositivo nuevo lo recoja. Parte de Pro.",
+  "Sign in while the server is reachable to use cloud backup.": "Inicia sesión cuando el servidor esté disponible para usar la copia en la nube.",
   "Upload backup": "Subir copia",
   "Restore backup": "Restaurar copia",
-  "Bring the server copy onto this device? Matching threads are overwritten.":
-    "¿Traer la copia del servidor a este dispositivo? Los hilos que coincidan se sobrescriben.",
+  "Bring the server copy onto this device? Matching threads are overwritten.": "¿Traer la copia del servidor a este dispositivo? Los hilos que coincidan se sobrescriben.",
   "Yes, restore": "Sí, restaurar",
   "Cloud backup is part of Pro.": "La copia en la nube es parte de Pro.",
   "The server could not be reached.": "No pudimos contactar el servidor.",
@@ -74,11 +58,9 @@ export const auth: Record<string, string> = {
   "Backup restored.": "Copia restaurada.",
   "Server address": "Dirección del servidor",
   "Server address saved.": "Dirección del servidor guardada.",
-  Save: "Guardar",
+  "Save": "Guardar",
   "Upload and get a code": "Subir y obtener un código",
   "Uploading…": "Subiendo…",
-  "The code could not be created. Try again in a moment.":
-    "No pudimos crear el código. Intenta de nuevo en un momentico.",
-  "Give this code to your psychologist. It works once and expires in 14 days.":
-    "Dale este código a tu psicólogo. Funciona una sola vez y vence en 14 días.",
+  "The code could not be created. Try again in a moment.": "No pudimos crear el código. Intenta de nuevo en un momentico.",
+  "Give this code to your psychologist. It works once and expires in 14 days.": "Dale este código a tu psicólogo. Funciona una sola vez y vence en 14 días.",
 };

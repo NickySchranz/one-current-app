@@ -1,3 +1,10 @@
+/**
+ * Colombian Spanish app copy, keyed by the English source strings.
+ * Distinct from the Spain dictionary: preterite past ("volvió", not
+ * "ha vuelto"), "agregar" over "añadir", "jalar" for pulling, "qué tan"
+ * over "cómo de", plus Colombian vocabulary (trasteo, pena, sin afán,
+ * durazno, liviano, quiubo, de una). A missing key falls back to English.
+ */
 import { common } from "./common";
 import { wholeness } from "./wholeness";
 import { timeline } from "./timeline";
@@ -6,14 +13,9 @@ import { inspection } from "./inspection";
 import { history } from "./history";
 import { paywall } from "./paywall";
 import { auth } from "./auth";
+import { tutorial } from "./tutorial";
+import { sweep } from "./sweep";
 
-/**
- * Colombian Spanish app copy, keyed by the English source strings.
- * Distinct from the Spain dictionary: preterite past ("volvió", not
- * "ha vuelto"), "agregar" over "añadir", "jalar" for pulling, "qué tan"
- * over "cómo de", plus Colombian vocabulary (trasteo, pena, sin afán,
- * durazno, liviano). A missing key simply falls back to English.
- */
 export const esCO: Record<string, string> = {
   ...common,
   ...wholeness,
@@ -23,4 +25,6 @@ export const esCO: Record<string, string> = {
   ...history,
   ...paywall,
   ...auth,
+  ...tutorial,
+  ...sweep,
 };

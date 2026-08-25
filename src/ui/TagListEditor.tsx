@@ -46,7 +46,9 @@ export function TagListEditor({
         {values.map((v) => (
           <Tag
             key={v}
-            label={v}
+            // Suggested values are stored as their English keys: translate at
+            // render. A user's own words fall through t() unchanged.
+            label={t(v)}
             quality={variant === "quality"}
             onRemove={() => remove(v)}
           />

@@ -1,6 +1,7 @@
 import { View, Pressable } from 'react-native';
 import Svg, { Rect } from 'react-native-svg';
 import { T } from '@/ui/primitives';
+import { useT } from '@/i18n/i18n';
 import { useTheme } from '@/ui/theme';
 import { mix } from '@/ui/color';
 import type { MascotType, ColorKey } from '@/features/life-timeline/mascot-frames';
@@ -48,6 +49,7 @@ export function TutorialOverlay({
   onSkip,
 }: Props) {
   const tk = useTheme();
+  const t = useT();
   const frames = CHARACTER_FRAMES[mascotType];
   const pixels = frames[step.frame] ?? frames['IDLE_A'];
   const palette = resolvePalette(tk.accent);
@@ -97,7 +99,7 @@ export function TutorialOverlay({
       <View style={{ flex: 1, gap: 6 }}>
         {/* Skip button */}
         <Pressable onPress={onSkip} style={{ alignSelf: 'flex-end' }}>
-          <T style={{ fontSize: 12, color: tk.inkSoft }}>Skip tour</T>
+          <T style={{ fontSize: 12, color: tk.inkSoft }}>{t("Skip tour")}</T>
         </Pressable>
 
         <T
@@ -108,11 +110,11 @@ export function TutorialOverlay({
             fontFamily: tk.fontDisplay,
           }}
         >
-          {step.text}
+          {t(step.text)}
         </T>
         {step.subtext ? (
           <T style={{ fontSize: 13.5, color: tk.inkSoft, lineHeight: 19 }}>
-            {step.subtext}
+            {t(step.subtext)}
           </T>
         ) : null}
 
@@ -152,7 +154,7 @@ export function TutorialOverlay({
               fontSize: 14,
             }}
           >
-            {isLast ? "Let's go!" : 'Next \u2192'}
+            {isLast ? t("Let's go!") : t("Next →")}
           </T>
         </Pressable>
       </View>

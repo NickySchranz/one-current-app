@@ -89,7 +89,7 @@ type Phrases = {
 
 const EN: Phrases = {
   attack:     ["BONK. Shhh — settling now.", "Quieter now, hm?", "Down a notch. You're welcome.", "Soothed it, boss.", "It'll rest easier now."],
-  attackCalm: ["This one's already quiet, boss.", "Nothing to hit — it's calm.", "Shh. It's resting already."],
+  attackCalm: ["This one's already quiet, boss.", "Nothing to soothe — it's calm.", "Shh. It's resting already."],
   merge:      ["HOME. One less thing, boss!", "That's done. I got you.", "CLEARED! You're lighter now.", "Back in your line. Nailed it.", "That thread is FREE!", "Done and dusted, boss.", "Let it go! Yes!"],
   mergeDeep:  ["HUGE ONE. You really did that!", "BOSS MODE. That was a big one.", "That was heavy and you handled it!", "BIG WIN. I felt that one too."],
   born:       ["New thread? On it, boss.", "Got it logged. I'm watching this.", "Named it — that's step one done.", "I see this. Won't lose it.", "Got your back on this one."],
@@ -111,47 +111,57 @@ const EN: Phrases = {
   action_default:    "How's this one going, boss?",
 };
 
-// Spanish — culturally warm, uses "jefe/a" (boss) which is casual and affectionate
-// in Latin American Spanish. Phrases are direct, expressive and celebratory.
+// Spanish — culturally warm, uses "jefe/a" (boss) which is casual and
+// affectionate in Latin American Spanish. Same principles as English:
+// soothing-same-energy (no combat verbs), credit the user's act, calm wins.
 const ES: Phrases = {
-  attack:     ["¡TOMA YA!", "Más callado ahora, ¿eh?", "Un punto menos. De nada.", "¡PUM! Controlado.", "Se lo pensará dos veces, jefe."],
-  attackCalm: ["Este ya está tranquilo, jefe.", "Nada que golpear — está en calma.", "Shh. Ya descansa."],
-  merge:      ["¡Listo, jefe! ¡Una menos que cargar!", "¡Cerrado! Eso ya no pesa.", "¡HECHO! Ya respiras mejor.", "Integrado. Bien jugado.", "¡Ese hilo es libre! ¡Dale!", "¡Terminado! Sin vueltas.", "¡Soltado! ¡Sí, así!"],
-  mergeDeep:  ["¡ESE ERA GRANDE, JEFE! ¡Lo lograste!", "¡NIVEL CAPI! Ese era pesado de verdad.", "Era un hilo de peso y lo manejaste. ¡Brutal!", "¡GOLAZO! Lo sentí yo también."],
-  born:       ["¿Nuevo hilo? En eso estoy, jefe.", "Anotado. Le tengo el ojo encima.", "Nombrado — eso ya es el primer paso.", "Lo veo. No lo pierdo de vista.", "Te cubro en este."],
-  action:     ["¡PLAN LISTO! ¡Vamos!", "Decidido. Tu yo del futuro te lo agradece.", "Eso es movimiento real. Me gusta.", "¡Listo! Avanzando juntos.", "Acción tomada. Así se hace, jefe."],
-  note:       ["Anotado. Testigo de ello.", "Registrado — nada se pierde aquí.", "Te escucho. Guardado.", "Listo, jefe. Sigue adelante."],
-  greet:      ["¡Yo me encargo, jefe! Trabajando contigo en esto.", "No te preocupes — tengo el ojo en todo.", "¡Oye, jefe! Tus hilos están en buenas manos.", "¡En ello! Me ocupo de estos hilos."],
-  focus:      ["¡Aquí estoy, jefe!", "Claro, a ver este.", "¡Te tengo!", "Veamos esto juntos."],
-  handled:    ["Este ya está respondido, jefe. Bien.", "Este ya lo manejaste hoy. Eso fue todo tuyo.", "Este hilo ya recibió lo suyo hoy.", "Respondido y en calma. Buen trabajo, jefe."],
-  allDone:    ["Todos los hilos respondidos. Disfruta la calma, jefe.", "Todo manejado hoy. Eso fuiste tú.", "Nada jala ahora mismo. Lo manejamos.", "Corriente entera hoy, jefe. Aquí descansando."],
-  superBonk:  ["¡¡SUPERBONK!! ¡Todos en calma!", "¡BARRIDA COMPLETA, jefe! ¡Todo tranquilo!", "BONK BONK BONK. Qué gusto dio eso.", "Cada hilo calmado en una sola carrera. Imparables."],
-  coinGrab:   ["¡Uy, brilla! Tú lo soltaste, jefe.", "¡LA TENGO! Directo al medidor.", "Un brillito — te lo ganaste.", "¡Ficha asegurada! El fondo del bonk crece."],
-  action_loud:       "¡Este hilo está FUERTE, jefe! ¿Lo resolvemos?",
-  action_ready:      "¡Jefe, este ya está listo para cerrar!",
+  attack:     ["¡BONK! Shhh — ya se aquieta.", "Más suavecito ahora, ¿no?", "Un punto menos. De nada, jefe.", "Listo, lo arrullé un poco.", "Ahora descansa más tranquilo."],
+  attackCalm: ["Este ya está tranquilo, jefe.", "Nada que calmar — ya descansa.", "Shh. Ya está en paz."],
+  merge:      ["¡A CASA! Una menos que cargar, jefe.", "Eso quedó. Yo te cubro.", "¡INTEGRADO! Vas más liviano.", "De vuelta en tu línea. Eso fue tuyo.", "¡Ese hilo volvió a casa!", "Hecho y guardado, jefe.", "¡Lo soltaste! Eso es."],
+  mergeDeep:  ["¡ESE ERA GRANDE, JEFE! Lo hiciste tú.", "MODO JEFE. Ese pesaba de verdad.", "Era pesado y lo llevaste a casa.", "GRAN LOGRO. Yo también lo sentí."],
+  born:       ["¿Nuevo hilo? En eso estoy, jefe.", "Anotado. Le tengo el ojo puesto.", "Nombrado — el primer paso ya está.", "Lo veo. No lo pierdo de vista.", "Te cubro con este."],
+  action:     ["¡PLAN LISTO! Vamos.", "Decidido. Tu yo del futuro te lo agradece.", "Eso es un paso real. Me encanta.", "¡Hecho! Avanzando juntos.", "Paso dado. Así se hace, jefe."],
+  note:       ["Anotado. Yo fui testigo.", "Guardado — aquí nada se pierde.", "Te escuché. Quedó escrito.", "Listo, jefe. Sigue tranquilo."],
+  greet:      ["¡Aquí estoy, jefe! Estos hilos los llevamos juntos.", "Tranquilo — les tengo el ojo puesto a todos.", "¡Hola, jefe! Tus hilos están en buenas manos.", "¡Al tanto! Yo cuido estas líneas."],
+  focus:      ["¡Voy, jefe!", "Claro, veamos este.", "¡Te tengo!", "Miremos esto juntos."],
+  handled:    ["Este ya está respondido, jefe. Bien.", "Este ya lo atendiste hoy. Eso fue tuyo.", "Este hilo ya recibió lo suyo hoy.", "Respondido y en calma. Buen trabajo, jefe."],
+  allDone:    ["Todos los hilos respondidos. Disfruta la calma, jefe.", "Todo atendido hoy. Eso fuiste tú.", "Nada jala ahora mismo. Lo lograste.", "Corriente entera hoy, jefe. Aquí descansando."],
+  superBonk:  ["¡¡SUPERBONK!! Todos a descansar.", "¡BARRIDA COMPLETA, jefe! Calma en cada línea.", "BONK BONK BONK. Qué gusto dio eso.", "Cada hilo arrullado en una sola carrera."],
+  coinGrab:   ["¡Uy, brilla! Tú lo soltaste, jefe.", "¡LA TENGO! Directo al medidor.", "Un brillito — te lo ganaste.", "Ficha guardada. El medidor crece."],
+  action_loud:       "Este hilo suena FUERTE, jefe. ¿Le damos una respuesta?",
+  action_ready:      "¡Jefe, este ya está listo para volver a casa!",
   action_waiting:    "Todavía esperando por este…",
-  action_support:    "Este puede necesitar un apoyo extra.",
+  action_support:    "Este podría necesitar un apoyo.",
   action_identity:   "Cosa profunda. Vale la pena sentarse con ella.",
   action_projection: "Preocupación futura — mirémosla juntos.",
   action_empty:      "Nada aquí aún. ¿Le añades una nota?",
   action_default:    "¿Cómo va este, jefe?",
 };
 
-// Colombia variant: slightly warmer slang ("parce" = friend/buddy)
+// Colombian Spanish — its own voice, not Spain-with-parce: quiubo, parce y
+// parcero, "de una", "sin afán", "qué nota", agregar (nunca añadir), tuteo
+// cálido en todo. Mismos principios: arrullar, nunca golpear.
 const ES_CO: Phrases = {
-  ...ES,
-  attack:     ["¡TOME PUES!", "Más callado ahora, ¿cierto?", "Un punto menos. Con gusto.", "¡PUM! Controlado.", "Lo va a pensar dos veces, parce."],
-  attackCalm: ["Este ya está tranquilo, parce.", "Nada que golpear — está en calma.", "Shh. Ya descansa."],
-  merge:      ["¡Listo, parce! ¡Una menos!", "¡Cerrado! Eso ya no pesa, parcero.", "¡HECHO! Ya respiras mejor.", "Integrado. Bien jugado.", "¡Ese hilo quedó libre! ¡Uy!", "¡Terminado, parcero!", "¡Soltado! ¡Sí señor!"],
-  mergeDeep:  ["¡ESE ERA GRANDÍSIMO, PARCE! ¡Lo lograste!", "¡MODO CRACK! Ese era muy pesado.", "Era un hilo tenaz y lo manejaste. ¡Qué chimba!", "¡GOLAZO, PARCE! Lo sentí yo también."],
-  born:       ["¿Nuevo hilo? En eso estoy, parce.", "Anotado. Le tengo el ojo encima.", "Nombrado — eso ya es el primer paso.", "Lo veo. No lo pierdo de vista.", "Te cubro en este, parcero."],
-  greet:      ["¡Yo me encargo, parce! Trabajando contigo.", "No te preocupes — tengo el ojo en todo.", "¡Oye, parce! Tus hilos están en buenas manos.", "¡En ello! Me ocupo de estos hilos."],
-  focus:      ["¡Aquí estoy, parce!", "Claro, a ver este.", "¡Te tengo, parcero!", "Veamos esto juntos."],
-  handled:    ["Este ya está respondido, parce. Bien.", "Este ya lo manejaste hoy. Todo tuyo.", "Este hilo ya recibió lo suyo hoy.", "Respondido y en calma. Buen trabajo, parce."],
-  allDone:    ["Todos los hilos respondidos. Disfruta la calma, parce.", "Todo manejado hoy. Eso fuiste tú.", "Nada jala ahora, parcero. Lo manejamos.", "Corriente entera hoy, parce. Sin afán."],
-  superBonk:  ["¡¡SUPERBONK!! ¡Todos en calma, parce!", "¡BARRIDA COMPLETA! ¡Todo tranquilo, parcero!", "BONK BONK BONK. ¡Qué chimba!", "Cada hilo calmado de una. Imparables, parce."],
-  coinGrab:   ["¡Uy, qué brillo! Tú lo soltaste, parce.", "¡LA COGÍ! Directo al medidor.", "Un brillito — te lo ganaste, parcero.", "¡Ficha asegurada! El fondo del bonk crece."],
-  action_loud:       "¡Este hilo está TENAZ, parce! ¿Lo resolvemos?",
+  attack:     ["¡BONK! Shhh — ya se calma, parce.", "Más suavecito ahora, ¿cierto?", "Un punto menos. Con gusto.", "Listo, lo arrullé un poquito.", "Ya descansa más tranquilo, parce."],
+  attackCalm: ["Este ya está tranquilo, parce.", "Nada que calmar — ya descansa.", "Shh. Ya está en paz."],
+  merge:      ["¡A CASA! Una menos, parce.", "Eso quedó. Yo te cubro.", "¡INTEGRADO! Vas más liviano, parcero.", "De vuelta en tu línea. Eso fue todo tuyo.", "¡Ese hilo volvió a casa! ¡Qué nota!", "Hecho y guardado, parcero.", "¡Lo soltaste! Eso es, de una."],
+  mergeDeep:  ["¡ESE ERA GRANDÍSIMO, PARCE! Lo hiciste tú.", "¡MODO CRACK! Ese pesaba de verdad.", "Era un hilo tenaz y lo llevaste a casa. ¡Qué nota!", "GRAN LOGRO, PARCE. Yo también lo sentí."],
+  born:       ["¿Nuevo hilo? En eso estoy, parce.", "Anotado. Le tengo el ojo puesto.", "Nombrado — el primer paso ya quedó.", "Lo veo. No lo pierdo de vista.", "Te cubro con este, parcero."],
+  action:     ["¡PLAN LISTO! De una.", "Decidido. Tu yo del futuro te lo agradece.", "Eso es un paso real. Me encanta.", "¡Listo pues! Avanzando juntos.", "Paso dado. Así es, parce."],
+  note:       ["Anotado. Yo fui testigo, parce.", "Guardado — aquí nada se pierde.", "Te escuché. Quedó escrito.", "Listo, parce. Sigue sin afán."],
+  greet:      ["¡Aquí estoy, parce! Estos hilos los llevamos juntos.", "Fresco — les tengo el ojo puesto a todos.", "¡Quiubo, parce! Tus hilos están en buenas manos.", "¡Al tanto! Yo cuido estas líneas."],
+  focus:      ["¡Voy, parce!", "Claro, veamos este.", "¡Te tengo, parcero!", "Miremos esto juntos."],
+  handled:    ["Este ya está respondido, parce. Bien.", "Este ya lo atendiste hoy. Todo tuyo.", "Este hilo ya recibió lo suyo hoy.", "Respondido y en calma. Buen trabajo, parce."],
+  allDone:    ["Todos los hilos respondidos. Disfruta la calma, parce.", "Todo atendido hoy. Eso fuiste tú.", "Nada jala ahora, parcero. Lo lograste.", "Corriente entera hoy, parce. Sin afán."],
+  superBonk:  ["¡¡SUPERBONK!! Todos a descansar, parce.", "¡BARRIDA COMPLETA! Calma en cada línea, parcero.", "BONK BONK BONK. ¡Qué nota!", "Cada hilo arrullado de una sola."],
+  coinGrab:   ["¡Uy, qué brillo! Tú lo soltaste, parce.", "¡LA COGÍ! Directo al medidor.", "Un brillito — te lo ganaste, parcero.", "Ficha guardada. El medidor crece."],
+  action_loud:       "Este hilo suena DURO, parce. ¿Le damos una respuesta?",
+  action_ready:      "¡Parce, este ya está listo para volver a casa!",
+  action_waiting:    "Todavía esperando por este…",
+  action_support:    "Este podría necesitar un apoyo.",
+  action_identity:   "Cosa profunda. Vale la pena sentarse con ella.",
+  action_projection: "Preocupación futura — mirémosla juntos.",
+  action_empty:      "Nada aquí todavía. ¿Le agregas una nota?",
   action_default:    "¿Cómo va este, parce?",
 };
 
@@ -161,11 +171,6 @@ function getLang(language: string): Phrases {
   return EN;
 }
 
-export const REACTION_MERGE      = EN.merge;
-export const REACTION_MERGE_DEEP = EN.mergeDeep;
-export const REACTION_BORN       = EN.born;
-export const REACTION_ACTION     = EN.action;
-export const REACTION_NOTE       = EN.note;
 
 export function randomFrom(arr: string[]): string {
   return arr[Math.floor(Math.random() * arr.length)];

@@ -42,7 +42,7 @@ import { alpha, mix } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
 import { loudnessWord } from "@/ui/LoudnessSlider";
 import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, ChargePop, CoinToken, COIN_FLY_MS, COIN_HOVER, COIN_LEAD, LungeG, MergePreviewTarget, NowGlow, ReclaimFly, SmokeFly, ThemeBackdrop, ThemeScenery, TokenFly, useDashFlow } from "./timeline-fx";
-import { Mascot } from "./Mascot";
+import { Mascot, estTextWidth } from "./Mascot";
 import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
 import { useCalmCurrent } from "./useSquiggle";
@@ -52,14 +52,20 @@ const DAY = 24 * 60 * 60 * 1000;
 const AnimatedOptionG = Animated.createAnimatedComponent(G);
 
 // Pip's offer bubble: one padded speech bubble holding two rounded rows —
-// kept compact so it fits to his right almost anywhere on the map.
+// kept compact so it fits to his right almost anywhere on the map. Row
+// width follows the labels (Spanish runs longer than English) but stays
+// within a thumb-friendly clamp.
 const BUBBLE_PAD = 4;
-const ROW_W = 100;
 const ROW_H = 27;
 const ROW_GAP = 3;
-const BUBBLE_W = ROW_W + BUBBLE_PAD * 2;
 const BUBBLE_H = ROW_H * 2 + ROW_GAP + BUBBLE_PAD * 2;
 const BUBBLE_R = 15;
+const ROW_FONT = 11.5;
+/** Icon (28) + text + right breathing room, clamped. */
+function pillRowW(labels: string[], fontBody?: string): number {
+  const text = Math.max(...labels.map((l) => estTextWidth(l, fontBody, ROW_FONT)));
+  return Math.max(100, Math.min(142, Math.ceil(28 + text + 10)));
+}
 
 /**
  * The offer Pip makes when he reaches a thread: ONE speech bubble with a
@@ -107,6 +113,8 @@ function MascotOptionsBubble({
     opacity: Math.min(1, Math.max(0, p.value * 1.5)),
     scale: 0.4 + 0.6 * p.value,
   }));
+  const ROW_W = pillRowW([labels.reflect, labels.dial], tk.fontBody);
+  const BUBBLE_W = ROW_W + BUBBLE_PAD * 2;
   const left = dir === 1 ? 8 : -8 - BUBBLE_W;
   const rowLeft = left + BUBBLE_PAD;
   // Local origin (0,0) stays at the TOP row's center.
@@ -230,7 +238,7 @@ function MascotOpenPill({
     opacity: Math.min(1, Math.max(0, p.value * 1.5)),
     scale: 0.4 + 0.6 * p.value,
   }));
-  const W = 78;
+  const W = Math.max(78, Math.min(142, Math.ceil(28 + estTextWidth(label, tk.fontBody, ROW_FONT) + 10)));
   const H = 27;
   const left = dir === 1 ? 8 : -8 - W;
   const stroke = alpha(tk.lineAxis, 0.9);
@@ -1562,8 +1570,10 @@ export function LifeTimeline() {
                   // but only while he's actually on screen. Once he scrolls
                   // out of view, the bubble scrolls out with him (it belongs
                   // to him, never pinned to the viewport).
+                  const optionLabels = { reflect: t("Reflect"), dial: t("How loud?") };
+                  const bubbleW = pillRowW([optionLabels.reflect, optionLabels.dial], tk.fontBody) + BUBBLE_PAD * 2;
                   const wouldOverflowRight =
-                    mascot.pos.x + spriteW + 14 + BUBBLE_W + 10 > layout.metrics.width;
+                    mascot.pos.x + spriteW + 14 + bubbleW + 10 > layout.metrics.width;
                   const pipOnScreen =
                     mascot.pos.x > -spriteW && mascot.pos.x < layout.metrics.width - spriteW / 2;
                   const dir: 1 | -1 = wouldOverflowRight && pipOnScreen ? -1 : 1;
@@ -1593,7 +1603,7 @@ export function LifeTimeline() {
                         cy={cy}
                         dir={dir}
                         tailDy={tailDy}
-                        label={t("Open")}
+                        label={t("Open it")}
                         onPress={() => {
                           setArmedBranchId(null);
                           setOperation({ kind: "quick-touch", branchId: optId });
@@ -1618,7 +1628,7 @@ export function LifeTimeline() {
                       cy={cy}
                       dir={dir}
                       tailDy={tailDy}
-                      labels={{ reflect: t("Reflect"), dial: t("How loud?") }}
+                      labels={optionLabels}
                       onReflect={() => open(false)}
                       onDial={() => open(true)}
                       tk={tk}
@@ -1758,7 +1768,7 @@ export function LifeTimeline() {
                   color: tick.major ? tk.inkSoft : tk.inkFaint,
                 }}
               >
-                {tick.label}
+                {tick.label === "Today" ? t("Today") : tick.label}
               </T>
             );
           })}

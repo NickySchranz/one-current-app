@@ -76,7 +76,7 @@ export function HistoryView() {
   const [filter, setFilter] = useState<HistoryFilter>("all");
   const mascotType = useAppStore((s) => s.mascotType);
   const show = (f: HistoryFilter) => filter === "all" || filter === f;
-  const locale = language === "es" ? "es" : undefined;
+  const locale = language === "en" ? undefined : language;
 
   // Slide the days like a strip of paper: right reveals earlier days.
   const pan = useRef(
