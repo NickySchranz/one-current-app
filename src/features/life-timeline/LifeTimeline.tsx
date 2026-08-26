@@ -64,7 +64,7 @@ const ROW_FONT = 11.5;
 /** Icon (28) + text + right breathing room, clamped. */
 function pillRowW(labels: string[], fontBody?: string): number {
   const text = Math.max(...labels.map((l) => estTextWidth(l, fontBody, ROW_FONT)));
-  return Math.max(100, Math.min(142, Math.ceil(28 + text + 10)));
+  return Math.max(100, Math.min(154, Math.ceil(28 + text + 13)));
 }
 
 /**

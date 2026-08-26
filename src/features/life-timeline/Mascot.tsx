@@ -53,7 +53,7 @@ const FONT_SIZE = 9.5;
 const LINE_H    = 13;
 const MAX_BUBBLE_W = 180;
 const MIN_BUBBLE_W = 60;
-const H_PAD = 16;        // horizontal padding (both sides total)
+const H_PAD = 20;        // horizontal padding (both sides total)
 const V_PAD_TOP = 5;
 const V_PAD_BOT = 6;
 const MAX_LINES = 4;
@@ -64,12 +64,17 @@ const MAX_LINES = 4;
 // wide on purpose (plus a safety margin): a bubble a few px roomy is
 // invisible; a line poking out of the border is not.
 const GLYPH_NARROW = new Set([..."ijl!.,;:'’|¡· "]);
-const GLYPH_SLIM = new Set([..."ftr()[]\"-—…"]);
+const GLYPH_SLIM = new Set([..."ftr()[]\"-"]);
+/** A full em wide — the dash and the ellipsis are as wide as an M. */
+const GLYPH_EM = new Set([..."—…"]);
+const GLYPH_EN = new Set([..."–"]);
 const GLYPH_WIDE = new Set([..."mwMW@%"]);
 const CAP_RE = /[A-ZÁÉÍÓÚÑÜÀ-Þ]/;
 
 function glyphW(ch: string): number {
   if (ch === " ") return 2.8;
+  if (GLYPH_EM.has(ch)) return 9.8;
+  if (GLYPH_EN.has(ch)) return 5.2;
   if (GLYPH_NARROW.has(ch)) return 3.0;
   if (GLYPH_SLIM.has(ch)) return 4.0;
   if (GLYPH_WIDE.has(ch)) return 8.6;
@@ -78,21 +83,36 @@ function glyphW(ch: string): number {
   return 5.1; // lowercase and everything else
 }
 
+/** Monospace faces give every glyph the same box: count, never classify. */
+function isMono(f: string): boolean {
+  return (
+    f.includes("mono") || f.includes("courier") || f.includes("consol") || f.includes("menlo")
+  );
+}
+/** Widest common monospace advance, as a share of the font size. */
+const MONO_ADVANCE = 0.63;
+
 /** How much wider than the reference sans a theme's body face runs. */
 export function fontWidthFactor(fontBody = ""): number {
   const f = fontBody.toLowerCase();
   if (f.includes("courier") || f.includes("mono")) return 1.12;
   if (f.includes("futura") || f.includes("century") || f.includes("rounded") || f.includes("avenir"))
     return 1.16;
+  if (f.includes("helvetica") || f.includes("arial")) return 1.1;
   if (f.includes("georgia") || f.includes("palatino") || f.includes("times") || f.includes("serif"))
-    return 1.06;
-  return 1.0;
+    return 1.09;
+  // The base stack can resolve all the way down to DejaVu Sans, which is at
+  // the wide end of the humanist sans faces — leave it a little slack.
+  return 1.05;
 }
 
 const SAFETY = 1.08;
 
 /** Estimated rendered width of `text` at `fontSize`, in the given face. */
 export function estTextWidth(text: string, fontBody = "", fontSize = FONT_SIZE): number {
+  if (isMono(fontBody.toLowerCase())) {
+    return [...text].length * MONO_ADVANCE * fontSize * SAFETY;
+  }
   let w = 0;
   for (const ch of text) w += glyphW(ch);
   return w * fontWidthFactor(fontBody) * SAFETY * (fontSize / FONT_SIZE);
