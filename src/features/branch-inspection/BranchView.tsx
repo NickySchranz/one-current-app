@@ -122,6 +122,7 @@ export function BranchView({ branchId }: Props) {
   const branches = useAppStore((s) => s.branches);
   const updateBranch = useAppStore((s) => s.updateBranch);
   const createTodayAction = useAppStore((s) => s.createTodayAction);
+  const setOperation = useAppStore((s) => s.setOperation);
   const branch = useMemo(
     () => branches.find((b) => b.id === branchId),
     [branches, branchId],
@@ -253,6 +254,15 @@ export function BranchView({ branchId }: Props) {
           onChange={(v) => savePr({ reclaimable: v })}
           suggestions={RECLAIMABLE_QUALITIES}
           variant="quality"
+        />
+      </View>
+
+      {/* Holding it next to what matters — offered, never required. */}
+      <View style={{ marginTop: 4, marginBottom: 10 }}>
+        <Button
+          label={t("Hold it against what matters")}
+          onPress={() => setOperation({ kind: "weighing-values", branchId: branch.id })}
+          style={{ alignSelf: "flex-start" }}
         />
       </View>
 

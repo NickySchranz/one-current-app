@@ -43,6 +43,7 @@ import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
 import { loudnessWord } from "@/ui/LoudnessSlider";
 import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, ChargePop, CoinToken, COIN_FLY_MS, COIN_HOVER, COIN_LEAD, LungeG, MergePreviewTarget, NowGlow, PopBurst, ReclaimFly, SmokeFly, ThemeBackdrop, ThemeScenery, TokenFly, useDashFlow } from "./timeline-fx";
 import { Mascot, estTextWidth } from "./Mascot";
+import { steadyingValues } from "@/domain/values/logic";
 import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
 import { useCalmCurrent } from "./useSquiggle";
@@ -292,6 +293,7 @@ export function LifeTimeline() {
   const dialLoudness = useAppStore((s) => s.dialLoudness);
   const maybeDropCoin = useAppStore((s) => s.maybeDropCoin);
   const coins = useAppStore((s) => s.coins);
+  const values = useAppStore((s) => s.values);
   const actions = useAppStore((s) => s.actions);
   const language = useAppStore((s) => s.language);
   const t = useT();
@@ -833,6 +835,16 @@ export function LifeTimeline() {
   // Each time progress rises (an answer landed, a thread integrated), one
   // shimmer streak sweeps the main line; crossing into completion also
   // blooms gold motes off it. A new thread lowering progress fires nothing.
+  /** What the line stands for, shown only once every thread is answered. */
+  const sacredValues = useMemo(
+    () =>
+      steadyingValues(values)
+        .map((v) => t(v.name))
+        .join("  ·  "),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t is stable per language
+    [values, language],
+  );
+
   const [pulseKey, setPulseKey] = useState(0);
   const [bloom, setBloom] = useState({ key: 0, count: 0 });
   const [celebration, setCelebration] = useState(0);
@@ -1265,6 +1277,24 @@ export function LifeTimeline() {
                 strokeWidth={3.25 + calmProgress}
                 fill="none"
               />
+
+              {/* Every thread answered: what is left is what the line is made
+                  of. Only drawn in the calm state, where no thread label can
+                  reach it — and only on a state change, never per frame. */}
+              {calmProgress >= 0.999 && sacredValues.length > 0 && (
+                <SvgText
+                  x={Math.max(12, layout.nowX - 34)}
+                  y={layout.mainY + 22}
+                  textAnchor="end"
+                  fontSize={11.5}
+                  fontFamily={tk.fontBody}
+                  fontWeight="600"
+                  fill={tk.shimmer}
+                  opacity={0.9}
+                >
+                  {sacredValues}
+                </SvgText>
+              )}
 
               {/* the future stays one line: the main line continues faded,
                   nothing branches ahead of Now */}

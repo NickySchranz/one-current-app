@@ -19,6 +19,7 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, { G, Path } from "react-native-svg";
 import { useAppStore } from "@/stores/app-store";
+import { steadyingValues } from "@/domain/values/logic";
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import { effectiveLoudness } from "@/domain/branches/logic";
 import { decidedToday, energySplit } from "@/domain/feelings/logic";
@@ -116,6 +117,7 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
   const t = useT();
   const tk = useTheme();
   const branches = useAppStore((s) => s.branches);
+  const values = useAppStore((s) => s.values);
   const setOperation = useAppStore((s) => s.setOperation);
   const nowTick = useAppStore((s) => s.nowTick);
   const reducedMotion = useAppStore((s) => s.reducedMotion);
@@ -336,6 +338,17 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
               {activeLines.length > 0
                 ? t("Every open thread has its decision for today. Nothing more is asked of you.")
                 : t("Nothing is open right now. Your whole current is moving as one.")}
+            </Hint>
+          )}
+
+          {/* What the line is made of — read in a calm moment, not scored. */}
+          {steadyingValues(values).length > 0 && (
+            <Hint style={{ margin: 0 }}>
+              {t("Your line carries: {list}", {
+                list: steadyingValues(values)
+                  .map((v) => t(v.name))
+                  .join(" · "),
+              })}
             </Hint>
           )}
         </View>

@@ -1,5 +1,6 @@
 import { Platform, ScrollView, Text } from "react-native";
 import { SettingsSections } from "@/features/settings/SettingsPage";
+import { ValuesEditor } from "@/features/values/ValuesEditor";
 import { useT } from "@/i18n/i18n";
 import { Card, H1, H2, Hint, Panel } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
@@ -12,6 +13,8 @@ export function MorePage() {
     <ScrollView>
       <Panel>
         <H1>{t("More")}</H1>
+        {/* Content, not a setting: what your line is made of comes first. */}
+        <ValuesEditor />
         <SettingsSections />
         <H2>{t("About")}</H2>
         <Card>
