@@ -50,13 +50,6 @@ const DYNAMIC_KEYS = [
   "This look is part of Pro",
   "The free current holds {n} threads",
   "Sharing is part of Pro",
-  // value names + their practice lines render via t(dynamic) (src/domain/values/logic.ts)
-  "self-respect", "purpose", "vitality", "closure", "competence",
-  "say the hard thing kindly", "not explain myself twice", "leave when it is finished",
-  "stop at a stopping place", "let it be unfinished overnight", "lie down before earning it",
-  "do the small honest version of it today", "let it lead one decision",
-  // motive choices (src/features/values/ValuesSort.tsx)
-  "Mine — I chose it", "Expected of me", "I would feel guilty otherwise",
   // tutorial steps render via t(step.text) (src/features/tutorial/useTutorial.ts)
   "Hi! I'm Pip!",
   "That's everything!",

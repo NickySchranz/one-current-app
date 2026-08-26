@@ -32,7 +32,6 @@ import {
   IconHeart,
   IconMerge,
   IconNote,
-  IconPath,
   IconSetDown,
   IconStep,
   type IconProps,
@@ -351,12 +350,6 @@ export function QuickBranchMenu({ branchId, startExpanded = false, dialOnly = fa
             />
           </View>
           <View style={{ flexDirection: "column", alignItems: "flex-start", gap: 3.2, marginTop: 3.2 }}>
-            <Button
-              variant="quiet"
-              icon={<IconPath size={16} color={theme.inkSoft} />}
-              label={t("Hold it against what matters")}
-              onPress={() => setOperation({ kind: "weighing-values", branchId })}
-            />
             <Button
               variant="quiet"
               icon={<IconEye size={16} color={theme.inkSoft} />}

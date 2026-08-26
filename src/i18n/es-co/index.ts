@@ -15,7 +15,6 @@ import { paywall } from "./paywall";
 import { auth } from "./auth";
 import { tutorial } from "./tutorial";
 import { sweep } from "./sweep";
-import { values } from "./values";
 
 export const esCO: Record<string, string> = {
   ...common,
@@ -28,5 +27,4 @@ export const esCO: Record<string, string> = {
   ...auth,
   ...tutorial,
   ...sweep,
-  ...values,
 };

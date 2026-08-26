@@ -4,8 +4,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { ForkPeriodChoice, PsychologicalBranch, Loudness } from "@/domain/branches/types";
 import type { BranchMerge, MergeDraft } from "@/domain/merges/types";
 import type { Lesson } from "@/domain/lessons/types";
-import type { CoreValue, ValueMotive } from "@/domain/values/types";
-import { createValue, turnValue, settleRevisit } from "@/domain/values/logic";
 import type { IntegratedAction } from "@/domain/actions/types";
 import type { BranchCommit } from "@/domain/moments/types";
 import {
@@ -60,11 +58,7 @@ export type TimelineOperation =
   /** The final, explicit merge confirmation. Focused. */
   | { kind: "confirming-merge"; branchIds: string[] }
   /** A branch that needs more support than an app should carry alone. Focused. */
-  | { kind: "seeking-support"; branchId: string }
-  /** Holding one thread next to what matters to you. */
-  | { kind: "weighing-values"; branchId: string }
-  /** Naming what matters, on its own — no thread involved. */
-  | { kind: "naming-values"; becauseOf?: string };
+  | { kind: "seeking-support"; branchId: string };
 
 /** How much of the screen an operation may take. */
 export function operationDepth(op: TimelineOperation): "none" | "quick" | "focused" {
@@ -95,8 +89,6 @@ type AppState = {
   actions: IntegratedAction[];
   /** What the fires taught you — each survives its burned thread. */
   lessons: Lesson[];
-  /** What your one line is made of — a standing list you can hold a thread against. */
-  values: CoreValue[];
   mergeDraft?: MergeDraft;
   view: View;
   operation: TimelineOperation;
@@ -205,24 +197,6 @@ type AppState = {
   burnBranch(branchId: string, items: string[], lesson: string): void;
   /** Phase 2: the fire is done — keep the lesson, remove the thread entirely. */
   finalizeBurn(): Promise<void>;
-  /** Take up a value: what this line is made of, in your own words. */
-  takeUpValue(input: {
-    name: string;
-    looksLike: string[];
-    motive: ValueMotive;
-    becauseOf?: string;
-  }): Promise<void>;
-  /**
-   * A turn in a value's life. The earlier wording is always kept; a change
-   * made while a thread was loud earns a second look in two weeks.
-   */
-  turnValue(
-    id: string,
-    patch: { name?: string; looksLike?: string[]; motive?: ValueMotive; setDown?: boolean },
-    context?: { becauseOf?: string; loudness?: number },
-  ): Promise<void>;
-  /** The second look has been taken: stop asking. */
-  settleValueRevisit(id: string): Promise<void>;
   clearBorn(): void;
   clearAdded(): void;
   updateMoment(branchId: string, moment: BranchCommit): Promise<void>;
@@ -422,7 +396,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   merges: [],
   actions: [],
   lessons: [],
-  values: [],
   view: { kind: "now" },
   operation: { kind: "idle" },
   typeFilter: new Set(),
@@ -451,7 +424,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       branches: data.branches,
       merges: data.merges,
       lessons: data.lessons,
-      values: data.values,
       actions: data.actions,
       mergeDraft: draft,
       nowTick: appNow().getTime(),
@@ -824,28 +796,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       operation: s.operation.kind !== "idle" ? { kind: "idle" } : s.operation,
     }));
   },
-  async takeUpValue(input) {
-    const value = createValue(input, appNow());
-    await repo.saveValue(value);
-    set((s) => ({ values: [...s.values, value] }));
-  },
-
-  async turnValue(id, patch, context = {}) {
-    const current = get().values.find((v) => v.id === id);
-    if (!current) return;
-    const next = turnValue(current, patch, context, appNow());
-    await repo.saveValue(next);
-    set((s) => ({ values: s.values.map((v) => (v.id === id ? next : v)) }));
-  },
-
-  async settleValueRevisit(id) {
-    const current = get().values.find((v) => v.id === id);
-    if (!current) return;
-    const next = settleRevisit(current);
-    await repo.saveValue(next);
-    set((s) => ({ values: s.values.map((v) => (v.id === id ? next : v)) }));
-  },
-
   clearBorn: () => set({ born: undefined }),
   clearAdded: () => set({ added: undefined }),
 
@@ -1066,8 +1016,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       branches: data.branches,
       merges: data.merges,
       actions: data.actions,
+      // Imported lessons reach the disk through repo.importAll; without this
+      // they stayed invisible until the next launch.
       lessons: data.lessons,
-      values: data.values,
       window: weekWindow(appNow()),
     });
   },
@@ -1094,7 +1045,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       merges: [],
       actions: [],
       lessons: [],
-      values: [],
       pinnedBranchIds: [],
       draftBranchId: null,
       mergeDraft: undefined,

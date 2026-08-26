@@ -12,7 +12,6 @@ import { paywall } from "./paywall";
 import { auth } from "./auth";
 import { tutorial } from "./tutorial";
 import { sweep } from "./sweep";
-import { values } from "./values";
 
 export const es: Record<string, string> = {
   ...common,
@@ -25,5 +24,4 @@ export const es: Record<string, string> = {
   ...auth,
   ...tutorial,
   ...sweep,
-  ...values,
 };

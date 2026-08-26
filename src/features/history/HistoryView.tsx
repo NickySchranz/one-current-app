@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import { PanResponder, Pressable, ScrollView, View } from "react-native";
 import { useAppStore } from "@/stores/app-store";
-import { allTurns } from "@/domain/values/logic";
 import { isClosed } from "@/domain/branches/logic";
 import { energySplit, integrationSummary } from "@/domain/feelings/logic";
 import { useT } from "@/i18n/i18n";
@@ -71,7 +70,6 @@ export function HistoryView() {
     new Date(nowTick + offset * DAY).toISOString().slice(0, 10);
   const merges = useAppStore((s) => s.merges);
   const lessons = useAppStore((s) => s.lessons);
-  const values = useAppStore((s) => s.values);
   const setView = useAppStore((s) => s.setView);
   // 0 = today; step back as far as you like.
   const [dayOffset, setDayOffset] = useState(0);
@@ -149,52 +147,6 @@ export function HistoryView() {
             </Hint>
           </Card>
         )}
-
-        {/* Values change, and a situation is usually what changed them. Stated
-            plainly — a turn is not an achievement. */}
-        {(() => {
-          const turns = allTurns(values).filter((x) => x.turn.was);
-          if (turns.length === 0) return null;
-          return (
-            <Card sunken style={{ marginTop: 8, marginBottom: 4 }}>
-              <H3>{t("What changed what matters")}</H3>
-              {turns.slice(0, 6).map(({ value, turn }) => {
-                const owner = turn.becauseOf
-                  ? branches.find((b) => b.id === turn.becauseOf)
-                  : undefined;
-                return (
-                  <View key={`${value.id}-${turn.at}`} style={{ marginTop: 6, gap: 1.6 }}>
-                    <T style={{ fontSize: 13.6 }}>
-                      {turn.kind === "set-down"
-                        ? t("You set {name} down.", { name: t(value.name) })
-                        : turn.kind === "renamed"
-                          ? t("{was} became {name}.", {
-                              was: t(turn.was?.name ?? ""),
-                              name: t(value.name),
-                            })
-                          : t("What {name} looks like changed.", { name: t(value.name) })}
-                    </T>
-                    {owner && (
-                      <Hint style={{ margin: 0 }}>
-                        {t("after “{title}”", { title: owner.title })}
-                      </Hint>
-                    )}
-                    {turn.was && turn.was.looksLike.length > 0 && turn.kind !== "set-down" && (
-                      <Hint style={{ margin: 0 }}>
-                        {t("It used to say: {was}", {
-                          was: turn.was.looksLike.map((l) => t(l)).join(" · "),
-                        })}
-                      </Hint>
-                    )}
-                  </View>
-                );
-              })}
-              <Hint style={{ marginTop: 8, marginBottom: 0 }}>
-                {t("This changed for you. The earlier wording is kept, either way.")}
-              </Hint>
-            </Card>
-          );
-        })()}
 
         {/* The day itself is the page header: swipe or step through the days here. */}
         <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6.4, marginBottom: 3.2 }}>

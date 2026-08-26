@@ -27,8 +27,6 @@ import { QuickMerge } from "@/features/branch-quick-actions/QuickMerge";
 import { QuickNote } from "@/features/branch-quick-actions/QuickNote";
 import { ActionsPanel } from "@/features/branch-quick-actions/ActionsPanel";
 import { SupportPanel } from "@/features/branch-quick-actions/SupportPanel";
-import { WeighValues } from "@/features/values/WeighValues";
-import { ValuesSort } from "@/features/values/ValuesSort";
 import { BranchView } from "@/features/branch-inspection/BranchView";
 import { MergeWizard } from "@/features/branch-merge/MergeWizard";
 import { IntegratedThreadsPanel } from "@/features/integrated-threads/IntegratedThreadsPanel";
@@ -62,10 +60,6 @@ function trayLabel(op: TimelineOperation): string {
       return "Integrate into Now";
     case "seeking-support":
       return "More support";
-    case "weighing-values":
-      return "What matters to you";
-    case "naming-values":
-      return "What matters to you";
     default:
       return "";
   }
@@ -102,10 +96,6 @@ function operationBody(op: TimelineOperation) {
       return <MergeWizard branchIds={op.branchIds} />;
     case "seeking-support":
       return <SupportPanel key={op.branchId} branchId={op.branchId} />;
-    case "weighing-values":
-      return <WeighValues key={op.branchId} branchId={op.branchId} />;
-    case "naming-values":
-      return <ValuesSort becauseOf={op.becauseOf} />;
     default:
       return null;
   }
