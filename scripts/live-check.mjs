@@ -2,9 +2,14 @@
    seed user against the deployed Workers API (no offline fallback hint). */
 import { chromium } from "playwright-core";
 
+// This box's headless shell needs its bundled libraries on the path.
 const browser = await chromium.launch({
   executablePath: `${process.env.HOME}/.cache/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell`,
   args: ["--no-sandbox"],
+  env: {
+    ...process.env,
+    LD_LIBRARY_PATH: `${process.env.HOME}/.cache/one-current-chromium-libs/usr/lib/x86_64-linux-gnu`,
+  },
 });
 let failed = false;
 const check = (name, ok, detail = "") => {
