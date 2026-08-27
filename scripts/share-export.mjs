@@ -14,7 +14,10 @@ const MIME = {
   ".ico": "image/x-icon",
 };
 const server = createServer(async (req, res) => {
-  const path = req.url === "/" ? "/index.html" : req.url.split("?")[0];
+  let path = req.url.split("?")[0];
+  // The export bakes in the GitHub Pages baseUrl; serve it from the root too.
+  if (path.startsWith("/one-current-app")) path = path.slice("/one-current-app".length);
+  if (path === "" || path === "/") path = "/index.html";
   try {
     const body = await readFile(join(DIST, path));
     res.writeHead(200, { "content-type": MIME[extname(path)] ?? "application/octet-stream" });
@@ -26,9 +29,14 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((r) => server.listen(4179, r));
 
+// This box's headless shell needs its bundled libraries on the path.
 const browser = await chromium.launch({
   executablePath: `${process.env.HOME}/.cache/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell`,
   args: ["--no-sandbox"],
+  env: {
+    ...process.env,
+    LD_LIBRARY_PATH: `${process.env.HOME}/.cache/one-current-chromium-libs/usr/lib/x86_64-linux-gnu`,
+  },
 });
 const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
 const errors = [];
@@ -54,8 +62,14 @@ await page.addInitScript(() => {
     return original.call(this);
   };
 });
-await page.goto("http://localhost:4179/");
-await page.waitForTimeout(1800);
+// Start past the sign-in gate and the tutorial: this script is about the
+// export, not onboarding.
+await page.addInitScript(() => {
+  localStorage.setItem("one-current-auth", JSON.stringify({ email: "e@example.com" }));
+  localStorage.setItem("one-current-tutorial-v1", "done");
+});
+await page.goto("http://localhost:4179/one-current-app/");
+await page.waitForTimeout(2600);
 
 let failed = false;
 const check = (name, ok, detail = "") => {
@@ -72,20 +86,25 @@ await page.waitForTimeout(900);
 // 1b. burn one thread so the export carries a burned integrated event
 await page.getByRole("button", { name: "Now", exact: true }).first().click();
 await page.waitForTimeout(1500);
-// burn the thread the export will include, by its timeline label
-await page.getByText("The argument with my father", { exact: true }).first().click({ force: true });
-await page.waitForTimeout(400);
-await page.getByRole("button", { name: "Reflect on this thread" }).click();
-await page.waitForTimeout(600);
+// Burn the thread the export will include, by its timeline label. A first tap
+// arms the thread, a second opens its panel, then the menu expands.
+const burnTarget = page.getByText("The argument with my father", { exact: true }).first();
+await burnTarget.click({ force: true });
+await page.waitForTimeout(1500);
+await burnTarget.click({ force: true });
+await page.waitForTimeout(1500);
 await page.getByText("What does this thread need from you now?").first().click();
-await page.waitForTimeout(500);
+await page.waitForTimeout(700);
 await page.getByRole("button", { name: /^Integrate\b/ }).last().click();
 await page.waitForTimeout(700);
 await page.getByRole("button", { name: /Burn it away/ }).click();
 await page.waitForTimeout(500);
+// What burns with it: the input commits on Enter, then Next.
 await page.getByPlaceholder(/a fear, a story/).fill("the endless what-ifs");
-await page.getByRole("button", { name: "Add to the fire" }).click();
-await page.waitForTimeout(300);
+await page.keyboard.press("Enter");
+await page.waitForTimeout(400);
+await page.getByRole("button", { name: "Next" }).last().click();
+await page.waitForTimeout(600);
 await page.getByPlaceholder(/one sentence you'll keep/).fill("arguments end; family continues");
 await page.getByRole("button", { name: "Strike the match" }).click();
 await page.waitForTimeout(3800);
@@ -121,12 +140,25 @@ for (const b of pick) {
   await page.waitForTimeout(200);
 }
 
-// 3. a custom start date that excludes older history
-const sinceDate = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-await page.getByRole("button", { name: "Since a date…" }).click();
-await page.waitForTimeout(300);
-await page.getByLabel("Since a date…").last().fill(sinceDate);
-await page.waitForTimeout(300);
+// 3. a window that excludes older history. The four presets replaced the old
+// free-text date field, so "Last week" is the tightest one available.
+await page.getByRole("button", { name: "Last week" }).click();
+await page.waitForTimeout(400);
+const sinceDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+// 3b. before sending, the app must itemise what is about to leave.
+const fieldList = page.getByLabel("What leaves the app").first();
+await fieldList.waitFor({ state: "visible", timeout: 10000 });
+const listText = await fieldList.innerText();
+check(
+  "what leaves the app is itemised before sending",
+  /the name you gave the thread/i.test(listText) && /Never included/i.test(listText),
+);
+check(
+  "the list promises burned words never leave",
+  /words you wrote down to burn/i.test(listText),
+);
+check("no field leaves the app undescribed", !/not yet described/i.test(listText));
 
 // 4. create the file and read the captured blob
 await page.getByRole("button", { name: "Create the file" }).click();
@@ -180,6 +212,7 @@ check(
   "the burned thread is gone from the export entirely",
   !JSON.stringify(share).includes("The argument with my father"),
 );
+check("no 'burned' key travels in a real export", !/"burned"/.test(raw));
 check("loudness window + baseline", loudnessOk);
 
 // 8. thread fields present

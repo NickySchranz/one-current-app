@@ -387,7 +387,9 @@ export function AuthGate() {
         )}
 
         <Hint style={{ textAlign: "center", marginTop: 4 }}>
-          {t("Your threads never leave this device — the account only signs you in.")}
+          {t(
+            "Signing in does not send your threads anywhere. They stay on this device until you choose to back them up or share them.",
+          )}
         </Hint>
       </View>
     </ScrollView>

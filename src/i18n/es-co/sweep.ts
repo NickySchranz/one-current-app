@@ -47,5 +47,6 @@ export const sweep: Record<string, string> = {
   "Restart tour": "Reiniciar el recorrido",
   "Fill super bonk (testing)": "Llenar el súper bonk (pruebas)",
   "Always drop tokens (testing)": "Soltar fichas siempre (pruebas)",
-  "Everything you write stays on this device, stored locally. Nothing is sent anywhere. Export a copy before switching devices.": "Todo lo que escribes se queda en este dispositivo, guardado localmente. Nada se envía a ninguna parte. Exporta una copia antes de cambiar de dispositivo.",
+  "Everything you write is stored on this device. Nothing is sent anywhere unless you send it: cloud backup uploads a copy of everything to your account, and sharing uploads only the threads you pick. Both are your choice, and neither happens on its own.": "Todo lo que escribes se guarda en este dispositivo. Nada se envía a ninguna parte a menos que vos lo envíes: la copia en la nube sube una copia de todo a tu cuenta, y compartir sube solo los hilos que escojas. Las dos cosas las decidís vos, y ninguna pasa sola.",
+  "Words you write down to burn stay here. They are never backed up and never shared.": "Las palabras que escribís para quemar se quedan acá. Nunca se respaldan ni se comparten.",
 };

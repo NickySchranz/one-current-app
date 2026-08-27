@@ -54,7 +54,31 @@ const DYNAMIC_KEYS = [
   "Hi! I'm Pip!",
   "That's everything!",
   "These lines are your threads.",
+  // "What leaves the app" list: labels live in
+  // src/domain/share/describe-fields.ts and render via t(line). Read from that
+  // file so a new share field can never ship without its translation.
+  ...shareFieldLabels(),
 ];
+
+/**
+ * Every label string in describe-fields.ts. Parsed rather than duplicated: the
+ * point of this check is that the list and the payload cannot drift apart.
+ */
+function shareFieldLabels() {
+  const text = readFileSync(join(SRC, "domain", "share", "describe-fields.ts"), "utf8");
+  const labels = new Set();
+  // Table entries: `key: "label",` and `key:\n  "label",`
+  const table = /^\s*(?:"[^"]+"|[A-Za-z_$][\w$]*):\s*\n?\s*"((?:[^"\\]|\\.)*)"/gm;
+  let m;
+  while ((m = table.exec(text))) labels.add(m[1].replace(/\\(.)/g, "$1"));
+  // The SHARE_NEVER_INCLUDES array: bare strings on their own lines.
+  const never = text.match(/SHARE_NEVER_INCLUDES\s*=\s*\[([\s\S]*?)\]/);
+  if (never) {
+    const item = /"((?:[^"\\]|\\.)*)"/g;
+    while ((m = item.exec(never[1]))) labels.add(m[1].replace(/\\(.)/g, "$1"));
+  }
+  return [...labels];
+}
 
 function* walk(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

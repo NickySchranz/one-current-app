@@ -194,6 +194,30 @@ export function SettingsSections() {
     void getApiUrl().then(setUrlDraft);
   }, []);
 
+  /**
+   * Deleting everything locally must not leave uploaded shares readable. Returns
+   * how many were revoked, or null when the server could not be reached — the
+   * user is told either way rather than being left with a false "all deleted".
+   */
+  async function revokeUploadedShares(): Promise<number | null> {
+    if (!hasTokens()) return 0;
+    try {
+      const { shares } = await api.listMyShares();
+      let revoked = 0;
+      for (const share of shares) {
+        try {
+          await api.deleteShare(share.id);
+          revoked += 1;
+        } catch {
+          return null;
+        }
+      }
+      return revoked;
+    } catch {
+      return null;
+    }
+  }
+
   function syncError(e: unknown): string {
     if (e instanceof ApiOfflineError) return t("The server could not be reached.");
     if (e instanceof ApiHttpError && e.code === "pro_required")
@@ -303,7 +327,7 @@ export function SettingsSections() {
       <Card>
         <Hint>
           {t(
-            "Cloud backup keeps a copy of everything on your account so a new device can pick it up. Part of Pro.",
+            "Cloud backup sends a copy of everything in the app — every thread, moment, step and lesson — to your account on our server, so a new device can pick it up. It stays there until you replace it or delete your account. Part of Pro.",
           )}
         </Hint>
         {!signedIn ? (
@@ -543,7 +567,12 @@ export function SettingsSections() {
       <Card>
         <Hint>
           {t(
-            "Everything you write stays on this device, stored locally. Nothing is sent anywhere. Export a copy before switching devices.",
+            "Everything you write is stored on this device. Nothing is sent anywhere unless you send it: cloud backup uploads a copy of everything to your account, and sharing uploads only the threads you pick. Both are your choice, and neither happens on its own.",
+          )}
+        </Hint>
+        <Hint>
+          {t(
+            "Words you write down to burn stay here. They are never backed up and never shared.",
           )}
         </Hint>
         <View style={rowStyles.filterRow}>
@@ -563,7 +592,7 @@ export function SettingsSections() {
             <>
               <T style={{ flexShrink: 1 }}>
                 {t(
-                  "Delete all threads, everything integrated, and your whole history? This cannot be undone.",
+                  "Delete all threads, everything integrated, and your whole history? This cannot be undone. Shares you have uploaded are revoked at the same time. A cloud backup stays on the server until you replace it.",
                 )}
               </T>
               <Button
@@ -571,8 +600,19 @@ export function SettingsSections() {
                 onPress={() => {
                   void (async () => {
                     await deleteEverything();
+                    const revoked = await revokeUploadedShares();
                     setConfirmingDelete(false);
-                    setMessage(t("All data deleted."));
+                    setMessage(
+                      revoked == null
+                        ? t(
+                            "Everything on this device is deleted. Uploaded shares could not be reached — revoke them in Share when you are back online.",
+                          )
+                        : revoked === 0
+                          ? t("All data deleted.")
+                          : t("All data deleted, and {n} uploaded share(s) revoked.", {
+                              n: revoked,
+                            }),
+                    );
                   })();
                 }}
                 label={t("Yes, delete")}

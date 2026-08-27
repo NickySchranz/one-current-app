@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Platform, View } from "react-native";
 import { selectEffectivePro, useAppStore } from "@/stores/app-store";
 import { api, ApiOfflineError, hasTokens } from "@/api/client";
 import { db } from "@/db/database";
 import { appNow } from "@/domain/time/clock";
 import { buildShareExport } from "@/domain/share/build-share-export";
+import { describeShareFields, SHARE_NEVER_INCLUDES } from "@/domain/share/describe-fields";
 import { PaywallPrompt } from "@/features/paywall/PaywallPrompt";
 import { MyShares } from "@/features/settings/MyShares";
 import { ThreadPicker } from "@/features/settings/ThreadPicker";
@@ -47,6 +48,10 @@ export function ShareWithPsychologist() {
   const [shareCodeErr, setShareCodeErr] = useState("");
   const [uploading, setUploading] = useState(false);
 
+  // What the share will actually contain, read off a built preview so the list
+  // can never claim less than the file carries.
+  const [fields, setFields] = useState<ReturnType<typeof describeShareFields> | null>(null);
+
   const candidates = branches.filter((b) => b.id !== draftBranchId && b.title.trim() !== "");
 
   const from =
@@ -58,6 +63,33 @@ export function ShareWithPsychologist() {
           ? isoDaysAgo(90)
           : isoDaysAgo(365 * 50); // "From the beginning" — far enough back for any thread
   const fromValid = true;
+
+  const selectedKey = [...selected].sort().join(",");
+  useEffect(() => {
+    if (selected.size === 0) {
+      setFields(null);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      const waiting = await db.waiting.toArray();
+      const preview = buildShareExport({
+        branches,
+        actions,
+        merges,
+        waiting,
+        selectedIds: [...selected],
+        from,
+        now: appNow(),
+      });
+      if (live) setFields(describeShareFields(preview));
+    })();
+    return () => {
+      live = false;
+    };
+    // Rebuilt when the picked threads or the window change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey, from, branches, actions, merges]);
 
   async function createFile() {
     // Waiting containers live only in the database, not in store state.
@@ -143,7 +175,7 @@ export function ShareWithPsychologist() {
       <Card>
         <Hint>
           {t(
-            "Choose which threads to share and since when. Only what you pick here leaves the app — as a file you hand over yourself.",
+            "Choose which threads to share and since when. Only what you pick here leaves the app. Make a file to hand over yourself, or upload it and give out a code — the upload puts the file on our server for 14 days so your psychologist can fetch it once.",
           )}
         </Hint>
         {candidates.length === 0 ? (
@@ -199,6 +231,54 @@ export function ShareWithPsychologist() {
                 </Hint>
                 {emailErr !== "" && (
                   <T style={{ color: tk.danger, fontSize: 13.6 }}>{emailErr}</T>
+                )}
+              </View>
+            )}
+            {fields && (
+              <View
+                accessibilityLabel={t("What leaves the app")}
+                style={{
+                  marginTop: 12,
+                  padding: 10,
+                  borderWidth: 1,
+                  borderColor: alpha(tk.lineAxis, 0.55),
+                  borderRadius: 8,
+                }}
+              >
+                <T style={{ fontWeight: "600" }}>
+                  {t("What leaves the app, for the {n} thread(s) you picked", {
+                    n: selected.size,
+                  })}
+                </T>
+                {fields.threadFields.map((line) => (
+                  <Hint key={line} style={{ marginTop: 4, marginBottom: 0 }}>
+                    {`· ${t(line)}`}
+                  </Hint>
+                ))}
+                {fields.eventFields.length > 0 && (
+                  <>
+                    <T style={{ marginTop: 8, fontWeight: "600" }}>
+                      {t("And for what happened on them")}
+                    </T>
+                    {fields.eventFields.map((line) => (
+                      <Hint key={line} style={{ marginTop: 4, marginBottom: 0 }}>
+                        {`· ${t(line)}`}
+                      </Hint>
+                    ))}
+                  </>
+                )}
+                <T style={{ marginTop: 8, fontWeight: "600" }}>{t("Never included")}</T>
+                {SHARE_NEVER_INCLUDES.map((line) => (
+                  <Hint key={line} style={{ marginTop: 4, marginBottom: 0 }}>
+                    {`· ${t(line)}`}
+                  </Hint>
+                ))}
+                {fields.unlabelled.length > 0 && (
+                  <Hint style={{ marginTop: 8, marginBottom: 0, color: tk.danger }}>
+                    {t("Also in the file, not yet described: {list}", {
+                      list: fields.unlabelled.join(", "),
+                    })}
+                  </Hint>
                 )}
               </View>
             )}

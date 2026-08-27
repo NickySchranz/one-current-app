@@ -61,8 +61,9 @@ export type SharedEvent =
       outdatedBeliefs?: string[];
       outsideControl?: string[];
       released?: string[];
-      /** Written down to burn with the thread — let go of, never stored. */
-      burned?: string[];
+      // Words written down to burn with the thread are deliberately absent. The
+      // app promises the user they are let go of, so they never travel in a
+      // share and the receiving app never displays them.
       conflicts?: SharedConflict[];
     };
 

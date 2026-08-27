@@ -147,7 +147,8 @@ function shareThread(
       outdatedBeliefs: some(g.outdatedBeliefs),
       outsideControl: some(g.outsideControl),
       released: some(g.released),
-        burned: some(g.burned ?? []),
+      // g.burned is deliberately not shared. The app tells the user those words
+      // are let go of, so they must never leave the device.
       conflicts:
         g.conflicts.length > 0
           ? g.conflicts.map((c) => ({
