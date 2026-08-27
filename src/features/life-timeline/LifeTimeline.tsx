@@ -279,6 +279,8 @@ export function LifeTimeline() {
   const clearBorn = useAppStore((s) => s.clearBorn);
   const added = useAppStore((s) => s.added);
   const clearAdded = useAppStore((s) => s.clearAdded);
+  const answered = useAppStore((s) => s.answered);
+  const clearAnswered = useAppStore((s) => s.clearAnswered);
   const burn = useAppStore((s) => s.burn);
   const hit = useAppStore((s) => s.hit);
   const clearHit = useAppStore((s) => s.clearHit);
@@ -997,10 +999,13 @@ export function LifeTimeline() {
   // Running Pip to the held thread (op focus, armed bonk, or the draft being
   // created) now lives inside useMascot's hold — no per-source effects here.
 
-  // Fire mascot reaction on merge (reclaim event)
+  // Fire mascot reaction on merge (reclaim event). An answered event on the
+  // same thread speaks for itself below — placing a step frees feelings too,
+  // and two reactions at once would talk over each other.
   const reclaimKey = reclaim?.key;
   useEffect(() => {
     if (!reclaimKey || !showMascot) return;
+    if (answered && answered.branchId === reclaim?.branchId) return;
     const pool = (reclaim?.feelings?.length ?? 0) >= 3 ? mascot.phrases.mergeDeep : mascot.phrases.merge;
     setTimeout(() => mascotReactionRef.current?.(randomFrom(pool)), 600);
   }, [reclaimKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1021,18 +1026,20 @@ export function LifeTimeline() {
     mascot.focusBranch(added.branchId);
   }, [addedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fire mascot reaction when an action/note operation closes
-  const prevOpKind = useRef(operation.kind);
+  // A step or a note just landed on its own stage. This map was unmounted
+  // while that stage was up, so the reaction cannot be read from an operation
+  // change — the store held it here until now. Pip walks to the thread and
+  // says it, then the event is spent.
+  const answeredKey = answered?.key;
   useEffect(() => {
-    const prev = prevOpKind.current;
-    prevOpKind.current = operation.kind;
-    if (operation.kind !== "idle" || !showMascot) return;
-    if (prev === "quick-act") {
-      setTimeout(() => mascotReactionRef.current?.(randomFrom(mascot.phrases.action)), 400);
-    } else if (prev === "quick-note") {
-      setTimeout(() => mascotReactionRef.current?.(randomFrom(mascot.phrases.note)), 400);
-    }
-  }, [operation.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!answeredKey || !answered) return;
+    const { branchId, kind } = answered;
+    clearAnswered();
+    if (!showMascot || !mascot.visible) return;
+    mascot.focusBranch(branchId);
+    const pool = kind === "act" ? mascot.phrases.action : mascot.phrases.note;
+    setTimeout(() => mascotReactionRef.current?.(randomFrom(pool)), 500);
+  }, [answeredKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When the user selects a merged thread from the integrated list, pan the
   // timeline so its merge date is centred in an 8-day window.

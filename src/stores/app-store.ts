@@ -60,18 +60,38 @@ export type TimelineOperation =
   /** A branch that needs more support than an app should carry alone. Focused. */
   | { kind: "seeking-support"; branchId: string };
 
-/** How much of the screen an operation may take. */
-export function operationDepth(op: TimelineOperation): "none" | "quick" | "focused" {
+/**
+ * How much of the screen an operation may take.
+ *
+ * "stage" is a screen of its own, like creating a thread: the whole shell steps
+ * away so the one thread being answered is visible above the keyboard. Every
+ * flow that asks the user to type belongs here — writing about a line you can
+ * no longer see is the thing this avoids.
+ */
+export function operationDepth(
+  op: TimelineOperation,
+): "none" | "quick" | "focused" | "stage" {
   switch (op.kind) {
     case "idle":
       return "none";
-    case "understanding":
+    case "quick-act":
+    case "quick-merge":
+    case "quick-note":
     case "confirming-merge":
+      return "stage";
+    case "understanding":
     case "seeking-support":
       return "focused";
     default:
       return "quick";
   }
+}
+
+/** The thread a stage is about, if any. */
+export function stageBranchId(op: TimelineOperation): string | null {
+  if ("branchId" in op && op.branchId) return op.branchId;
+  if (op.kind === "confirming-merge") return op.branchIds[0] ?? null;
+  return null;
 }
 
 export type StatusFilter = "all" | "active" | "merged" | "recurring";
@@ -115,6 +135,12 @@ type AppState = {
   born?: { key: number; branchId: string };
   /** A thread was just committed from the create flow: a small confirmation pops by its line. */
   added?: { key: number; branchId: string };
+  /**
+   * A reflect flow just finished on its own stage. The map is unmounted while
+   * a stage is up, so the reaction cannot be read from an operation change —
+   * it has to wait here until the timeline comes back and picks it up.
+   */
+  answered?: { key: number; branchId: string; kind: "act" | "note" };
   /** A worry is being burned: fire consumes its line, then finalizeBurn removes it. */
   burn?: { key: number; branchId: string; items: string[]; lesson: string };
   /** Pip just struck a thread (drives the attack animation). */
@@ -199,6 +225,12 @@ type AppState = {
   finalizeBurn(): Promise<void>;
   clearBorn(): void;
   clearAdded(): void;
+  /**
+   * A reflect stage is done: close it and leave the reaction for the map to
+   * play as it comes back. The write itself has already happened.
+   */
+  finishReflection(branchId: string, kind: "act" | "note"): void;
+  clearAnswered(): void;
   updateMoment(branchId: string, moment: BranchCommit): Promise<void>;
 
   startMerge(branchIds: string[]): Promise<void>;
@@ -798,6 +830,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   clearBorn: () => set({ born: undefined }),
   clearAdded: () => set({ added: undefined }),
+
+  finishReflection: (branchId, kind) =>
+    set((s) => ({
+      answered: { key: Date.now(), branchId, kind },
+      operation: { kind: "idle" as const },
+      view: nowView(s.view),
+    })),
+  clearAnswered: () => set({ answered: undefined }),
 
   async createTodayAction(branchId, step) {
     const branch = get().branches.find((b) => b.id === branchId);

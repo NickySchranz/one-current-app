@@ -4,12 +4,9 @@ import { useAppStore } from "@/stores/app-store";
 import { useT } from "@/i18n/i18n";
 import {
   AppTextInput,
-  Button,
-  CalmNote,
   Choice,
   Field,
   Panel,
-  T,
   Tag,
   rowStyles,
   useInTray,
@@ -31,6 +28,7 @@ const WHEN_OPTIONS = ["Now", "In ten minutes", "Later today", "This evening"];
 export function QuickAct({ branchId }: Props) {
   const branch = useAppStore((s) => s.branches.find((b) => b.id === branchId));
   const createTodayAction = useAppStore((s) => s.createTodayAction);
+  const finishReflection = useAppStore((s) => s.finishReflection);
   const setOperation = useAppStore((s) => s.setOperation);
   const t = useT();
   const inTray = useInTray();
@@ -39,36 +37,21 @@ export function QuickAct({ branchId }: Props) {
   const [step, setStep] = useState("");
   const [when, setWhen] = useState("Now");
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
 
   if (!branch) return null;
 
+  // Placing the step closes this stage. Nothing is confirmed here: the map
+  // comes back and Pip says it, standing at the thread the step belongs to.
   async function save() {
     if (!step.trim() || busy) return;
     setBusy(true);
     try {
       const suffix = when !== "Now" ? ` (${t(when).toLowerCase()})` : "";
       await createTodayAction(branchId, `${step.trim()}${suffix}`);
-      setDone(true);
+      finishReflection(branchId, "act");
     } finally {
       setBusy(false);
     }
-  }
-
-  if (done) {
-    return (
-      <Panel inTray={inTray}>
-        <CalmNote style={{ marginBottom: 12 }}>
-          <T>{t("Action added to your main line.")}</T>
-        </CalmNote>
-        <Button
-          variant="primary"
-          label={t("Return to timeline")}
-          onPress={() => setOperation({ kind: "idle" })}
-          style={{ alignSelf: "flex-start" }}
-        />
-      </Panel>
-    );
   }
 
   return (

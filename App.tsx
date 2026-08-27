@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { ActivityIndicator, AppState, Platform, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
-import { useAppStore } from "@/stores/app-store";
+import { operationDepth, useAppStore } from "@/stores/app-store";
 import { hasTokens } from "@/api/client";
 import { useT } from "@/i18n/i18n";
 import { PrimaryNavigation } from "@/features/navigation/PrimaryNavigation";
@@ -10,6 +10,7 @@ import { Logo } from "@/features/navigation/Logo";
 import { LifeTimeline } from "@/features/life-timeline/LifeTimeline";
 import { OperationTray } from "@/features/timeline-shell/OperationTray";
 import { CreationScreen } from "@/features/branch-creation/CreationScreen";
+import { ReflectionScreen } from "@/features/reflection/ReflectionScreen";
 import { HistoryView } from "@/features/history/HistoryView";
 import { MergeReview } from "@/features/history/MergeReview";
 import { MorePage } from "@/features/more/MorePage";
@@ -38,10 +39,12 @@ function AppShell() {
   // The tab bar must never ride up with the software keyboard — while the
   // keyboard is open it simply steps away (the sheet above has Back/Next).
   const keyboard = useKeyboard();
-  // Creating a thread takes over the whole screen: no header, no tab bar —
-  // just the solo timeline with Pip and the four questions.
+  // Creating a thread — and answering one, whenever that means typing — takes
+  // over the whole screen: no header, no tab bar, just the one line with Pip
+  // and the questions.
   const operation = useAppStore((s) => s.operation);
   const creating = operation.kind === "creating-branch";
+  const onStage = operationDepth(operation) === "stage";
   const tutorial = useTutorial();
 
   useEffect(() => {
@@ -112,15 +115,17 @@ function AppShell() {
     );
   }
 
-  // Creating a thread is an entirely separate screen: the whole shell —
-  // header, map, tabs — is unmounted while it's up, so no state is shared
-  // and nothing can ever show through. The store carries the result back;
-  // the map animates it in when it remounts.
-  if (creating) {
+  // A stage is an entirely separate screen: the whole shell — header, map,
+  // tabs — is unmounted while it's up, so no state is shared and nothing can
+  // ever show through. The store carries the result back; the map animates it
+  // in when it remounts. That unmount is also what makes the animations land:
+  // a hidden-but-mounted map would run them through and clear them before the
+  // stage ever left.
+  if (creating || onStage) {
     return (
       <View style={{ flex: 1, backgroundColor: tk.bg }}>
         <StatusBar style={tk.mode === "dark" ? "light" : "dark"} />
-        <CreationScreen />
+        {creating ? <CreationScreen /> : <ReflectionScreen />}
       </View>
     );
   }

@@ -22,13 +22,9 @@ import { useLayoutStore } from "@/stores/layout-store";
 import { CreateBranch } from "@/features/branch-creation/CreateBranch";
 import { RecurrenceCheck } from "@/features/branch-creation/RecurrenceCheck";
 import { QuickBranchMenu } from "@/features/branch-quick-actions/QuickBranchMenu";
-import { QuickAct } from "@/features/branch-quick-actions/QuickAct";
-import { QuickMerge } from "@/features/branch-quick-actions/QuickMerge";
-import { QuickNote } from "@/features/branch-quick-actions/QuickNote";
 import { ActionsPanel } from "@/features/branch-quick-actions/ActionsPanel";
 import { SupportPanel } from "@/features/branch-quick-actions/SupportPanel";
 import { BranchView } from "@/features/branch-inspection/BranchView";
-import { MergeWizard } from "@/features/branch-merge/MergeWizard";
 import { IntegratedThreadsPanel } from "@/features/integrated-threads/IntegratedThreadsPanel";
 import { useT } from "@/i18n/i18n";
 import { useTheme, type ThemeTokens } from "@/ui/theme";
@@ -36,6 +32,8 @@ import { alpha } from "@/ui/color";
 import { useKeyboard } from "@/ui/keyboard";
 import { InTrayContext } from "@/ui/primitives";
 
+// Flows that ask the user to type are not here: operationDepth sends them to
+// ReflectionScreen, which holds their panels instead.
 function trayLabel(op: TimelineOperation): string {
   switch (op.kind) {
     case "creating-branch":
@@ -44,20 +42,12 @@ function trayLabel(op: TimelineOperation): string {
       return "This has returned before";
     case "quick-touch":
       return "This thread";
-    case "quick-act":
-      return "One small step";
-    case "quick-merge":
-      return "What is true now";
-    case "quick-note":
-      return "A note";
     case "viewing-integrated":
       return "Integrated threads";
     case "viewing-actions":
       return "Actions";
     case "understanding":
       return "Understand this thread";
-    case "confirming-merge":
-      return "Integrate into Now";
     case "seeking-support":
       return "More support";
     default:
@@ -80,20 +70,12 @@ function operationBody(op: TimelineOperation) {
           dialOnly={op.dialOnly}
         />
       );
-    case "quick-act":
-      return <QuickAct key={op.branchId} branchId={op.branchId} />;
-    case "quick-merge":
-      return <QuickMerge key={op.branchId} branchId={op.branchId} />;
-    case "quick-note":
-      return <QuickNote key={op.branchId} branchId={op.branchId} />;
     case "viewing-integrated":
       return <IntegratedThreadsPanel selectedBranchId={op.branchId} />;
     case "viewing-actions":
       return <ActionsPanel />;
     case "understanding":
       return <BranchView key={op.branchId} branchId={op.branchId} />;
-    case "confirming-merge":
-      return <MergeWizard branchIds={op.branchIds} />;
     case "seeking-support":
       return <SupportPanel key={op.branchId} branchId={op.branchId} />;
     default:
@@ -218,16 +200,16 @@ export function OperationTray() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [operation.kind, setOperation]);
 
-  // Creating a thread lives on its own screen (CreationScreen); this tray
-  // renders nothing then, but its Escape handler stays live for cancelling —
-  // so the outside-tap dismissal below must stay off (no tray to be inside).
+  // Creating a thread, and every flow that asks the user to type, live on a
+  // screen of their own (CreationScreen / ReflectionScreen). This tray renders
+  // nothing then, and its outside-tap dismissal below must stay off — there is
+  // no tray for a tap to be inside of.
 
   // A tap anywhere outside the quick tray only sets it down — nothing
   // underneath activates on that same tap. A drag is a pan, not a dismissal.
   // (Web: window listeners with a click swallow, exactly like the source app.)
   useEffect(() => {
-    if (Platform.OS !== "web" || depth !== "quick" || operation.kind === "creating-branch")
-      return;
+    if (Platform.OS !== "web" || depth !== "quick") return;
     let start: { x: number; y: number } | null = null;
     const inTray = (target: EventTarget | null) => {
       const node = trayRef.current as unknown as HTMLElement | null;
@@ -257,7 +239,7 @@ export function OperationTray() {
     };
   }, [depth, operation.kind, setOperation]);
 
-  if (depth === "none" || operation.kind === "creating-branch") return null;
+  if (depth === "none" || depth === "stage") return null;
 
   const grip = (
     <View
