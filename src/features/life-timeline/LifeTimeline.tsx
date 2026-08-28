@@ -197,8 +197,9 @@ function MascotOptionsBubble({
           stroke={stroke}
           strokeWidth={1}
         />
-        {/* row 1: Reflect — its own rounded pill inside the card */}
-        <G onPress={onReflect} accessible accessibilityRole="button" accessibilityLabel={labels.reflect}>
+        {/* row 1: Reflect — its own rounded pill inside the card. Plain G on
+            purpose: a11y roles turn SVG groups into invisible HTML buttons. */}
+        <G onPress={onReflect}>
           <Rect x={left - 8} y={top - 6} width={BUBBLE_W + 16} height={BUBBLE_PAD + ROW_H + 6 + ROW_GAP / 2} fill="transparent" />
           <Rect
             x={rowLeft}
@@ -220,7 +221,7 @@ function MascotOptionsBubble({
           </SvgText>
         </G>
         {/* row 2: the loudness dial — its own rounded pill, quieter tint */}
-        <G onPress={onDial} accessible accessibilityRole="button" accessibilityLabel={labels.dial}>
+        <G onPress={onDial}>
           <Rect x={left - 8} y={ROW_H / 2 + ROW_GAP / 2} width={BUBBLE_W + 16} height={ROW_H + BUBBLE_PAD + 6 + ROW_GAP / 2} fill="transparent" />
           <Rect
             x={rowLeft}
@@ -1636,7 +1637,6 @@ export function LifeTimeline() {
                   bubbleO={mascot.bubbleO}
                   bubbleText={mascot.bubbleText}
                   showTapHint={mascot.frame === 'IDLE_A' || mascot.frame === 'IDLE_B'}
-                  accessibilityLabel={t("Pip, your companion")}
                   theme={tk}
                   onPress={mascot.onPress}
                 />

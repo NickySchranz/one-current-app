@@ -72,5 +72,4 @@ export const timeline: Record<string, string> = {
   "Shoo!": "¡Fuera!",
   "Ruffle!": "¡Despeina!",
   "Reflect": "Reflexionar",
-  "Pip, your companion": "Pip, tu compañero",
 };
