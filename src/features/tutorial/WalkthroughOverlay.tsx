@@ -22,7 +22,7 @@ const TUT_PX = PX * 2.2;
 const HALO_PAD = 10;
 /** A point target (a spot on the SVG canvas) gets a circle this wide. */
 const POINT_HALO = 44;
-const CARD_MAX_W = 360;
+const CARD_MAX_W = 420;
 
 function resolvePalette(accent: string): Record<ColorKey, string> {
   return {
@@ -68,7 +68,8 @@ function Halo({ rect, reduced, accent }: { rect: TargetRect; reduced: boolean; a
   const w = isPoint ? POINT_HALO : rect.w + HALO_PAD * 2;
   const h = isPoint ? POINT_HALO : rect.h + HALO_PAD * 2;
   const left = isPoint ? rect.x - POINT_HALO / 2 : rect.x - HALO_PAD;
-  const top = isPoint ? rect.y - POINT_HALO / 2 : rect.y - HALO_PAD;
+  // Never let the ring reach into the header bar.
+  const top = Math.max(4, isPoint ? rect.y - POINT_HALO / 2 : rect.y - HALO_PAD);
   const radius = Math.min(w, h) / 2 + 6;
 
   const ring = {
@@ -104,6 +105,11 @@ function Halo({ rect, reduced, accent }: { rect: TargetRect; reduced: boolean; a
  * The guided walkthrough's card + pointer. Reads everything from the store;
  * mounted once in the shell (it disappears with the shell during stages, and
  * simply picks up at the current step when the shell returns).
+ *
+ * Placement rule: the card never floats next to its target — it docks to the
+ * screen edge OPPOSITE the target (clear of the header and the tab bar), and
+ * the halo alone does the pointing. Cards near targets kept covering the very
+ * things they pointed at: the main line, the new thread, Pip.
  */
 export function WalkthroughOverlay() {
   const t = useT();
@@ -117,6 +123,9 @@ export function WalkthroughOverlay() {
 
   const step = stepId ? walkthroughStep(stepId) : null;
   const [rect, setRect] = useState<TargetRect | null>(null);
+  // The birth moment belongs to the timeline: entering meet-thread holds the
+  // card back so the draw-in and Pip's reaction play unobstructed.
+  const [held, setHeld] = useState(false);
 
   // Follow the target: on step entry, on resize, and on a slow tick while a
   // targeted step is up (layout drifts — panning, keyboard, Pip's walk).
@@ -138,7 +147,17 @@ export function WalkthroughOverlay() {
     };
   }, [step?.target, stepId, winW, winH]);
 
-  if (!step || stepId === "creating") return null;
+  useEffect(() => {
+    if (stepId !== "meet-thread" || reducedMotion) {
+      setHeld(false);
+      return;
+    }
+    setHeld(true);
+    const timer = setTimeout(() => setHeld(false), 1800);
+    return () => clearTimeout(timer);
+  }, [stepId, reducedMotion]);
+
+  if (!step || stepId === "creating" || held) return null;
 
   const frames = CHARACTER_FRAMES[mascotType];
   const pixels = frames[step.frame] ?? frames["IDLE_A"];
@@ -147,50 +166,56 @@ export function WalkthroughOverlay() {
   const svgH = 12 * TUT_PX + 4;
   const stepIndex = walkthroughIndex(step.id);
 
-  // Placement: anchored near the target when one is measurable; docked to the
-  // top while the quick menu owns the bottom; docked to the bottom otherwise.
-  const anchored = rect !== null;
-  const cardW = Math.min(CARD_MAX_W, winW - 24);
-  let cardStyle: object;
-  if (anchored) {
-    const cx = rect.x + rect.w / 2;
-    const below = rect.y + rect.h / 2 < winH / 2;
-    const left = Math.max(12, Math.min(cx - cardW / 2, winW - cardW - 12));
-    cardStyle = below
-      ? { left, top: rect.y + rect.h + HALO_PAD + 14, width: cardW }
-      : { left, bottom: winH - rect.y + HALO_PAD + 14, width: cardW };
-  } else if (stepId === "menu") {
-    cardStyle = { left: 0, right: 0, top: 0, borderBottomWidth: 1, borderBottomColor: tk.accent };
-  } else {
-    cardStyle = { left: 0, right: 0, bottom: 0, borderTopWidth: 1, borderTopColor: tk.accent };
-  }
+  // Dock to the edge opposite the target: the halo points, the card stays out
+  // of the way. Compact screens keep the header and the tab bar (with its
+  // raised +) fully visible.
+  const compact = winW <= 760;
+  const side: "top" | "bottom" = rect
+    ? rect.y + rect.h / 2 >= winH / 2
+      ? "top"
+      : "bottom"
+    : stepId === "menu"
+      ? "top"
+      : "bottom";
+  const dock =
+    side === "top"
+      ? { top: compact ? 48 : 12 }
+      : { bottom: compact ? 96 : 12 };
 
   return (
     <>
       {rect && <Halo rect={rect} reduced={reducedMotion} accent={tk.accent} />}
       <View
-        style={[
-          {
-            position: "absolute",
-            backgroundColor: tk.bgRaised,
-            padding: 16,
-            shadowColor: "#000",
-            shadowOffset: { width: 0, height: anchored ? 2 : -2 },
-            shadowOpacity: 0.12,
-            shadowRadius: 8,
-            elevation: 8,
-            flexDirection: "row",
-            alignItems: "flex-start",
-            gap: 12,
-            zIndex: 100,
-          },
-          anchored && {
-            borderWidth: 1,
-            borderColor: tk.accent,
-            borderRadius: tk.radiusLg,
-          },
-          cardStyle,
-        ]}
+        pointerEvents="box-none"
+        style={{
+          position: "absolute",
+          left: 12,
+          right: 12,
+          ...dock,
+          alignItems: "center",
+          zIndex: 100,
+        }}
+      >
+      <View
+        // The walkthrough card — the check scripts measure it by this label.
+        accessibilityLabel="walkthrough-card"
+        style={{
+          width: "100%",
+          maxWidth: CARD_MAX_W,
+          backgroundColor: tk.bgRaised,
+          padding: 16,
+          borderWidth: 1,
+          borderColor: tk.accent,
+          borderRadius: tk.radiusLg,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: side === "top" ? 2 : -2 },
+          shadowOpacity: 0.12,
+          shadowRadius: 8,
+          elevation: 8,
+          flexDirection: "row",
+          alignItems: "flex-start",
+          gap: 12,
+        }}
       >
         <Svg width={svgW} height={svgH}>
           {pixels.map((p, i) => (
@@ -248,6 +273,7 @@ export function WalkthroughOverlay() {
             </Pressable>
           )}
         </View>
+      </View>
       </View>
     </>
   );

@@ -37,6 +37,32 @@ async function haloNear(page, locator) {
   const cy = t.y + t.height / 2;
   return cx > h.x - 8 && cx < h.x + h.width + 8 && cy > h.y - 8 && cy < h.y + h.height + 8;
 }
+/** The card must never cover the halo it points with. */
+async function cardClearOfHalo(page) {
+  const [card, halo] = await Promise.all([
+    page.getByLabel("walkthrough-card").first().boundingBox().catch(() => null),
+    page.getByLabel("walkthrough-halo").first().boundingBox().catch(() => null),
+  ]);
+  if (!card || !halo) return false;
+  const overlap =
+    card.x < halo.x + halo.width &&
+    card.x + card.width > halo.x &&
+    card.y < halo.y + halo.height &&
+    card.y + card.height > halo.y;
+  return !overlap;
+}
+/** Regression guard: a11y roles on SVG groups render as invisible HTML buttons. */
+const svgButtons = (page) => page.evaluate(() => document.querySelectorAll("svg button").length);
+/** Pip is a dense pixel-sprite group; he must render with a real bounding box. */
+const pipRenders = (page) =>
+  page.evaluate(() => {
+    const g = [...document.querySelectorAll("svg g")].find(
+      (el) => el.querySelectorAll("polygon, rect").length > 80,
+    );
+    if (!g) return false;
+    const r = g.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  });
 
 // ---- phone-size guided run --------------------------------------------------
 {
@@ -48,6 +74,8 @@ async function haloNear(page, locator) {
 
   check("point-plus copy", await bubble(page, "Something on your mind right now?").isVisible().catch(() => false));
   check("halo rests on the + button", await haloNear(page, page.getByLabel("New thread").first()));
+  check("card clear of halo (point-plus)", await cardClearOfHalo(page));
+  check("tab bar visible under the card", await page.getByText("●Now").first().isVisible().catch(() => false));
 
   await page.getByLabel("New thread").first().click();
   await page.waitForTimeout(900);
@@ -67,6 +95,9 @@ async function haloNear(page, locator) {
 
   check("meet-thread copy", await bubble(page, "There it is — your first thread.").isVisible().catch(() => false));
   check("halo present for the thread", (await page.getByLabel("walkthrough-halo").count()) > 0);
+  check("card clear of halo (meet-thread)", await cardClearOfHalo(page));
+  check("Pip renders after creation", await pipRenders(page));
+  check("no HTML buttons inside SVG", (await svgButtons(page)) === 0);
 
   // First tap arms; second opens the menu.
   const stroke = await page.evaluate(() => {
@@ -95,12 +126,15 @@ async function haloNear(page, locator) {
   await page.waitForTimeout(700);
   check("bonk step copy", await bubble(page, "See the little pill by the dates?").isVisible().catch(() => false));
   check("halo rests on the bonk pill", await haloNear(page, page.getByText("Bonk!").first()));
+  check("card clear of halo (bonk)", await cardClearOfHalo(page));
   await page.getByRole("button", { name: "Next →" }).click();
   await page.waitForTimeout(500);
   check("wholeness step copy", await bubble(page, "This shows how gathered you are.").isVisible().catch(() => false));
+  check("card clear of halo (wholeness)", await cardClearOfHalo(page));
   await page.getByRole("button", { name: "Next →" }).click();
   await page.waitForTimeout(500);
   check("history halo on the History tab", await haloNear(page, page.getByRole("button", { name: "History" }).first()));
+  check("card clear of halo (history)", await cardClearOfHalo(page));
   await page.getByRole("button", { name: "Next →" }).click();
   await page.waitForTimeout(500);
   check("more halo on the More tab", await haloNear(page, page.getByRole("button", { name: "More" }).first()));
