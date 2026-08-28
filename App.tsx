@@ -21,6 +21,7 @@ import { useKeyboard } from "@/ui/keyboard";
 import { T } from "@/ui/primitives";
 import { useTutorial } from "@/features/tutorial/useTutorial";
 import { TutorialOverlay } from "@/features/tutorial/TutorialOverlay";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 
 function AppShell() {
   const ready = useAppStore((s) => s.ready);
@@ -204,8 +205,10 @@ function AppShell() {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <AppShell />
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <AppShell />
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }

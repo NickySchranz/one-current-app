@@ -8,9 +8,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const TOKENS_KEY = "one-current-tokens";
 const API_URL_KEY = "one-current-api-url";
-const DEFAULT_URL = __DEV__
-  ? "http://localhost:4000"
-  : "https://one-current-api.nikischranz.workers.dev";
+const DEFAULT_URL = __DEV__ ? "http://localhost:4000" : "https://api.onecurrentapp.com";
 const TIMEOUT_MS = 6000;
 
 export type Session = { access: string; refresh: string };
@@ -240,13 +238,29 @@ export const api = {
 
   me: () => call<ApiUser>("GET", "/me", undefined, { auth: true }),
 
-  checkout: () =>
+  /** Delete the account and everything the server holds for it. Tokens die with it. */
+  deleteMe: async () => {
+    const res = await call<{ ok: true; deleted: true; sharesRevoked: number }>(
+      "DELETE",
+      "/me",
+      undefined,
+      { auth: true },
+    );
+    await saveTokens(null);
+    return res;
+  },
+
+  checkout: (period: "monthly" | "biannual" | "annual" = "monthly") =>
     call<{ url: string; sessionId: string; mode: "stub" | "stripe" }>(
       "POST",
       "/billing/checkout",
-      { app: "one-current" },
+      { app: "one-current", period },
       { auth: true },
     ),
+
+  /** Stripe's customer portal (manage payment method, cancel). */
+  billingPortal: () =>
+    call<{ url: string }>("POST", "/billing/portal", { app: "one-current" }, { auth: true }),
 
   completeStubCheckout: (sessionId: string) =>
     call<{ ok: true; plan: "pro" }>("POST", "/billing/dev/complete", { sessionId }, { auth: true }),

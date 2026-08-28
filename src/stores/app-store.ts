@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { AccessibilityInfo, Appearance } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { SHOW_TESTING } from "@/config/flags";
 import type { ForkPeriodChoice, PsychologicalBranch, Loudness } from "@/domain/branches/types";
 import type { BranchMerge, MergeDraft } from "@/domain/merges/types";
 import type { Lesson } from "@/domain/lessons/types";
@@ -141,6 +142,12 @@ type AppState = {
    * it has to wait here until the timeline comes back and picks it up.
    */
   answered?: { key: number; branchId: string; kind: "act" | "note" };
+  /**
+   * A thread just came home to the main line. Like `born`, this waits for the
+   * map: the line draws itself along its merged path so the fold-in is seen,
+   * instead of the thread simply being there already merged.
+   */
+  integrated?: { key: number; branchId: string };
   /** A worry is being burned: fire consumes its line, then finalizeBurn removes it. */
   burn?: { key: number; branchId: string; items: string[]; lesson: string };
   /** Pip just struck a thread (drives the attack animation). */
@@ -231,6 +238,7 @@ type AppState = {
    */
   finishReflection(branchId: string, kind: "act" | "note"): void;
   clearAnswered(): void;
+  clearIntegrated(): void;
   updateMoment(branchId: string, moment: BranchCommit): Promise<void>;
 
   startMerge(branchIds: string[]): Promise<void>;
@@ -411,7 +419,7 @@ async function planPatch(
   serverPro: boolean | null,
   s: { isPro: boolean; theme: ThemeId },
 ): Promise<{ apiOnline: true; serverPro: boolean | null; theme: ThemeId }> {
-  const pro = serverPro ?? s.isPro;
+  const pro = serverPro ?? (SHOW_TESTING && s.isPro);
   let theme = s.theme;
   if (pro) {
     const saved = await AsyncStorage.getItem(THEME_KEY).catch(() => null);
@@ -838,6 +846,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       view: nowView(s.view),
     })),
   clearAnswered: () => set({ answered: undefined }),
+  clearIntegrated: () => set({ integrated: undefined }),
 
   async createTodayAction(branchId, step) {
     const branch = get().branches.find((b) => b.id === branchId);
@@ -923,6 +932,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       mergeDraft: undefined,
       view: nowView(s.view),
       operation: { kind: "idle" },
+      // Whichever line actually closed is the one that folds in.
+      integrated: (() => {
+        const closed = updated.find((b) => !!b.mergeDate);
+        return closed ? { key: Date.now(), branchId: closed.id } : s.integrated;
+      })(),
     }));
     get().addBonkCharge(CHARGE_INTEGRATE);
     return merge;
@@ -958,6 +972,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       branches: s.branches.map((b) => (b.id === branchId ? next : b)),
       actions: s.actions.map((a) => openActions.find((c) => c.id === a.id) ?? a),
       reclaim: freed.length > 0 ? { key: Date.now(), branchId, feelings: freed } : s.reclaim,
+      integrated: { key: Date.now(), branchId },
       view: nowView(s.view),
       operation: { kind: "idle" },
     }));
@@ -1095,9 +1110,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 }));
 
-/** Pro as enforced: the server's word when it has spoken, else the local testing flag. */
+/** Pro as enforced: the server's word when it has spoken. The local flag only
+ * counts in testing builds — production Pro comes from a real subscription. */
 export const selectEffectivePro = (s: { isPro: boolean; serverPro: boolean | null }): boolean =>
-  s.serverPro ?? s.isPro;
+  s.serverPro ?? (SHOW_TESTING && s.isPro);
 
 export function matchesStatusFilter(
   b: PsychologicalBranch,

@@ -51,6 +51,47 @@ const DAY = 24 * 60 * 60 * 1000;
 
 const AnimatedOptionG = Animated.createAnimatedComponent(G);
 
+/**
+ * One line in the day's record beside Now. A step that has just landed slides
+ * in from the right and fades up, so placing it is something you watch happen
+ * rather than something you find already there. Everything else renders still.
+ */
+function DayRow({
+  arriving,
+  reducedMotion,
+  children,
+}: {
+  arriving: boolean;
+  reducedMotion: boolean;
+  children: React.ReactNode;
+}) {
+  const play = arriving && !reducedMotion;
+  const op = useSharedValue(1);
+  const dx = useSharedValue(0);
+  // `arriving` turns true one render after mount — the event that sets it is
+  // read in an effect — so the entrance has to start when it flips, not on
+  // mount, or it would be over before there was anything to move.
+  useEffect(() => {
+    if (!play) return;
+    op.value = 0;
+    dx.value = 14;
+    op.value = withTiming(1, { duration: 460, easing: Easing.out(Easing.cubic) });
+    dx.value = withTiming(0, { duration: 460, easing: Easing.out(Easing.cubic) });
+  }, [play, op, dx]);
+  const animatedProps = useAnimatedProps(() => ({
+    opacity: op.value,
+    translateX: dx.value,
+  }));
+  if (!play) return <G>{children}</G>;
+  return (
+    // testID so the harness can watch this one row rather than guess which
+    // group on a busy map is the arriving step.
+    <AnimatedOptionG testID="day-row-arriving" animatedProps={animatedProps}>
+      {children}
+    </AnimatedOptionG>
+  );
+}
+
 // Pip's offer bubble: one padded speech bubble holding two rounded rows —
 // kept compact so it fits to his right almost anywhere on the map. Row
 // width follows the labels (Spanish runs longer than English) but stays
@@ -281,6 +322,8 @@ export function LifeTimeline() {
   const clearAdded = useAppStore((s) => s.clearAdded);
   const answered = useAppStore((s) => s.answered);
   const clearAnswered = useAppStore((s) => s.clearAnswered);
+  const integrated = useAppStore((s) => s.integrated);
+  const clearIntegrated = useAppStore((s) => s.clearIntegrated);
   const burn = useAppStore((s) => s.burn);
   const hit = useAppStore((s) => s.hit);
   const clearHit = useAppStore((s) => s.clearHit);
@@ -358,6 +401,14 @@ export function LifeTimeline() {
     const timer = setTimeout(clearBorn, reducedMotion ? 0 : 1600);
     return () => clearTimeout(timer);
   }, [born, clearBorn, reducedMotion]);
+
+  // A thread that just came home does the same, along its merged path — so the
+  // fold onto the main line is watched rather than arrived at.
+  useEffect(() => {
+    if (!integrated) return;
+    const timer = setTimeout(clearIntegrated, reducedMotion ? 0 : 1600);
+    return () => clearTimeout(timer);
+  }, [integrated, clearIntegrated, reducedMotion]);
 
   // The added event only sends Pip to the new thread now (no popup): consume
   // it shortly after so it never refires.
@@ -786,7 +837,14 @@ export function LifeTimeline() {
   // steps already done today (✓), and even "nothing can be done", which is a
   // decision too. Decisions of integrated lines leave with them.
   const futureItems = useMemo(() => {
-    const items: { id: string; label: string; done: boolean; color: string }[] = [];
+    const items: {
+      id: string;
+      label: string;
+      done: boolean;
+      color: string;
+      /** The thread this row belongs to, so a fresh step can be spotted. */
+      ownerId?: string;
+    }[] = [];
     const short = (s: string, n = 26) => (s.length > n ? s.slice(0, n - 2) + "…" : s);
     for (const a of actions) {
       const owner = branches.find((b) => b.id === a.branchesIntegrated[0]?.branchId);
@@ -798,6 +856,7 @@ export function LifeTimeline() {
         label: doneToday ? `✓ ${short(a.title)}` : short(a.title),
         done: !!doneToday,
         color: owner ? branchColor(owner, theme) : tk.accent,
+        ownerId: owner?.id,
       });
     }
     for (const b of branches) {
@@ -1031,10 +1090,17 @@ export function LifeTimeline() {
   // change — the store held it here until now. Pip walks to the thread and
   // says it, then the event is spent.
   const answeredKey = answered?.key;
+  // Which thread just had a step placed — the row for it arrives visibly. Held
+  // locally because the event itself is spent as soon as it is read.
+  const [arrivedFor, setArrivedFor] = useState<string | null>(null);
   useEffect(() => {
     if (!answeredKey || !answered) return;
     const { branchId, kind } = answered;
     clearAnswered();
+    if (kind === "act") {
+      setArrivedFor(branchId);
+      setTimeout(() => setArrivedFor(null), 1400);
+    }
     if (!showMascot || !mascot.visible) return;
     mascot.focusBranch(branchId);
     const pool = kind === "act" ? mascot.phrases.action : mascot.phrases.note;
@@ -1321,7 +1387,11 @@ export function LifeTimeline() {
                   {futureItems.map((it, i) => {
                     const y = layout.mainY + 16 + i * 16;
                     return (
-                      <G key={it.id}>
+                      <DayRow
+                        key={it.id}
+                        arriving={!!it.ownerId && it.ownerId === arrivedFor && !it.done}
+                        reducedMotion={reducedMotion}
+                      >
                         <Circle
                           cx={layout.nowX + 16}
                           cy={y - 4}
@@ -1339,7 +1409,7 @@ export function LifeTimeline() {
                         >
                           {it.label}
                         </SvgText>
-                      </G>
+                      </DayRow>
                     );
                   })}
                 </G>
@@ -1388,7 +1458,11 @@ export function LifeTimeline() {
                     emphasizedId={top?.id}
                     highlighted={isUserFocused || mascotHighlight}
                     dimmed={!!focusedBranchId && branch.id !== focusedBranchId}
-                    born={!reducedMotion && born?.branchId === branch.id}
+                    // Draws itself in: newly created, or just folded home.
+                    born={
+                      !reducedMotion &&
+                      (born?.branchId === branch.id || integrated?.branchId === branch.id)
+                    }
                     reducedMotion={reducedMotion}
                     onSelect={selectBranch}
                     onSelectMoment={selectBranchMoment}

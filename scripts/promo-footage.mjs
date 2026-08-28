@@ -50,6 +50,57 @@ async function typeInto(rec, locator, text) {
   await rec.during(locator.pressSequentially(text, { delay: 45 }), { min: 10 });
 }
 
+/**
+ * Open a thread's decisions, on camera. A first tap only sends Pip to the
+ * thread (bonk-run targeting) — the sheet opens on the second. If Pip is
+ * already standing there his offer pills cover the line, and "Reflect" is
+ * the way in. Returns the expand handle, or null when the sheet came up
+ * already expanded (a thread answered today has no question left to tap).
+ */
+async function openThread(rec, page, along, index = 0, glideMs = 600) {
+  const handle = page.getByText("What does this thread need from you now?").first();
+  const reflect = page.getByText("Reflect", { exact: true }).first();
+  for (let i = 0; i < 3; i++) {
+    if (await reflect.count()) {
+      await rec.glideClick(reflect, 420);
+      await rec.hold(900);
+    } else {
+      await tapStroke(rec, page, along, index, glideMs);
+      await rec.hold(1100);
+    }
+    if (await handle.count()) return handle;
+    // exact: a loose "Act" also matches the tab bar's "Actions".
+    if (await page.getByRole("button", { name: "Act", exact: true }).count()) return null;
+  }
+  return false; // caller decides whether that is fatal
+}
+
+/**
+ * Click something and confirm it actually landed. Sheets and stages animate,
+ * so a click measured mid-flight can miss (or hit the backdrop) — and the
+ * virtual clock makes that deterministic rather than rare. Retries until the
+ * expected locator turns up.
+ */
+async function clickUntil(rec, target, expected, { tries = 3, glideMs = 500 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    await rec.glideClick(target, i === 0 ? glideMs : 260);
+    await rec.during(expected.waitFor({ timeout: 4000 }).catch(() => {}), { min: 10, max: 120 });
+    if (await expected.count()) return true;
+  }
+  return false;
+}
+
+/** Open a thread and unfold its four decisions. */
+async function openDecisions(rec, page, along, index = 0, glideMs = 600) {
+  const handle = await openThread(rec, page, along, index, glideMs);
+  if (handle === false) return false;
+  if (handle) {
+    await rec.glideClick(handle, 450);
+    await rec.hold(900);
+  }
+  return true;
+}
+
 /* ---------------------------------------------------------------- scenes */
 
 async function scene01_hero() {
@@ -62,24 +113,37 @@ async function scene01_hero() {
   await rec.during(rec.glideClick(page.getByLabel("New thread").first(), 700));
   await rec.hold(700);
 
-  rec.beat("form");
+  // Creation is a screen of its own now: a bare stage holding only the line
+  // being born, with Pip at its end, and four questions one at a time.
+  const next = page.getByRole("button", { name: "Next" });
+  rec.beat("naming");
   await typeInto(rec, page.getByLabel("Name the thread"), "The presentation on Friday");
-  console.log("  01 input value:", await page.getByLabel("Name the thread").inputValue().catch(() => "(n/a)"));
+  await rec.hold(900); // the label writes itself along the line
+  await rec.glideClick(next, 450);
+  await rec.hold(700);
+
+  rec.beat("since");
   await rec.glideClick(page.getByRole("button", { name: "Today", exact: true }).first(), 450);
-  await rec.hold(400);
-  rec.beat("start");
-  // the submit sits below the fold in the tray — glideClick scrolls to it
-  await rec.glideClick(page.getByRole("button", { name: "Start the thread" }), 600);
-  await rec.hold(1000);
-  // the new thread opens with its loudness dial — set how loud it feels
+  await rec.hold(700);
+  await rec.glideClick(next, 450);
+  await rec.hold(700);
+
+  rec.beat("holds");
+  const feeling = page.getByRole("button", { name: "dread" }).first();
+  if (await feeling.count()) {
+    await rec.glideClick(feeling, 450);
+    await rec.hold(1100); // the tags gather under the line
+  }
+  await rec.glideClick(next, 450);
+  await rec.hold(700);
+
+  rec.beat("loudness");
   const dial = page.getByRole("slider").first();
   await rec.during(dial.waitFor({ timeout: 8000 }).catch(() => {}), { min: 6, max: 90 });
-  if (await dial.count()) {
-    rec.beat("loudness");
-    const box = await dial.boundingBox();
-    if (box) await rec.glideTap(box.x + box.width * 0.7, box.y + box.height / 2, 600);
-    await rec.hold(1200);
-    await rec.during(page.keyboard.press("Escape"));
+  const box = await dial.boundingBox().catch(() => null);
+  if (box) {
+    await rec.glideTap(box.x + box.width * 0.7, box.y + box.height / 2, 600);
+    await rec.hold(1400); // the line thickens as the dial fills
   } else {
     await page.screenshot({ path: `${FOOTAGE_DIR}/01-debug.png` });
     console.log(
@@ -87,25 +151,33 @@ async function scene01_hero() {
       (await page.evaluate(() => document.body.innerText.slice(0, 300))).replace(/\n/g, " | "),
     );
   }
-  await rec.hold(1600); // the thread forks off; Pip reacts
+  rec.beat("start");
+  await rec.glideClick(page.getByRole("button", { name: "Start the thread" }), 600);
+  // the stage closes, the map returns, the line draws itself in among the rest
+  await rec.hold(1800);
   rec.beat("born");
-  await rec.hold(2200);
+  await rec.hold(2600); // Pip runs over and says it
 
   rec.beat("tap-thread");
-  await tapStroke(rec, page, 0.72, 0, 700);
-  await rec.hold(1500); // peek: title + loudness dial
+  if (!(await openDecisions(rec, page, 0.72, 0, 700))) throw new Error("01: decisions never opened");
   rec.beat("menu");
-  await rec.glideClick(page.getByText("What does this thread need from you now?").first(), 500);
-  await rec.hold(1800); // the four options
+  await rec.hold(1500); // the four answers
   rec.beat("act");
-  await rec.glideClick(page.getByRole("button", { name: "Act" }).first(), 500);
+  // Answering opens its own stage — the shell unmounts and remounts.
+  const step = page.getByLabel("The smallest honest step");
+  const act = page.getByRole("button", { name: "Act", exact: true }).first();
+  if (!(await clickUntil(rec, act, step))) throw new Error("01: the Act stage never opened");
   await rec.hold(600);
-  await typeInto(rec, page.getByLabel("The smallest honest step"), "Outline three slides");
+  await typeInto(rec, step, "Outline three slides");
+  await rec.hold(600);
+  rec.beat("when");
+  await rec.glideClick(page.getByRole("button", { name: "Next" }), 450);
+  await rec.hold(1000); // when will you begin?
   rec.beat("place");
   await rec.glideClick(page.getByRole("button", { name: "Place it on today" }), 500);
-  await rec.hold(2800); // ✓ lands on the line, Pip reacts
+  await rec.hold(3000); // the stage closes, the step lands past Now, Pip says it
   rec.beat("done");
-  await rec.hold(1200);
+  await rec.hold(1400);
   await rec.stop();
   await page.close();
 }
@@ -115,12 +187,35 @@ async function scene02_pip() {
   const rec = await new Recorder(page, "02-pip").start();
   rec.beat("patrol");
   await rec.hold(9000); // ~2 patrol cycles: jump → run → inspect → talk
-  rec.beat("tap-thread");
-  await tapStroke(rec, page, 0.6, 1, 600); // Pip runs to the tapped thread
-  await rec.hold(3500);
+
+  // When Pip arrives at a thread that still owes an answer, he offers two
+  // ways in rather than nagging: Reflect, and How loud?
+  const reflect = page.getByText("Reflect", { exact: true }).first();
+  for (let i = 0; i < 8 && !(await reflect.count()); i++) await rec.hold(1000);
+  // His offers fade with the bubble, so take them the moment they are up and
+  // fall back to the line itself if they slip away mid-click.
+  let tookOffer = false;
+  if (await reflect.count()) {
+    rec.beat("offers");
+    await rec.hold(1500);
+    rec.beat("reflect");
+    try {
+      await rec.glideClick(reflect, 460);
+      tookOffer = true;
+      await rec.hold(2600); // his offer opens the thread's decisions
+    } catch {
+      tookOffer = false;
+    }
+  }
+  if (!tookOffer) {
+    if (!(await page.getByText("What does this thread need from you now?").count())) {
+      await tapStroke(rec, page, 0.6, 1, 600);
+      await rec.hold(2600);
+    }
+  }
   rec.beat("close");
   await rec.during(page.keyboard.press("Escape"));
-  await rec.hold(3500); // patrol resumes
+  await rec.hold(4000); // he goes back to his rounds
   await rec.stop();
   await page.close();
 }
@@ -136,16 +231,7 @@ async function scene03_louder() {
     await page.waitForTimeout(1200);
   };
 
-  // open a thread's quick menu and expand it; false if it has no expand row
-  const openMenu = async (rec, along, idx) => {
-    await tapStroke(rec, page, along, idx, 600);
-    await rec.hold(1100);
-    const expand = page.getByText("What does this thread need from you now?").first();
-    if (!(await expand.count())) return false;
-    await rec.glideClick(expand, 400);
-    await rec.hold(800);
-    return true;
-  };
+  const openMenu = (rec, along, idx) => openDecisions(rec, page, along, idx, 600);
   // try several threads until one still has the full menu (open + undecided)
   const openMenuAny = async (rec, indices) => {
     for (const idx of indices) {
@@ -164,40 +250,56 @@ async function scene03_louder() {
 
   recA.beat("act");
   if (await openMenu(recA, 0.75, 0)) {
-    await recA.glideClick(page.getByRole("button", { name: "Act" }).first(), 450);
-    await recA.hold(500);
-    await typeInto(recA, page.getByLabel("The smallest honest step"), "Answer it today");
-    await recA.glideClick(page.getByRole("button", { name: "Place it on today" }), 450);
+    const step = page.getByLabel("The smallest honest step");
+    if (await clickUntil(recA, page.getByRole("button", { name: "Act", exact: true }).first(), step)) {
+      await typeInto(recA, step, "Answer it today");
+      await recA.glideClick(page.getByRole("button", { name: "Next" }), 400);
+      await recA.hold(800); // when will you begin?
+      await recA.glideClick(page.getByRole("button", { name: "Place it on today" }), 450);
+    }
   }
-  await recA.hold(1700);
+  await recA.hold(2000); // the stage closes, the step lands past Now
 
   recA.beat("integrate");
   if (await openMenuAny(recA, [1, 2, 3])) {
-    await recA.glideClick(page.getByRole("button", { name: "Integrate" }).first(), 450);
-    await recA.hold(1200);
-    await recA.glideClick(page.getByRole("button", { name: "It is resolved" }), 450);
-    await recA.hold(1500);
-    await recA.glideClick(page.getByRole("button", { name: "Integrate it into Now" }), 500);
-    await recA.hold(2600); // reclaim flight
+    const resolved = page.getByRole("button", { name: "It is resolved" });
+    if (await clickUntil(recA, page.getByRole("button", { name: "Integrate", exact: true }).first(), resolved)) {
+      await recA.hold(800);
+      const confirm = page.getByRole("button", { name: "Integrate it into Now" });
+      if (await clickUntil(recA, resolved, confirm)) {
+        await recA.hold(1200); // what returns with you
+        await recA.glideClick(confirm, 500);
+        await recA.hold(3000); // the stage closes; the line folds home, feelings fly back
+      }
+    }
   }
 
-  recA.beat("cant");
+  recA.beat("rest");
   if (await openMenuAny(recA, [1, 2, 3])) {
-    await recA.glideClick(page.getByRole("button", { name: "Can't do anything about it now" }), 450);
-    await recA.hold(1100);
+    // "Let it rest" — the app's own words for an honest nothing-today
+    await recA.glideClick(page.getByRole("button", { name: "Let it rest", exact: true }), 450);
+    await recA.hold(1400);
     const back = page.getByRole("button", { name: "Return to timeline" });
     if (await back.count()) await recA.glideClick(back, 400);
   }
   await recA.hold(1000);
 
+  // Press and hold a line: it swells, pops, and hands you just its dial
+  // (HOLD_MS is 380 in the app — hold well past it so the swell reads).
   recA.beat("lower");
-  await tapStroke(recA, page, 0.7, 2, 600);
-  await recA.hold(1000);
+  const hp = await strokePoint(page, 0.7, 2);
+  if (hp) {
+    await recA.glideTo(hp.x, hp.y, 600);
+    await page.mouse.down();
+    await recA.hold(900); // the swell
+    await page.mouse.up();
+    await recA.hold(900); // the pop, then the dial
+  }
   const dial3 = page.getByRole("slider").first();
   if (await dial3.count()) {
     const box = await dial3.boundingBox();
     if (box) await recA.glideTap(box.x + box.width * 0.14, box.y + box.height / 2, 500);
-    await recA.hold(900);
+    await recA.hold(1100); // a token can shake loose when a thread genuinely quiets
     await recA.during(page.keyboard.press("Escape"));
   }
   recA.beat("worked");
@@ -219,23 +321,106 @@ async function scene04_merge() {
   rec.beat("timeline");
   await rec.hold(1800);
   rec.beat("tap-thread");
-  await tapStroke(rec, page, 0.7, 2, 700);
-  await rec.hold(1400);
-  await rec.glideClick(page.getByText("What does this thread need from you now?").first(), 450);
-  await rec.hold(1300);
+  // several example threads are already answered today — try until one opens
+  let opened = false;
+  for (const idx of [2, 1, 3, 0]) {
+    if (await openDecisions(rec, page, 0.7, idx, 700)) {
+      opened = true;
+      break;
+    }
+    await rec.during(page.keyboard.press("Escape"));
+    await rec.hold(400);
+  }
+  if (!opened) throw new Error("04: no thread offered its decisions");
+  await rec.hold(1000);
   rec.beat("integrate");
-  await rec.glideClick(page.getByRole("button", { name: "Integrate" }).first(), 500);
-  await rec.hold(1600); // "What is true about this thread now?"
+  const resolved = page.getByRole("button", { name: "It is resolved" });
+  if (!(await clickUntil(rec, page.getByRole("button", { name: "Integrate", exact: true }).first(), resolved)))
+    throw new Error("04: the integrate chooser never opened");
+  await rec.hold(1400); // "What is true about this thread now?"
   rec.beat("resolved");
-  await rec.glideClick(page.getByRole("button", { name: "It is resolved" }), 500);
-  await rec.hold(2400); // MergeWizard: what returns with you
+  const confirm = page.getByRole("button", { name: "Integrate it into Now" });
+  if (!(await clickUntil(rec, resolved, confirm)))
+    throw new Error("04: the merge stage never opened");
+  await rec.hold(2200); // the stage: what returns with you
   rec.beat("wizard");
-  await rec.hold(1200);
+  await rec.hold(1400);
   rec.beat("confirm");
-  await rec.glideClick(page.getByRole("button", { name: "Integrate it into Now" }), 600);
+  await rec.glideClick(confirm, 600);
   rec.beat("reclaim");
-  await rec.hold(3200); // ReclaimFly: qualities fly home, line curves back
+  // the stage closes, the map returns, the line redraws along its merged
+  // path and the feelings it held fly home to Now
+  await rec.hold(3600);
   rec.beat("after");
+  await rec.hold(2400);
+  await rec.stop();
+  await page.close();
+}
+
+/**
+ * The play layer, which no film has ever shown: Pip soothing a thread on
+ * request, a token shaking loose and flying home to the meter, and the meter
+ * filling until SUPER BONK sweeps every open line at once. Tokens are forced
+ * on from Testing so the drop is guaranteed rather than a 50% roll.
+ */
+async function scene11_bonk() {
+  const page = await openAppWithExampleData(browser, PHONE);
+  // off camera: guarantee the token drop
+  await page.getByRole("button", { name: "More" }).first().click();
+  await page.waitForTimeout(600);
+  const always = page.getByRole("checkbox", { name: "Always drop tokens (testing)" });
+  if (await always.count()) await always.click();
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: /Now$/ }).first().click();
+  await page.waitForTimeout(1500);
+
+  const rec = await new Recorder(page, "11-bonk").start();
+  const bonk = page.getByRole("button", { name: "Have Pip calm this thread" });
+  const superBonk = page.getByRole("button", { name: "Super bonk: Pip calms every thread" });
+
+  rec.beat("armed");
+  await tapStroke(rec, page, 0.7, 0, 700); // first tap sends Pip and arms the bar
+  await rec.hold(2200);
+
+  rec.beat("bonk");
+  for (let i = 0; i < 4 && (await bonk.count()); i++) {
+    await rec.glideClick(bonk, i === 0 ? 520 : 240);
+    await rec.hold(1200); // the lunge, the thread easing, a token shaking loose
+  }
+
+  rec.beat("token");
+  await rec.hold(2000); // it flies into the meter and the gold gulps brighter
+
+  // keep answering threads until the meter is full
+  rec.beat("charging");
+  for (const idx of [1, 2, 3]) {
+    if (await superBonk.count()) break;
+    if (await openDecisions(rec, page, 0.7, idx, 500)) {
+      await rec.glideClick(page.getByRole("button", { name: "Let it rest", exact: true }), 420);
+      await rec.hold(1200);
+      const back = page.getByRole("button", { name: "Return to timeline" });
+      if (await back.count()) await rec.glideClick(back, 380);
+      await rec.hold(700);
+    } else {
+      await rec.during(page.keyboard.press("Escape"));
+      await rec.hold(400);
+    }
+    for (let i = 0; i < 6 && (await bonk.count()); i++) {
+      await rec.glideClick(bonk, 220);
+      await rec.hold(700);
+    }
+  }
+
+  if (await superBonk.count()) {
+    rec.beat("super");
+    await rec.hold(1200); // the pill has turned gold
+    await rec.glideClick(superBonk, 560);
+    await rec.hold(6000); // Pip sprints the whole map, bonking every line
+  } else {
+    rec.beat("super");
+    await rec.hold(2000);
+  }
+  rec.beat("quiet");
   await rec.hold(2400);
   await rec.stop();
   await page.close();
@@ -286,6 +471,9 @@ async function scene06_history() {
     await rec.glideClick(filter, 500);
     await rec.hold(1800);
   }
+  // The review button sits under "Integrated threads", below the fold.
+  await rec.during(page.mouse.wheel(0, 500), { min: 12 });
+  await rec.hold(900);
   const review = page.getByRole("button", { name: "What was integrated" }).first();
   if (await review.count()) {
     rec.beat("review");
@@ -334,29 +522,30 @@ async function scene08_wholeness() {
   const rec = await new Recorder(page, "08-wholeness").start();
   rec.beat("timeline");
   await rec.hold(1500);
+  // The chip names the self on the high rungs and the attention on the low
+  // ones — "You are gathered" / "Your attention is scattered".
+  const chip = page.getByLabel(/^(You are|Your attention is) /).first();
   rec.beat("gauge");
-  await rec.glideClick(page.getByLabel(/You are /).first(), 600);
-  await rec.hold(3600); // "How you are doing" panel
+  await rec.glideClick(chip, 600);
+  await rec.hold(3900); // "How you are doing": the forecast and the one decision
   rec.beat("close-panel");
-  await rec.glideClick(page.getByLabel(/You are /).first(), 450); // toggle closed
+  await rec.glideClick(chip, 450); // toggle closed
   await rec.hold(600);
   rec.beat("decide");
-  await tapStroke(rec, page, 0.72, 0, 600);
-  await rec.hold(1400);
-  const expand = page.getByText("What does this thread need from you now?").first();
-  if (await expand.count()) {
-    await rec.glideClick(expand, 450);
-    await rec.hold(800);
-    await rec.glideClick(page.getByRole("button", { name: "Act" }).first(), 450);
-    await rec.hold(500);
-    await typeInto(rec, page.getByLabel("The smallest honest step"), "One honest step");
-    await rec.glideClick(page.getByRole("button", { name: "Place it on today" }), 450);
+  if (await openDecisions(rec, page, 0.72, 0, 600)) {
+    const step = page.getByLabel("The smallest honest step");
+    if (await clickUntil(rec, page.getByRole("button", { name: "Act", exact: true }).first(), step)) {
+      await typeInto(rec, step, "One honest step");
+      await rec.glideClick(page.getByRole("button", { name: "Next" }), 400);
+      await rec.hold(800);
+      await rec.glideClick(page.getByRole("button", { name: "Place it on today" }), 450);
+    }
   } else {
     await rec.during(page.keyboard.press("Escape"));
   }
-  await rec.hold(1500);
+  await rec.hold(2200);
   rec.beat("gauge-after");
-  await rec.glideClick(page.getByLabel(/You are /).first(), 600);
+  await rec.glideClick(chip, 600);
   await rec.hold(3000);
   await rec.stop();
   await page.close();
@@ -531,6 +720,7 @@ const scenes = {
   "08": scene08_wholeness,
   "09": scene09_share,
   "10": scene10_practice,
+  "11": scene11_bonk,
 };
 
 for (const id of Object.keys(scenes).sort()) {

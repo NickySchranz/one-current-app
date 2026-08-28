@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Alert, Platform, Pressable, View } from "react-native";
+import { Alert, Linking, Platform, Pressable, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { selectEffectivePro, useAppStore } from "@/stores/app-store";
 import { api, ApiHttpError, ApiOfflineError, getApiUrl, hasTokens, setApiUrl } from "@/api/client";
+import { SHOW_TESTING } from "@/config/flags";
 import { THEMES } from "@/visualization/theme";
 import { isProTheme, type PaywallReason } from "@/domain/entitlements/logic";
 import { PaywallPrompt } from "@/features/paywall/PaywallPrompt";
@@ -218,6 +219,40 @@ export function SettingsSections() {
     }
   }
 
+  /**
+   * Delete everything: for signed-in accounts the server account goes first
+   * (subscription canceled, shares revoked, cloud backup removed), then the
+   * device is wiped. A server failure falls back to revoking shares only and
+   * says so — never a false "all deleted".
+   */
+  async function doDeleteEverything() {
+    let serverMsg = "";
+    if (hasTokens()) {
+      try {
+        const res = await api.deleteMe();
+        signOut();
+        serverMsg = t(
+          "Your account, cloud backup, and {n} uploaded share(s) are deleted from the server. ",
+          { n: res.sharesRevoked },
+        );
+      } catch {
+        const revoked = await revokeUploadedShares();
+        serverMsg =
+          revoked == null
+            ? t(
+                "The server could not be reached, so your account still exists — try again while online. ",
+              )
+            : t(
+                "Your account could not be deleted right now, but {n} uploaded share(s) were revoked — try again while online. ",
+                { n: revoked },
+              );
+      }
+    }
+    await deleteEverything();
+    setConfirmingDelete(false);
+    setMessage(serverMsg + t("Everything on this device is deleted."));
+  }
+
   function syncError(e: unknown): string {
     if (e instanceof ApiOfflineError) return t("The server could not be reached.");
     if (e instanceof ApiHttpError && e.code === "pro_required")
@@ -318,6 +353,19 @@ export function SettingsSections() {
             {t("Offline — signed in on this device only.")}
           </Hint>
         )}
+        {signedIn && effectivePro && (
+          <View style={[rowStyles.filterRow, { marginTop: 8 }]}>
+            <Button
+              onPress={() => {
+                void api
+                  .billingPortal()
+                  .then(({ url }) => Linking.openURL(url))
+                  .catch(() => setMessage(t("The subscription page could not be opened.")));
+              }}
+              label={t("Manage subscription")}
+            />
+          </View>
+        )}
         <Hint style={{ marginTop: 8, marginBottom: 0 }}>
           {t("Signing out only closes the door — every thread stays on this device.")}
         </Hint>
@@ -376,28 +424,30 @@ export function SettingsSections() {
             {syncMsg !== "" && <P style={{ marginTop: 8, marginBottom: 0 }}>{syncMsg}</P>}
           </>
         )}
-        <View style={{ marginTop: 12, gap: 8 }}>
-          <Hint style={{ marginBottom: 0 }}>{t("Server address")}</Hint>
-          <View style={rowStyles.filterRow}>
-            <AppTextInput
-              value={urlDraft}
-              onChangeText={setUrlDraft}
-              placeholder="https://…"
-              accessibilityLabel={t("Server address")}
-              autoCapitalize="none"
-              style={{ flexGrow: 1, minWidth: 200 }}
-            />
-            <Button
-              onPress={() => {
-                void setApiUrl(urlDraft).then(() => {
-                  void syncMe();
-                  setSyncMsg(t("Server address saved."));
-                });
-              }}
-              label={t("Save")}
-            />
+        {SHOW_TESTING && (
+          <View style={{ marginTop: 12, gap: 8 }}>
+            <Hint style={{ marginBottom: 0 }}>{t("Server address")}</Hint>
+            <View style={rowStyles.filterRow}>
+              <AppTextInput
+                value={urlDraft}
+                onChangeText={setUrlDraft}
+                placeholder="https://…"
+                accessibilityLabel={t("Server address")}
+                autoCapitalize="none"
+                style={{ flexGrow: 1, minWidth: 200 }}
+              />
+              <Button
+                onPress={() => {
+                  void setApiUrl(urlDraft).then(() => {
+                    void syncMe();
+                    setSyncMsg(t("Server address saved."));
+                  });
+                }}
+                label={t("Save")}
+              />
+            </View>
           </View>
-        </View>
+        )}
       </Card>
 
       <H2>{t("Appearance")}</H2>
@@ -510,6 +560,8 @@ export function SettingsSections() {
         />
       </Card>
 
+      {SHOW_TESTING && (
+        <>
       <H2>{t("Testing")}</H2>
       <Card>
         <Hint>
@@ -562,6 +614,8 @@ export function SettingsSections() {
           />
         </View>
       </Card>
+        </>
+      )}
 
       <H2>{t("Privacy")}</H2>
       <Card>
@@ -591,30 +645,17 @@ export function SettingsSections() {
           ) : (
             <>
               <T style={{ flexShrink: 1 }}>
-                {t(
-                  "Delete all threads, everything integrated, and your whole history? This cannot be undone. Shares you have uploaded are revoked at the same time. A cloud backup stays on the server until you replace it.",
-                )}
+                {signedIn
+                  ? t(
+                      "Delete all threads, everything integrated, and your whole history? This cannot be undone. Your account is deleted from the server too — cloud backup, uploaded shares, and any subscription go with it.",
+                    )
+                  : t(
+                      "Delete all threads, everything integrated, and your whole history? This cannot be undone.",
+                    )}
               </T>
               <Button
                 variant="danger"
-                onPress={() => {
-                  void (async () => {
-                    await deleteEverything();
-                    const revoked = await revokeUploadedShares();
-                    setConfirmingDelete(false);
-                    setMessage(
-                      revoked == null
-                        ? t(
-                            "Everything on this device is deleted. Uploaded shares could not be reached — revoke them in Share when you are back online.",
-                          )
-                        : revoked === 0
-                          ? t("All data deleted.")
-                          : t("All data deleted, and {n} uploaded share(s) revoked.", {
-                              n: revoked,
-                            }),
-                    );
-                  })();
-                }}
+                onPress={() => void doDeleteEverything()}
                 label={t("Yes, delete")}
               />
               <Button onPress={() => setConfirmingDelete(false)} label={t("Keep it")} />
@@ -650,6 +691,16 @@ export function SettingsSections() {
         {message !== "" && (
           <P style={{ marginTop: 8, marginBottom: 0 }}>{message}</P>
         )}
+        <View style={[rowStyles.filterRow, { marginTop: 8 }]}>
+          <Button
+            onPress={() => void Linking.openURL("https://onecurrentapp.com/privacy")}
+            label={t("Privacy policy")}
+          />
+          <Button
+            onPress={() => void Linking.openURL("https://onecurrentapp.com/terms")}
+            label={t("Terms of service")}
+          />
+        </View>
       </Card>
 
       <ShareWithPsychologist />

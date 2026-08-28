@@ -28,7 +28,7 @@ export const auth: Record<string, string> = {
   "Paste the code from the email first.": "Primero pega el código del correo.",
   "Email delivery is not set up yet — use this code: {code}": "El envío de correos aún no está configurado — usa este código: {code}",
   "That does not look like an email address.": "Eso no parece una dirección de correo.",
-  "The password needs at least 4 characters.": "La contraseña necesita al menos 4 caracteres.",
+  "The password needs at least 8 characters.": "La contraseña necesita al menos 8 caracteres.",
   "Signing in does not send your threads anywhere. They stay on this device until you choose to back them up or share them.": "Entrar no envía tus hilos a ningún lado. Se quedan en este dispositivo hasta que decidas respaldarlos o compartirlos.",
   "Account": "Cuenta",
   "Signed in as {email}": "Sesión iniciada como {email}",

@@ -58,7 +58,7 @@ export function AuthGate() {
 
   async function submitLogin() {
     if (!looksLikeEmail(email)) return setError(t("That does not look like an email address."));
-    if (password.length < 4) return setError(t("The password needs at least 4 characters."));
+    if (password.length < 8) return setError(t("The password needs at least 8 characters."));
     setBusy(true);
     setError("");
     try {
@@ -81,7 +81,7 @@ export function AuthGate() {
 
   async function submitRegister() {
     if (!looksLikeEmail(email)) return setError(t("That does not look like an email address."));
-    if (password.length < 4) return setError(t("The password needs at least 4 characters."));
+    if (password.length < 8) return setError(t("The password needs at least 8 characters."));
     // No name field to type: the part before the @ stands in, and the
     // account page shows it alongside the full address anyway.
     const name = email.trim().split("@")[0];
@@ -156,7 +156,7 @@ export function AuthGate() {
 
   async function submitReset() {
     if (resetToken.trim() === "") return setError(t("Paste the code from the email first."));
-    if (newPassword.length < 4) return setError(t("The password needs at least 4 characters."));
+    if (newPassword.length < 8) return setError(t("The password needs at least 8 characters."));
     setBusy(true);
     setError("");
     try {
