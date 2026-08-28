@@ -21,6 +21,7 @@ import {
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
 import { ShareWithPsychologist } from "./ShareWithPsychologist";
+import { TestingPanel } from "./TestingPanel";
 
 /** The little round split swatch (paper left, accent right) for a theme button. */
 function ThemeSwatch({ paper, accent }: { paper: string; accent: string }) {
@@ -112,8 +113,8 @@ function ThemeButton({
   );
 }
 
-/** A plain checkbox row (the reduce-motion toggle). */
-function CheckboxRow({
+/** A plain checkbox row (the reduce-motion toggle; also used by the capture-build TestingPanel). */
+export function CheckboxRow({
   label,
   checked,
   onChange,
@@ -164,13 +165,6 @@ export function SettingsSections() {
   const importData = useAppStore((s) => s.importData);
   const deleteEverything = useAppStore((s) => s.deleteEverything);
   const loadExampleData = useAppStore((s) => s.loadExampleData);
-  const timeSkewMs = useAppStore((s) => s.timeSkewMs);
-  const timeRate = useAppStore((s) => s.timeRate);
-  const setTimeRate = useAppStore((s) => s.setTimeRate);
-  const resetTimeSkew = useAppStore((s) => s.resetTimeSkew);
-  const isPro = useAppStore((s) => s.isPro);
-  const coinAlways = useAppStore((s) => s.coinAlways);
-  const setPro = useAppStore((s) => s.setPro);
   const effectivePro = useAppStore(selectEffectivePro);
   const apiOnline = useAppStore((s) => s.apiOnline);
   const syncMe = useAppStore((s) => s.syncMe);
@@ -560,62 +554,7 @@ export function SettingsSections() {
         />
       </Card>
 
-      {SHOW_TESTING && (
-        <>
-      <H2>{t("Testing")}</H2>
-      <Card>
-        <Hint>
-          {t(
-            "Let the app's clock run faster than real time and watch how threads grow louder when days pass without decisions. This only affects this session — reloading returns to real time.",
-          )}
-        </Hint>
-        <View accessibilityLabel={t("How fast time passes")} style={rowStyles.filterRow}>
-          <Button selected={timeRate === 1} onPress={() => setTimeRate(1)} label={t("Real time")} />
-          <Button
-            selected={timeRate === 3600}
-            onPress={() => setTimeRate(3600)}
-            label={t("An hour per second")}
-          />
-          <Button
-            selected={timeRate === 86400}
-            onPress={() => setTimeRate(86400)}
-            label={t("A day per second")}
-          />
-        </View>
-        {timeSkewMs > 60_000 && (
-          <View style={[rowStyles.filterRow, { marginTop: 8 }]}>
-            <T>
-              {t("The app is living {days} day(s) ahead.", {
-                days: (timeSkewMs / (24 * 60 * 60 * 1000)).toFixed(1),
-              })}
-            </T>
-            <Button onPress={resetTimeSkew} label={t("Back to real time")} />
-          </View>
-        )}
-        {/* Payments are not wired yet: this stands in for a real purchase. */}
-        <View style={{ marginTop: 12 }}>
-          <CheckboxRow
-            label={t("Pro unlocked (testing)")}
-            checked={isPro}
-            onChange={setPro}
-          />
-        </View>
-        <View style={{ marginTop: 12 }}>
-          <Button
-            label={t("Fill super bonk (testing)")}
-            onPress={() => useAppStore.getState().addBonkCharge(100)}
-          />
-        </View>
-        <View style={{ marginTop: 12 }}>
-          <CheckboxRow
-            label={t("Always drop tokens (testing)")}
-            checked={coinAlways}
-            onChange={(v) => useAppStore.getState().setCoinAlways(v)}
-          />
-        </View>
-      </Card>
-        </>
-      )}
+      <TestingPanel />
 
       <H2>{t("Privacy")}</H2>
       <Card>
