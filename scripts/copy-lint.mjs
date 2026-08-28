@@ -50,10 +50,10 @@ const DYNAMIC_KEYS = [
   "This look is part of Pro",
   "The free current holds {n} threads",
   "Sharing is part of Pro",
-  // tutorial steps render via t(step.text) (src/features/tutorial/useTutorial.ts)
-  "Hi! I'm Pip!",
-  "That's everything!",
-  "These lines are your threads.",
+  // walkthrough steps render via t(step.text)/t(step.subtext)
+  // (src/features/tutorial/steps.ts). Parsed from the file so new step copy
+  // can never ship without its translations.
+  ...walkthroughStepTexts(),
   // "What leaves the app" list: labels live in
   // src/domain/share/describe-fields.ts and render via t(line). Read from that
   // file so a new share field can never ship without its translation.
@@ -64,6 +64,16 @@ const DYNAMIC_KEYS = [
  * Every label string in describe-fields.ts. Parsed rather than duplicated: the
  * point of this check is that the list and the payload cannot drift apart.
  */
+/** Every text/subtext literal in the walkthrough's steps.ts. */
+function walkthroughStepTexts() {
+  const text = readFileSync(join(SRC, "features", "tutorial", "steps.ts"), "utf8");
+  const out = new Set();
+  const re = /^\s*(?:text|subtext):\s*\n?\s*"((?:[^"\\]|\\.)*)"/gm;
+  let m;
+  while ((m = re.exec(text))) out.add(m[1].replace(/\\(.)/g, "$1"));
+  return [...out];
+}
+
 function shareFieldLabels() {
   const text = readFileSync(join(SRC, "domain", "share", "describe-fields.ts"), "utf8");
   const labels = new Set();

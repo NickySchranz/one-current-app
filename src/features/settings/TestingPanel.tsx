@@ -25,6 +25,20 @@ export function TestingPanel() {
   if (!CAPTURE_TESTING) return null;
   return (
     <>
+      <H2>{t("Explore")}</H2>
+      <Card>
+        <Hint>
+          {t(
+            "See what a lived-in timeline looks like: ten example threads — drifting, resting, integrated — plus today's actions. You can delete them any time.",
+          )}
+        </Hint>
+        <Button
+          style={{ alignSelf: "flex-start" }}
+          onPress={() => void useAppStore.getState().loadExampleData()}
+          label={t("Load example threads")}
+        />
+      </Card>
+
       <H2>{t("Testing")}</H2>
       <Card>
         <Hint>

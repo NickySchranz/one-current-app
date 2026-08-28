@@ -19,6 +19,7 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, { G, Path } from "react-native-svg";
 import { useAppStore } from "@/stores/app-store";
+import { useWalkthroughTarget } from "@/features/tutorial/targets";
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import { effectiveLoudness } from "@/domain/branches/logic";
 import { decidedToday, energySplit } from "@/domain/feelings/logic";
@@ -115,6 +116,7 @@ type Props = {
 export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
   const t = useT();
   const tk = useTheme();
+  const chipTarget = useWalkthroughTarget("wholeness");
   const branches = useAppStore((s) => s.branches);
   const setOperation = useAppStore((s) => s.setOperation);
   const nowTick = useAppStore((s) => s.nowTick);
@@ -194,6 +196,7 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
       )}
 
       <Pressable
+        ref={chipTarget as never}
         accessibilityRole="button"
         accessibilityLabel={summary}
         accessibilityState={{ expanded: open }}

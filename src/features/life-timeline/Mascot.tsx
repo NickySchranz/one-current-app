@@ -271,6 +271,8 @@ type Props = {
   runPhase?: SharedValue<number>;
   bubbleText: string;
   showTapHint: boolean;
+  /** Spoken name for the sprite (he is pressable, so he needs one). */
+  accessibilityLabel?: string;
   theme: ThemeTokens;
   onPress: () => void;
 };
@@ -280,6 +282,7 @@ const AnimatedG = Animated.createAnimatedComponent(G);
 export function Mascot({
   posX, posY, frame, flip, mascotType,
   bubbleO, bubbleText, showTapHint, theme, onPress, runPhase,
+  accessibilityLabel,
   viewW = 0,
 }: Props) {
   const palette = useMemo(() => resolveColors(theme.accent), [theme.accent]);
@@ -331,6 +334,9 @@ export function Mascot({
       <G
         transform={transform}
         onPress={onPress}
+        accessible={accessibilityLabel !== undefined}
+        accessibilityLabel={accessibilityLabel}
+        accessibilityRole={accessibilityLabel !== undefined ? "button" : undefined}
         // pointer cursor on web makes it obvious it's clickable
         {...(Platform.OS === 'web' ? { style: { cursor: 'pointer' } as object } : null)}
       >

@@ -19,8 +19,7 @@ import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
 import { useKeyboard } from "@/ui/keyboard";
 import { T } from "@/ui/primitives";
-import { useTutorial } from "@/features/tutorial/useTutorial";
-import { TutorialOverlay } from "@/features/tutorial/TutorialOverlay";
+import { WalkthroughOverlay } from "@/features/tutorial/WalkthroughOverlay";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 
 function AppShell() {
@@ -30,7 +29,6 @@ function AppShell() {
   const init = useAppStore((s) => s.init);
   const refreshNow = useAppStore((s) => s.refreshNow);
   const timeRate = useAppStore((s) => s.timeRate);
-  const mascotType = useAppStore((s) => s.mascotType);
   const apiOnline = useAppStore((s) => s.apiOnline);
   const t = useT();
   const tk = useTheme();
@@ -46,7 +44,6 @@ function AppShell() {
   const operation = useAppStore((s) => s.operation);
   const creating = operation.kind === "creating-branch";
   const onStage = operationDepth(operation) === "stage";
-  const tutorial = useTutorial();
 
   useEffect(() => {
     void init();
@@ -189,16 +186,7 @@ function AppShell() {
         {view.kind === "more" && <MorePage />}
       </View>
       {compactNav && !keyboard.open && <PrimaryNavigation variant="bottom" />}
-      {ready && authUser && tutorial.active && tutorial.currentStep && (
-        <TutorialOverlay
-          step={tutorial.currentStep}
-          stepIndex={tutorial.stepIndex}
-          totalSteps={tutorial.totalSteps}
-          mascotType={mascotType}
-          onNext={tutorial.next}
-          onSkip={tutorial.skip}
-        />
-      )}
+      {ready && authUser && <WalkthroughOverlay />}
     </View>
   );
 }

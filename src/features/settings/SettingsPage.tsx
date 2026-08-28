@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Linking, Platform, Pressable, View } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Linking, Platform, Pressable, View } from "react-native";
 import { selectEffectivePro, useAppStore } from "@/stores/app-store";
 import { api, ApiHttpError, ApiOfflineError, getApiUrl, hasTokens, setApiUrl } from "@/api/client";
 import { SHOW_TESTING } from "@/config/flags";
@@ -164,7 +163,6 @@ export function SettingsSections() {
   const exportData = useAppStore((s) => s.exportData);
   const importData = useAppStore((s) => s.importData);
   const deleteEverything = useAppStore((s) => s.deleteEverything);
-  const loadExampleData = useAppStore((s) => s.loadExampleData);
   const effectivePro = useAppStore(selectEffectivePro);
   const apiOnline = useAppStore((s) => s.apiOnline);
   const syncMe = useAppStore((s) => s.syncMe);
@@ -490,18 +488,7 @@ export function SettingsSections() {
         <View style={{ marginTop: 12 }}>
           <Button
             style={{ alignSelf: "flex-start" }}
-            onPress={() => {
-              void AsyncStorage.removeItem("one-current-tutorial-v1").then(() => {
-                if (Platform.OS === "web") {
-                  window.location.reload();
-                } else {
-                  Alert.alert(
-                    t("Tour restarted"),
-                    t("Navigate to Now to see the tour again."),
-                  );
-                }
-              });
-            }}
+            onPress={() => useAppStore.getState().tutorialRestart()}
             label={t("Restart tour")}
           />
         </View>
@@ -537,20 +524,6 @@ export function SettingsSections() {
           label={t("Reduce motion (no line movement or pulsing)")}
           checked={reducedMotion}
           onChange={setReducedMotion}
-        />
-      </Card>
-
-      <H2>{t("Explore")}</H2>
-      <Card>
-        <Hint>
-          {t(
-            "See what a lived-in timeline looks like: ten example threads — drifting, resting, integrated — plus today's actions. You can delete them any time.",
-          )}
-        </Hint>
-        <Button
-          style={{ alignSelf: "flex-start" }}
-          onPress={() => void loadExampleData()}
-          label={t("Load example threads")}
         />
       </Card>
 

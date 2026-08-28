@@ -24,6 +24,8 @@ import Animated, {
 import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from "react-native-svg";
 import { filterBranches, useAppStore } from "@/stores/app-store";
 import { useLayoutStore } from "@/stores/layout-store";
+import { measureNode } from "@/ui/measure";
+import { setWalkthroughPoint, useWalkthroughTarget } from "@/features/tutorial/targets";
 import { buildTimelineLayout } from "@/visualization/main-line/layout";
 import { generateTicks, dateToX, addDays } from "@/visualization/zoom/time-scale";
 import { describeTimeline } from "@/visualization/a11y/describe";
@@ -196,7 +198,7 @@ function MascotOptionsBubble({
           strokeWidth={1}
         />
         {/* row 1: Reflect — its own rounded pill inside the card */}
-        <G onPress={onReflect}>
+        <G onPress={onReflect} accessible accessibilityRole="button" accessibilityLabel={labels.reflect}>
           <Rect x={left - 8} y={top - 6} width={BUBBLE_W + 16} height={BUBBLE_PAD + ROW_H + 6 + ROW_GAP / 2} fill="transparent" />
           <Rect
             x={rowLeft}
@@ -218,7 +220,7 @@ function MascotOptionsBubble({
           </SvgText>
         </G>
         {/* row 2: the loudness dial — its own rounded pill, quieter tint */}
-        <G onPress={onDial}>
+        <G onPress={onDial} accessible accessibilityRole="button" accessibilityLabel={labels.dial}>
           <Rect x={left - 8} y={ROW_H / 2 + ROW_GAP / 2} width={BUBBLE_W + 16} height={ROW_H + BUBBLE_PAD + 6 + ROW_GAP / 2} fill="transparent" />
           <Rect
             x={rowLeft}
@@ -250,24 +252,6 @@ const STEP_PX = 36;
 
 function clampLevel(level: number): number {
   return Math.max(1, Math.min(5, level));
-}
-
-/** Works on native handles and raw DOM nodes alike. */
-function measureNode(
-  node: unknown,
-  cb: (x: number, y: number, w: number, h: number) => void,
-) {
-  const n = node as {
-    measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
-    getBoundingClientRect?: () => { left: number; top: number; width: number; height: number };
-  } | null;
-  if (!n) return;
-  if (typeof n.measureInWindow === "function") {
-    n.measureInWindow(cb);
-  } else if (typeof n.getBoundingClientRect === "function") {
-    const r = n.getBoundingClientRect();
-    cb(r.left, r.top, r.width, r.height);
-  }
 }
 
 /**
@@ -428,6 +412,13 @@ export function LifeTimeline() {
   const sizeRef = useRef(size);
   sizeRef.current = size;
 
+  // Walkthrough anchors: the controls register themselves; the first thread's
+  // tip is published as a point in window coordinates (it lives in SVG space).
+  const tutorialStep = useAppStore((s) => s.tutorialStep);
+  const tutorialBranchId = useAppStore((s) => s.tutorialBranchId);
+  const fabTarget = useWalkthroughTarget("new-thread");
+  const bonkTarget = useWalkthroughTarget("bonk");
+
   // When the quick tray rises over the stage as a bottom sheet, the view
   // scrolls so the selected line and Now stay visible together above it —
   // the lanes themselves keep their places. The tray reports its own height
@@ -484,6 +475,24 @@ export function LifeTimeline() {
   );
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
+
+  useEffect(() => {
+    const wantsThread = tutorialStep === "meet-thread" || tutorialStep === "pip-arrives";
+    if (!wantsThread || !tutorialBranchId) {
+      setWalkthroughPoint("thread", null);
+      return;
+    }
+    const g = layout.geometries.find((geo) => geo.branchId === tutorialBranchId);
+    if (!g || !g.inWindow) {
+      setWalkthroughPoint("thread", null);
+      return;
+    }
+    measureNode(stageRef.current, (sx, sy) => {
+      // A little back from the tip, so the halo rests on the line itself.
+      setWalkthroughPoint("thread", { x: sx + g.endX - 24, y: sy + g.endY });
+    });
+    return () => setWalkthroughPoint("thread", null);
+  }, [tutorialStep, tutorialBranchId, layout]);
 
   // The lean glides in over about a third of a second and glides back to rest
   // when the panel closes. Lanes are anchored to bandY, so the target does not
@@ -727,6 +736,8 @@ export function LifeTimeline() {
       }
       setArmedBranchId(branchId);
       mascot.focusBranch(branchId);
+      // Arming is local state by design; the walkthrough hears about it here.
+      useAppStore.getState().noteTutorialEvent("thread-armed");
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- focusBranch is stable
     [armedBranchId, setOperation],
@@ -1625,6 +1636,7 @@ export function LifeTimeline() {
                   bubbleO={mascot.bubbleO}
                   bubbleText={mascot.bubbleText}
                   showTapHint={mascot.frame === 'IDLE_A' || mascot.frame === 'IDLE_B'}
+                  accessibilityLabel={t("Pip, your companion")}
                   theme={tk}
                   onPress={mascot.onPress}
                 />
@@ -1847,6 +1859,7 @@ export function LifeTimeline() {
         {/* One round +, unmistakable and wordless, floating on the water. */}
         {showFab && (
         <Pressable
+          ref={fabTarget as never}
           accessibilityRole="button"
           accessibilityLabel={t("New thread")}
           onPress={() =>
@@ -1925,6 +1938,7 @@ export function LifeTimeline() {
           };
           return (
             <View
+              ref={bonkTarget as never}
               style={{
                 // Rests on the date strip (the one band threads never enter),
                 // on the right — stopping short of the + button's corner.

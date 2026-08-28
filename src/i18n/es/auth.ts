@@ -63,4 +63,7 @@ export const auth: Record<string, string> = {
   "Uploading…": "Subiendo…",
   "The code could not be created. Try again in a moment.": "No se pudo crear el código. Inténtalo de nuevo en un momento.",
   "Give this code to your psychologist. It works once and expires in 14 days.": "Dale este código a tu psicólogo. Funciona una vez y caduca en 14 días.",
+  "This device holds another account's threads. Continuing removes them from this device.": "Este dispositivo guarda los hilos de otra cuenta. Al continuar, se eliminan de este dispositivo.",
+  "Continue and remove them": "Continuar y eliminarlos",
+  "Go back": "Volver",
 };

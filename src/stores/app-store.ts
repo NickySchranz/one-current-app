@@ -22,6 +22,7 @@ import { newId } from "@/domain/ids";
 import { repo } from "@/db/repository";
 import { api, loadTokens, ApiAuthError, type ApiUser } from "@/api/client";
 import { canCreateThread, isProTheme } from "@/domain/entitlements/logic";
+import { NEXT_AFTER, type TutorialEvent, type WalkthroughStepId } from "@/features/tutorial/steps";
 import { panWindow, weekWindow, type TimeWindow } from "@/visualization/zoom/time-scale";
 import { isThemeId, type ThemeId } from "@/visualization/theme";
 import type { MascotType } from "@/features/life-timeline/mascot-frames";
@@ -129,6 +130,12 @@ type AppState = {
   apiOnline: boolean | null;
   /** Who is signed in, or null for the login gate. Dummy data for now. */
   authUser: AuthUser | null;
+  /** The email whose threads live on this device; null until someone signs in. */
+  ownerEmail: string | null;
+  /** Where the guided walkthrough stands; null = not running (done, skipped, or signed out). */
+  tutorialStep: WalkthroughStepId | null;
+  /** The first thread — the walkthrough's pointer follows it after birth. */
+  tutorialBranchId: string | null;
   /** UI language: every app term, never the user's own words. */
   language: "en" | "es" | "es-CO";
   reclaim?: ReclaimEvent;
@@ -259,8 +266,20 @@ type AppState = {
   setMascotType(t: MascotType): void;
   /** Flip the Pro entitlement (testing unlock for now). Turning it off steps an active Pro theme back to the default. */
   setPro(v: boolean): void;
-  /** Store the session (login or register both land here). Dummy: no server is asked. */
-  signIn(user: AuthUser): void;
+  /**
+   * Store the session (login or register both land here). The owner gate lives
+   * here too: a different account taking over this device wipes the previous
+   * account's threads before anything can render them.
+   */
+  signIn(user: AuthUser): Promise<void>;
+  /** Remove every piece of account data on this device (threads, merges, lessons, meter). Device preferences stay. */
+  wipeLocalData(): Promise<void>;
+  /** Manual advance for the walkthrough's Next-button steps; finishes on the last one. */
+  tutorialNext(): void;
+  tutorialSkip(): void;
+  tutorialRestart(): void;
+  /** The single funnel for the user actions the walkthrough advances on. */
+  noteTutorialEvent(e: TutorialEvent, branchId?: string): void;
   /** Sign in against the API; throws ApiOfflineError / ApiAuthError / ApiHttpError. */
   signInApi(email: string, password: string): Promise<void>;
   /**
@@ -298,6 +317,12 @@ const PRO_KEY = "one-current-pro";
 const AUTH_KEY = "one-current-auth";
 const MASCOT_KEY = "one-current-mascot";
 const BONK_CHARGE_KEY = "one-current-bonk-charge";
+/** "done" = the guided walkthrough never shows again. Known to the capture scripts. */
+const TUTORIAL_KEY = "one-current-tutorial-v1";
+/** Which account's threads live on this device. Survives sign-out on purpose. */
+const OWNER_KEY = "one-current-owner";
+
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 // Super bonk: dealing with threads charges the meter; at 100 Pip can sweep
 // every open timeline in one glorious run. Values are easy to tune.
@@ -369,6 +394,8 @@ async function loadSettings(): Promise<{
   mascotType: MascotType;
   bonkCharge: number;
   coinAlways: boolean;
+  ownerEmail: string | null;
+  tutorialDone: boolean;
 }> {
   let theme = defaultTheme();
   let language: "en" | "es" | "es-CO" = "en";
@@ -378,8 +405,10 @@ async function loadSettings(): Promise<{
   let mascotType: MascotType = MASCOT_TYPES[Math.floor(Math.random() * MASCOT_TYPES.length)];
   let bonkCharge = 0;
   let coinAlways = false;
+  let ownerEmail: string | null = null;
+  let tutorialDone = false;
   try {
-    const [savedTheme, savedLanguage, savedPro, savedAuth, reduceMotion, savedMascot, savedCharge, savedCoinAlways] = await Promise.all([
+    const [savedTheme, savedLanguage, savedPro, savedAuth, reduceMotion, savedMascot, savedCharge, savedCoinAlways, savedOwner, savedTutorial] = await Promise.all([
       AsyncStorage.getItem(THEME_KEY),
       AsyncStorage.getItem(LANGUAGE_KEY),
       AsyncStorage.getItem(PRO_KEY),
@@ -388,12 +417,16 @@ async function loadSettings(): Promise<{
       AsyncStorage.getItem(MASCOT_KEY),
       AsyncStorage.getItem(BONK_CHARGE_KEY),
       AsyncStorage.getItem(COIN_ALWAYS_KEY),
+      AsyncStorage.getItem(OWNER_KEY),
+      AsyncStorage.getItem(TUTORIAL_KEY),
     ]);
     const parsedCharge = Number(savedCharge);
     if (Number.isFinite(parsedCharge)) bonkCharge = Math.max(0, Math.min(100, parsedCharge));
     coinAlways = savedCoinAlways === "1";
     isPro = savedPro === "1";
     authUser = parseAuthUser(savedAuth);
+    ownerEmail = savedOwner ? normalizeEmail(savedOwner) : null;
+    tutorialDone = savedTutorial === "done";
     if (savedTheme && isThemeId(savedTheme) && (isPro || !isProTheme(savedTheme)))
       theme = savedTheme;
     if (savedLanguage === "es" || savedLanguage === "es-CO" || savedLanguage === "en")
@@ -407,7 +440,15 @@ async function loadSettings(): Promise<{
   } catch {
     // storage unavailable; defaults apply
   }
-  return { theme, language, reducedMotion, isPro, authUser, mascotType, bonkCharge, coinAlways };
+  return { theme, language, reducedMotion, isPro, authUser, mascotType, bonkCharge, coinAlways, ownerEmail, tutorialDone };
+}
+
+/** Disk-level account wipe, shared by init()'s backstop and the store action.
+ * The tutorial key is NOT touched here: only an account switch resets it. */
+async function wipeLocalStorageData(): Promise<void> {
+  bonkChargeStamps.clear();
+  await repo.deleteEverything();
+  await AsyncStorage.setItem(BONK_CHARGE_KEY, "0").catch(() => {});
 }
 
 /**
@@ -450,17 +491,43 @@ export const useAppStore = create<AppState>((set, get) => ({
   serverPro: null,
   apiOnline: null,
   authUser: null,
+  ownerEmail: null,
+  tutorialStep: null,
+  tutorialBranchId: null,
   language: "en" as const,
   nowTick: appNow().getTime(),
   timeSkewMs: 0,
   timeRate: 1,
 
   async init() {
-    const [data, settings] = await Promise.all([repo.loadAll(), loadSettings()]);
+    let [data, settings] = await Promise.all([repo.loadAll(), loadSettings()]);
+    const { tutorialDone, ...restored } = settings;
+    let { ownerEmail } = settings;
+    let startWalkthrough = !tutorialDone && settings.authUser !== null;
+    if (settings.authUser) {
+      const email = normalizeEmail(settings.authUser.email);
+      if (!ownerEmail) {
+        // Pre-stamp device (or a capture script's seeded session): the
+        // signed-in account adopts whatever is here.
+        ownerEmail = email;
+        AsyncStorage.setItem(OWNER_KEY, email).catch(() => {});
+      } else if (ownerEmail !== email) {
+        // The session changed hands outside the sign-in flow (storage edited):
+        // the old owner's threads must never render. Wipe before ready.
+        await wipeLocalStorageData();
+        await AsyncStorage.removeItem(TUTORIAL_KEY).catch(() => {});
+        data = await repo.loadAll();
+        ownerEmail = email;
+        AsyncStorage.setItem(OWNER_KEY, email).catch(() => {});
+        startWalkthrough = true;
+      }
+    }
     const draft = data.drafts[0];
     set({
       ready: true,
-      ...settings,
+      ...restored,
+      ownerEmail,
+      tutorialStep: startWalkthrough ? "welcome" : null,
       branches: data.branches,
       merges: data.merges,
       lessons: data.lessons,
@@ -484,11 +551,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Leaving Now sets any open operation down.
   setView: (view) => set({ view, operation: { kind: "idle" } }),
   // Operations live in Now, so starting one returns there.
-  setOperation: (operation) =>
+  setOperation: (operation) => {
+    // The walkthrough advances on the real actions these operations represent.
+    if (get().tutorialStep !== null) {
+      if (operation.kind === "creating-branch") get().noteTutorialEvent("create-opened");
+      else if (operation.kind === "quick-touch") get().noteTutorialEvent("menu-opened");
+      else if (operation.kind === "idle") {
+        get().noteTutorialEvent("create-cancelled");
+        get().noteTutorialEvent("menu-closed");
+      }
+    }
     set((s) => ({
       operation,
       view: operation.kind === "idle" ? s.view : nowView(s.view),
-    })),
+    }));
+  },
   returnToNow: () => {
     set({ view: { kind: "now" }, window: weekWindow(appNow()) });
   },
@@ -615,6 +692,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // recurrence path (no draft) lands in an existing thread's menu instead.
       added: draftId ? { key: Date.now(), branchId: branch.id } : s.added,
     }));
+    get().noteTutorialEvent("thread-born", branch.id);
     return branch;
   },
 
@@ -1009,15 +1087,32 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     set({ language });
   },
-  signIn: (user) => {
+  async signIn(user) {
+    const email = normalizeEmail(user.email);
+    const s = get();
+    const hasData =
+      s.branches.length + s.merges.length + s.actions.length + s.lessons.length > 0;
+    if (s.ownerEmail && s.ownerEmail !== email && hasData) {
+      // A different account is taking this device over: the previous account's
+      // threads go before anything can render them. AuthGate asked first.
+      await get().wipeLocalData();
+      await AsyncStorage.removeItem(TUTORIAL_KEY).catch(() => {});
+    }
+    if (s.ownerEmail !== email) {
+      AsyncStorage.setItem(OWNER_KEY, email).catch(() => {});
+      set({ ownerEmail: email });
+    }
     AsyncStorage.setItem(AUTH_KEY, JSON.stringify(user)).catch(() => {
       // storage may be unavailable; the session still applies now
     });
     set({ authUser: user });
+    // A first session on this device (or after a takeover) gets the walkthrough.
+    const done = await AsyncStorage.getItem(TUTORIAL_KEY).catch(() => null);
+    if (done !== "done" && get().tutorialStep === null) set({ tutorialStep: "welcome" });
   },
   async signInApi(email, password) {
     const user = await api.login(email, password);
-    get().signIn({ name: user.name, email: user.email });
+    await get().signIn({ name: user.name, email: user.email });
     set(await planPatch(user.plan === "pro", get()));
   },
   async registerApi(email, password, name) {
@@ -1027,7 +1122,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   async verifyEmailApi(email, code) {
     const user = await api.verifyEmail(email, code);
-    get().signIn({ name: user.name, email: user.email });
+    await get().signIn({ name: user.name, email: user.email });
     set(await planPatch(user.plan === "pro", get()));
   },
   async syncMe() {
@@ -1093,20 +1188,97 @@ export const useAppStore = create<AppState>((set, get) => ({
       window: weekWindow(appNow()),
     }));
   },
-  async deleteEverything() {
-    await repo.deleteEverything();
+  async wipeLocalData() {
+    // Quiesce first: no animation, timer, or pending write may act on old ids.
+    // burn goes with the rest — a stray finalizeBurn finds nothing to write.
     set({
-      branches: [],
-      merges: [],
-      actions: [],
-      lessons: [],
-      pinnedBranchIds: [],
-      draftBranchId: null,
+      operation: { kind: "idle" },
+      view: { kind: "now" },
       mergeDraft: undefined,
+      draftBranchId: null,
+      pinnedBranchIds: [],
+      tutorialBranchId: null,
+      burn: undefined,
+      born: undefined,
+      added: undefined,
+      answered: undefined,
+      integrated: undefined,
+      hit: undefined,
+      reclaim: undefined,
+      coins: [],
+      bonkCharge: 0,
+      window: weekWindow(appNow()),
+    });
+    // Table writes chain on their own queue, so anything in flight lands
+    // before the clear — nothing stale can re-persist afterwards.
+    await wipeLocalStorageData();
+    set({ branches: [], merges: [], actions: [], lessons: [] });
+  },
+  async deleteEverything() {
+    await get().wipeLocalData();
+    // The device holds nothing now, so it belongs to no account.
+    await AsyncStorage.removeItem(OWNER_KEY).catch(() => {});
+    set({ ownerEmail: null });
+  },
+
+  tutorialNext() {
+    const step = get().tutorialStep;
+    if (step === null) return;
+    if (step === "done") {
+      AsyncStorage.setItem(TUTORIAL_KEY, "done").catch(() => {});
+      set({ tutorialStep: null, tutorialBranchId: null });
+      return;
+    }
+    const next = NEXT_AFTER[step];
+    if (!next) return;
+    if (next === "point-plus" && !canCreateThread(get().branches, selectEffectivePro(get()), get().draftBranchId)) {
+      // Full timeline (a restart on a lived-in account): meet an existing
+      // thread instead of pointing at a + that would open the paywall.
+      const open = get().branches.filter((b) => !isClosed(b));
+      const newest = open[open.length - 1];
+      set(
+        newest
+          ? { tutorialStep: "meet-thread", tutorialBranchId: newest.id }
+          : { tutorialStep: next },
+      );
+      return;
+    }
+    set({ tutorialStep: next });
+  },
+  tutorialSkip() {
+    AsyncStorage.setItem(TUTORIAL_KEY, "done").catch(() => {});
+    set({ tutorialStep: null, tutorialBranchId: null });
+  },
+  tutorialRestart() {
+    AsyncStorage.removeItem(TUTORIAL_KEY).catch(() => {});
+    set({
+      tutorialStep: "welcome",
+      tutorialBranchId: null,
       view: { kind: "now" },
       operation: { kind: "idle" },
       window: weekWindow(appNow()),
     });
+  },
+  noteTutorialEvent(e, branchId) {
+    const step = get().tutorialStep;
+    if (step === null) return;
+    if (e === "create-opened" && step === "point-plus") {
+      set({ tutorialStep: "creating" });
+    } else if (e === "create-cancelled" && step === "creating") {
+      set({ tutorialStep: "point-plus" });
+    } else if (e === "thread-born" && (step === "creating" || step === "point-plus")) {
+      set({ tutorialStep: "meet-thread", tutorialBranchId: branchId ?? null });
+    } else if (e === "thread-armed" && step === "meet-thread") {
+      set({ tutorialStep: "pip-arrives" });
+    } else if (
+      e === "menu-opened" &&
+      (step === "pip-arrives" || step === "meet-thread" || step === "creating")
+    ) {
+      set({ tutorialStep: "menu" });
+    } else if (e === "menu-closed" && step === "menu") {
+      // The user answered (or stepped back) — either way they've seen the menu.
+      set({ tutorialStep: "bonk" });
+    }
   },
 }));
 

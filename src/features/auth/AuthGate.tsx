@@ -26,6 +26,10 @@ export function AuthGate() {
   const signInApi = useAppStore((s) => s.signInApi);
   const registerApi = useAppStore((s) => s.registerApi);
   const verifyEmailApi = useAppStore((s) => s.verifyEmailApi);
+  const ownerEmail = useAppStore((s) => s.ownerEmail);
+  const hasLocalData = useAppStore(
+    (s) => s.branches.length + s.merges.length + s.actions.length + s.lessons.length > 0,
+  );
 
   const [screen, setScreen] = useState<Screen>("login");
   const [email, setEmail] = useState("");
@@ -33,6 +37,11 @@ export function AuthGate() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  // A different account taking over this device must say so out loud first —
+  // the previous account's threads are removed when it continues.
+  const [confirmingTakeover, setConfirmingTakeover] = useState(false);
+  const takeoverNeeded = () =>
+    ownerEmail !== null && ownerEmail !== email.trim().toLowerCase() && hasLocalData;
   // Verification: the emailed code, plus resend feedback.
   const [code, setCode] = useState("");
   const [resent, setResent] = useState(false);
@@ -46,6 +55,7 @@ export function AuthGate() {
   const go = (next: Screen) => {
     setScreen(next);
     setError("");
+    setConfirmingTakeover(false);
     setResetSent(false);
     setResetDone(false);
     setResetToken("");
@@ -56,9 +66,11 @@ export function AuthGate() {
     setPassword("");
   };
 
-  async function submitLogin() {
+  async function submitLogin(takeoverConfirmed = false) {
     if (!looksLikeEmail(email)) return setError(t("That does not look like an email address."));
     if (password.length < 8) return setError(t("The password needs at least 8 characters."));
+    if (takeoverNeeded() && !takeoverConfirmed) return setConfirmingTakeover(true);
+    setConfirmingTakeover(false);
     setBusy(true);
     setError("");
     try {
@@ -66,7 +78,7 @@ export function AuthGate() {
     } catch (e) {
       if (e instanceof ApiOfflineError) {
         // The server is unreachable: the app still opens, on this device only.
-        signIn({ email: email.trim() });
+        await signIn({ email: email.trim() });
       } else if (e instanceof ApiHttpError && e.code === "email_unverified") {
         go("verify");
       } else if (e instanceof ApiHttpError && e.code === "rate_limited") {
@@ -79,9 +91,11 @@ export function AuthGate() {
     }
   }
 
-  async function submitRegister() {
+  async function submitRegister(takeoverConfirmed = false) {
     if (!looksLikeEmail(email)) return setError(t("That does not look like an email address."));
     if (password.length < 8) return setError(t("The password needs at least 8 characters."));
+    if (takeoverNeeded() && !takeoverConfirmed) return setConfirmingTakeover(true);
+    setConfirmingTakeover(false);
     // No name field to type: the part before the @ stands in, and the
     // account page shows it alongside the full address anyway.
     const name = email.trim().split("@")[0];
@@ -93,7 +107,7 @@ export function AuthGate() {
       if (dev) setDevCode(dev);
     } catch (e) {
       if (e instanceof ApiOfflineError) {
-        signIn({ name, email: email.trim() });
+        await signIn({ name, email: email.trim() });
       } else if (e instanceof ApiHttpError && e.code === "email_taken") {
         setError(t("An account with that email already exists."));
       } else if (e instanceof ApiHttpError && e.code === "rate_limited") {
@@ -178,7 +192,10 @@ export function AuthGate() {
   const emailField = (
     <AppTextInput
       value={email}
-      onChangeText={setEmail}
+      onChangeText={(v) => {
+        setEmail(v);
+        setConfirmingTakeover(false);
+      }}
       placeholder={t("Email")}
       accessibilityLabel={t("Email")}
       autoCapitalize="none"
@@ -230,13 +247,35 @@ export function AuthGate() {
               {emailField}
               {passwordField}
               {error !== "" && <T style={{ color: tk.danger, fontSize: 13.6 }}>{error}</T>}
-              <Button
-                variant="primary"
-                large
-                disabled={busy}
-                onPress={() => void submitLogin()}
-                label={busy ? t("Signing in…") : t("Sign in")}
-              />
+              {confirmingTakeover ? (
+                <>
+                  <T style={{ color: tk.danger, fontSize: 13.6 }}>
+                    {t(
+                      "This device holds another account's threads. Continuing removes them from this device.",
+                    )}
+                  </T>
+                  <Button
+                    variant="danger"
+                    large
+                    disabled={busy}
+                    onPress={() => void submitLogin(true)}
+                    label={t("Continue and remove them")}
+                  />
+                  <Button
+                    variant="quiet"
+                    onPress={() => setConfirmingTakeover(false)}
+                    label={t("Go back")}
+                  />
+                </>
+              ) : (
+                <Button
+                  variant="primary"
+                  large
+                  disabled={busy}
+                  onPress={() => void submitLogin()}
+                  label={busy ? t("Signing in…") : t("Sign in")}
+                />
+              )}
               <Button
                 variant="quiet"
                 onPress={() => go("forgot")}
@@ -259,13 +298,35 @@ export function AuthGate() {
               {emailField}
               {passwordField}
               {error !== "" && <T style={{ color: tk.danger, fontSize: 13.6 }}>{error}</T>}
-              <Button
-                variant="primary"
-                large
-                disabled={busy}
-                onPress={() => void submitRegister()}
-                label={busy ? t("One moment…") : t("Register")}
-              />
+              {confirmingTakeover ? (
+                <>
+                  <T style={{ color: tk.danger, fontSize: 13.6 }}>
+                    {t(
+                      "This device holds another account's threads. Continuing removes them from this device.",
+                    )}
+                  </T>
+                  <Button
+                    variant="danger"
+                    large
+                    disabled={busy}
+                    onPress={() => void submitRegister(true)}
+                    label={t("Continue and remove them")}
+                  />
+                  <Button
+                    variant="quiet"
+                    onPress={() => setConfirmingTakeover(false)}
+                    label={t("Go back")}
+                  />
+                </>
+              ) : (
+                <Button
+                  variant="primary"
+                  large
+                  disabled={busy}
+                  onPress={() => void submitRegister()}
+                  label={busy ? t("One moment…") : t("Register")}
+                />
+              )}
               <Button
                 variant="quiet"
                 onPress={() => go("login")}

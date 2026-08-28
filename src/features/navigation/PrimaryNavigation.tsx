@@ -9,6 +9,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppStore, type View as AppView } from "@/stores/app-store";
 import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
+import { useWalkthroughTarget } from "@/features/tutorial/targets";
 import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
@@ -46,6 +47,10 @@ export function PrimaryNavigation({ variant }: { variant: "header" | "bottom" })
   const insets = useSafeAreaInsets();
   const canOpenThread = useThreadGate();
   const [paywalled, setPaywalled] = useState(false);
+  // The walkthrough's pointer needs to know where these controls sit.
+  const plusTarget = useWalkthroughTarget("new-thread");
+  const historyTarget = useWalkthroughTarget("history-tab");
+  const moreTarget = useWalkthroughTarget("more-tab");
 
   const tab = (
     id: string,
@@ -53,9 +58,11 @@ export function PrimaryNavigation({ variant }: { variant: "header" | "bottom" })
     icon: string,
     active: boolean,
     onPress: () => void,
+    targetRef?: (node: unknown) => void,
   ) => (
     <Pressable
       key={id}
+      ref={targetRef as never}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       onPress={onPress}
@@ -104,11 +111,21 @@ export function PrimaryNavigation({ variant }: { variant: "header" | "bottom" })
   const actionsTab = tab("actions", "Actions", "→", viewingActions, () =>
     setOperation({ kind: "viewing-actions" }),
   );
-  const historyTab = tab("history", "History", "◔", current === "history", () =>
-    setView({ kind: "history" }),
+  const historyTab = tab(
+    "history",
+    "History",
+    "◔",
+    current === "history",
+    () => setView({ kind: "history" }),
+    historyTarget,
   );
-  const moreTab = tab("more", "More", "≡", current === "more", () =>
-    setView({ kind: "more" }),
+  const moreTab = tab(
+    "more",
+    "More",
+    "≡",
+    current === "more",
+    () => setView({ kind: "more" }),
+    moreTarget,
   );
 
   if (variant === "header") {
@@ -143,6 +160,7 @@ export function PrimaryNavigation({ variant }: { variant: "header" | "bottom" })
       {actionsTab}
       {/* the one obvious control, in the middle of the bar and half a step above it */}
       <Pressable
+        ref={plusTarget as never}
         accessibilityRole="button"
         accessibilityLabel={t("New thread")}
         onPress={() =>
