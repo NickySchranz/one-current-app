@@ -27,6 +27,8 @@ import { useLayoutStore } from "@/stores/layout-store";
 import { measureNode } from "@/ui/measure";
 import { setWalkthroughPoint, useWalkthroughTarget } from "@/features/tutorial/targets";
 import { buildTimelineLayout } from "@/visualization/main-line/layout";
+import { buildSummitLayout, dateToScreenY, type SummitLayout } from "@/visualization/vertical/transpose";
+import { themeOrientation } from "@/visualization/theme";
 import { generateTicks, dateToX, addDays } from "@/visualization/zoom/time-scale";
 import { describeTimeline } from "@/visualization/a11y/describe";
 import { effectiveLoudness, isClosed, mostActivated } from "@/domain/branches/logic";
@@ -48,6 +50,8 @@ import { Mascot, estTextWidth } from "./Mascot";
 import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
 import { useCalmCurrent } from "./useSquiggle";
+import { useSummitCurrent } from "./useSummit";
+import { ClimbPennant, climbSpan, Ledge, RopeCut, SummitRoute } from "./SummitScene";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -327,6 +331,12 @@ export function LifeTimeline() {
   const t = useT();
   const tk = useTheme();
 
+  // Summit turns the whole map on end: time flows up, ropes hang, gestures
+  // swap axes. The PanResponder is memoized once, so it reads this via a ref.
+  const vertical = themeOrientation(theme) === "vertical";
+  const verticalRef = useRef(vertical);
+  verticalRef.current = vertical;
+
   // The line the current operation concerns stays lit; everything else steps back.
   const focusedBranchId =
     operation.kind === "viewing-integrated" && operation.branchId
@@ -406,6 +416,8 @@ export function LifeTimeline() {
   const stageRef = useRef<View>(null);
   const scrollRef = useRef<ScrollView>(null);
   const scrollYRef = useRef(0);
+  /** Summit scrolls sideways: the lane columns overflow the stage width. */
+  const scrollXRef = useRef(0);
   const [scrollH, setScrollH] = useState(0);
   const scrollHRef = useRef(0);
   scrollHRef.current = scrollH;
@@ -457,25 +469,42 @@ export function LifeTimeline() {
   const mainShift = useEased(shiftTarget, reducedMotion);
   const layout = useMemo(
     () =>
-      buildTimelineLayout(visible, {
-        width: size.width,
-        height: size.height,
-        window: window_,
-        compact,
-        now,
-        mainShift,
-        // Room above the top lane for its label, clear of the pinned chip —
-        // and always enough headroom for Pip's speech bubble when he stands
-        // at the highest thread (sprite ~22px above the lane, bubble above).
-        topPad: Math.max(88, topInset > 0 ? topInset + 18 : 0),
-        // Lines created this session keep their lane — through "since when?"
-        // changes and past the save, while the quick menu is still open.
-        pinnedBranchIds,
-      }),
-    [visible, size, window_, compact, now, mainShift, topInset, pinnedBranchIds],
+      vertical
+        ? buildSummitLayout(visible, {
+            stageWidth: size.width,
+            stageHeight: size.height,
+            trayInset: bottomInset,
+            window: window_,
+            compact,
+            now,
+            mainShift,
+            pinnedBranchIds,
+          })
+        : buildTimelineLayout(visible, {
+            width: size.width,
+            height: size.height,
+            window: window_,
+            compact,
+            now,
+            mainShift,
+            // Room above the top lane for its label, clear of the pinned chip —
+            // and always enough headroom for Pip's speech bubble when he stands
+            // at the highest thread (sprite ~22px above the lane, bubble above).
+            topPad: Math.max(88, topInset > 0 ? topInset + 18 : 0),
+            // Lines created this session keep their lane — through "since when?"
+            // changes and past the save, while the quick menu is still open.
+            pinnedBranchIds,
+          }),
+    [vertical, visible, size, window_, compact, now, mainShift, topInset, pinnedBranchIds, bottomInset],
   );
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
+  // Summit's extra anchors; null on every horizontal theme.
+  const sm = vertical ? (layout as SummitLayout) : null;
+  // The Now point in canvas coordinates, whichever way the map runs.
+  const nowPt = sm
+    ? { x: sm.routeX, y: sm.nowScreenY }
+    : { x: layout.nowX, y: layout.mainY };
 
   useEffect(() => {
     const wantsThread = tutorialStep === "meet-thread" || tutorialStep === "pip-arrives";
@@ -490,7 +519,16 @@ export function LifeTimeline() {
     }
     measureNode(stageRef.current, (sx, sy) => {
       // A little back from the tip, so the halo rests on the line itself.
-      setWalkthroughPoint("thread", { x: sx + g.endX - 24, y: sy + g.endY });
+      // On the summit map the rope hangs below its anchor, and the canvas
+      // scrolls sideways instead of down.
+      if (verticalRef.current) {
+        setWalkthroughPoint("thread", {
+          x: sx + g.endX - scrollXRef.current,
+          y: sy + g.endY + 24,
+        });
+      } else {
+        setWalkthroughPoint("thread", { x: sx + g.endX - 24, y: sy + g.endY });
+      }
     });
     return () => setWalkthroughPoint("thread", null);
   }, [tutorialStep, tutorialBranchId, layout]);
@@ -503,31 +541,61 @@ export function LifeTimeline() {
     if (focusedBranchId) {
       const g = layout.geometries.find((geo) => geo.branchId === focusedBranchId);
       if (g && g.inWindow) {
-        const delta = g.laneY - layout.bandY;
+        // Base-coordinate delta either way: summit's mainShift feeds the same
+        // underlying builder, so the route leans toward the rope's column.
+        const delta = vertical && sm
+          ? (g.laneX ?? sm.bandX) - sm.bandX
+          : g.laneY - layout.bandY;
         const gap = compact ? 36 : 44;
         target = Math.abs(delta) > gap ? delta - Math.sign(delta) * gap : 0;
       }
     }
     setShiftTarget(target);
-  }, [focusedBranchId, layout, compact]);
+  }, [focusedBranchId, layout, compact, vertical, sm]);
 
   // With many threads the canvas grows taller than the stage and scrolls.
   // Whenever its shape changes, settle the view around the main line so Now
   // is what you see first; from there you scroll to the outer lanes.
+  // (On the summit map the columns overflow sideways instead: settle around
+  // the route so the face is centered.)
   useEffect(() => {
+    if (vertical) return;
     if (scrollH <= 0) return;
     const overflow = layout.height - scrollH;
     if (overflow > 0) {
       const y = Math.max(0, Math.min(overflow, layout.bandY - scrollH / 2));
       scrollRef.current?.scrollTo({ y, animated: false });
     }
-  }, [layout.height, layout.bandY, scrollH]);
+  }, [vertical, layout.height, layout.bandY, scrollH]);
+  const laneSpan = sm?.laneSpan ?? 0;
+  const bandX = sm?.bandX ?? 0;
+  useEffect(() => {
+    if (!vertical) return;
+    const overflow = laneSpan + 84 - size.width;
+    if (overflow > 0) {
+      const x = Math.max(0, Math.min(overflow, bandX - size.width / 2));
+      scrollRef.current?.scrollTo({ x, animated: false });
+    }
+  }, [vertical, laneSpan, bandX, size.width]);
 
   // The tapped thread stays in sight: when a panel opens, scroll so the pair —
   // its lane and the leaning main line — sits centered in the space the panel
   // leaves free. Runs while the inset and the lean animate, so the view
   // follows the sheet as it slides in.
   useEffect(() => {
+    if (vertical) {
+      // The tray inset already compresses the time axis in the layout; here
+      // only the focused rope's column needs to come on screen sideways.
+      const anchorId = focusedBranchId;
+      if (!anchorId || !sm) return;
+      const g = layout.geometries.find((geo) => geo.branchId === anchorId);
+      if (!g || !g.inWindow) return;
+      const maxScroll = Math.max(0, sm.laneSpan + 84 - size.width);
+      const anchor = ((g.laneX ?? sm.routeX) + sm.routeX) / 2;
+      const x = Math.max(0, Math.min(maxScroll, anchor - size.width / 2));
+      scrollRef.current?.scrollTo({ x, animated: false });
+      return;
+    }
     if (scrollH <= 0) return;
     const anchorId = focusedBranchId;
     if (!anchorId && bottomInset <= 0) return;
@@ -545,7 +613,7 @@ export function LifeTimeline() {
     }
     const y = Math.max(0, Math.min(scrollCap, anchor - usable / 2));
     scrollRef.current?.scrollTo({ y, animated: false });
-  }, [focusedBranchId, layout, bottomInset, topInset, scrollH]);
+  }, [vertical, sm, size.width, focusedBranchId, layout, bottomInset, topInset, scrollH]);
 
   // ---- gestures: tap / horizontal time-pan / vertical loudness dial --------
 
@@ -553,6 +621,7 @@ export function LifeTimeline() {
   const modeRef = useRef<"idle" | "dial" | "pan">("idle");
   const dialLevelRef = useRef(0);
   const lastXRef = useRef(0);
+  const lastYRef = useRef(0);
   const stagePosRef = useRef({ x: 0, y: 0 });
   const blockTapsUntilRef = useRef(0);
   const previewRef = useRef<LoudnessPreview | null>(null);
@@ -628,6 +697,21 @@ export function LifeTimeline() {
         onStartShouldSetPanResponder: () => false,
         onMoveShouldSetPanResponder: (_e, gs) => {
           if (Math.hypot(gs.dx, gs.dy) <= DECIDE_PX) return false;
+          if (verticalRef.current) {
+            // Summit swaps the axes: sideways on a rope dials its loudness,
+            // up/down anywhere climbs through time, and a plain sideways
+            // drag off any rope scrolls the face natively.
+            if (candidateRef.current && Math.abs(gs.dx) >= Math.abs(gs.dy)) {
+              modeRef.current = "dial";
+              return true;
+            }
+            if (Math.abs(gs.dy) > Math.abs(gs.dx)) {
+              modeRef.current = "pan";
+              candidateRef.current = null;
+              return true;
+            }
+            return false;
+          }
           if (candidateRef.current && Math.abs(gs.dy) >= Math.abs(gs.dx)) {
             // Vertical wins: the thumb is dialing loudness now.
             modeRef.current = "dial";
@@ -645,12 +729,16 @@ export function LifeTimeline() {
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (_e, gs) => {
           lastXRef.current = gs.moveX || gs.x0;
+          lastYRef.current = gs.moveY || gs.y0;
           measureNode(stageRef.current, (x, y) => {
             stagePosRef.current = { x, y };
           });
           if (modeRef.current === "dial" && candidateRef.current) {
             const c = candidateRef.current;
-            const level = clampLevel(c.startLevel + Math.round(-gs.dy / STEP_PX));
+            const level = clampLevel(
+              c.startLevel +
+                Math.round((verticalRef.current ? gs.dx : -gs.dy) / STEP_PX),
+            );
             dialLevelRef.current = level;
             setPreview({ branchId: c.branchId, level });
           }
@@ -659,7 +747,11 @@ export function LifeTimeline() {
           if (modeRef.current === "dial") {
             const c = candidateRef.current;
             if (!c) return;
-            const level = clampLevel(c.startLevel + Math.round(-gs.dy / STEP_PX));
+            // Right = louder on the summit map; up = louder everywhere else.
+            const level = clampLevel(
+              c.startLevel +
+                Math.round((verticalRef.current ? gs.dx : -gs.dy) / STEP_PX),
+            );
             if (level !== dialLevelRef.current) {
               dialLevelRef.current = level;
               setPreview({ branchId: c.branchId, level });
@@ -670,6 +762,17 @@ export function LifeTimeline() {
             return;
           }
           if (modeRef.current === "pan") {
+            if (verticalRef.current) {
+              const dy = gs.moveY - lastYRef.current;
+              if (dy === 0) return;
+              lastYRef.current = gs.moveY;
+              // Dragging beside the date rail scrubs faster than the face.
+              const stageX = gs.moveX - stagePosRef.current.x;
+              const nearDates = stageX > sizeRef.current.width - 64;
+              const timeLen = (layoutRef.current as SummitLayout).timeLen ?? 1;
+              panBy((dy / Math.max(1, timeLen)) * (nearDates ? 4 : 1));
+              return;
+            }
             const dx = gs.moveX - lastXRef.current;
             if (dx === 0) return;
             lastXRef.current = gs.moveX;
@@ -812,6 +915,17 @@ export function LifeTimeline() {
     const el = stageRef.current as unknown as HTMLElement | null;
     if (!el || typeof el.addEventListener !== "function") return;
     const onWheel = (e: WheelEvent) => {
+      if (verticalRef.current) {
+        // Summit: the vertical wheel climbs through time; sideways scrolling
+        // stays native (it pans the face's columns).
+        if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+        e.preventDefault();
+        const rect = el.getBoundingClientRect();
+        const nearDates = e.clientX - rect.left > rect.width - 64;
+        const timeLen = (layoutRef.current as SummitLayout).timeLen ?? rect.height;
+        panBy((-e.deltaY / Math.max(1, timeLen)) * (nearDates ? 4 : 1));
+        return;
+      }
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
       e.preventDefault();
       const rect = el.getBoundingClientRect();
@@ -963,7 +1077,19 @@ export function LifeTimeline() {
   // The camera follows Pip: whenever he sets off for a lane outside the
   // visible band (a super bonk hop, a focus run, a patrol jump), the
   // vertical scroll pans along with his dash. Once per run, never per frame.
-  const followPip = useCallback((_x: number, destY: number) => {
+  const followPip = useCallback((destX: number, destY: number) => {
+    if (verticalRef.current) {
+      // Summit scrolls sideways: pan the face so the climber stays in view.
+      const vw = sizeRef.current.width;
+      if (vw <= 0) return;
+      const sx = scrollXRef.current;
+      if (destX > sx + 70 && destX < sx + vw - 90) return;
+      const summit = layoutRef.current as SummitLayout;
+      const maxScroll = Math.max(0, (summit.laneSpan ?? vw) + 84 - vw);
+      const x = Math.max(0, Math.min(maxScroll, destX - vw / 2));
+      scrollRef.current?.scrollTo({ x, animated: true });
+      return;
+    }
     const vh = scrollHRef.current;
     if (vh <= 0) return;
     const sy = scrollYRef.current;
@@ -972,10 +1098,15 @@ export function LifeTimeline() {
     const y = Math.max(0, Math.min(maxScroll, destY - vh / 2));
     scrollRef.current?.scrollTo({ y, animated: true });
   }, []);
+  // On the summit map the climber's rest point starts below the ledge and
+  // rises with every answered rope — the day's climb, made visible.
+  const mascotNowY = vertical && sm
+    ? sm.nowScreenY + (1 - calmProgress) * climbSpan(sm.nowScreenY, sm.timeLen)
+    : layout.mainY;
   const mascot = useMascot(
     visible,
     layout.geometries,
-    layout.nowX,
+    nowPt.x,
     (branchId) => setOperation({ kind: "quick-touch", branchId }),
     mascotTypePref,
     operation.kind === "idle",
@@ -983,8 +1114,9 @@ export function LifeTimeline() {
     language,
     heldBranchId,
     burn?.branchId ?? null,
-    layout.mainY,
+    mascotNowY,
     followPip,
+    { vertical },
   );
 
   // Keep reaction ref current so effects below can call it
@@ -1037,7 +1169,9 @@ export function LifeTimeline() {
           }
           setFlights((f) => [
             ...f,
-            { key: c.key, branchId: c.branchId, x0: g.endX + COIN_LEAD, y0: g.endY - COIN_HOVER - scrollYRef.current },
+            verticalRef.current
+              ? { key: c.key, branchId: c.branchId, x0: g.endX + COIN_LEAD - scrollXRef.current, y0: g.endY - COIN_HOVER }
+              : { key: c.key, branchId: c.branchId, x0: g.endX + COIN_LEAD, y0: g.endY - COIN_HOVER - scrollYRef.current },
           ]);
           coinTimersRef.current.set(c.key, setTimeout(() => finishCoin(c.key), COIN_FLY_MS));
         }, hoverBeat),
@@ -1155,12 +1289,15 @@ export function LifeTimeline() {
     return () => cancelAnimation(worldClock);
   }, [reducedMotion, worldClock]);
 
+  // Hooks can't be conditional: both currents are always mounted, and the
+  // inactive one gets dormant inputs (zero progress and a zero-length line),
+  // so its breathing gate keeps every clock cancelled.
   const calmCurrent = useCalmCurrent({
-    progress: calmProgress,
-    pulseKey,
+    progress: vertical ? 0 : calmProgress,
+    pulseKey: vertical ? 0 : pulseKey,
     worldClock,
     mainY: layout.mainY,
-    nowX: layout.nowX,
+    nowX: vertical ? 0 : layout.nowX,
     periodMs: wavePeriodMs,
     dashDurationMs: tk.mainFlowDuration,
     reducedMotion,
@@ -1169,6 +1306,21 @@ export function LifeTimeline() {
     lineColor: tk.lineMain,
     sacredLineColor: mix(tk.shimmer, tk.lineMain, 70),
   });
+  const summitCurrent = useSummitCurrent({
+    progress: vertical ? calmProgress : 0,
+    pulseKey: vertical ? pulseKey : 0,
+    routeX: sm?.routeX ?? 0,
+    nowScreenY: sm?.nowScreenY ?? 0,
+    timeLen: sm?.timeLen ?? 0,
+    periodMs: wavePeriodMs,
+    dashDurationMs: tk.mainFlowDuration,
+    reducedMotion,
+    accentColor: tk.accent,
+    shimmerColor: tk.shimmer,
+    lineColor: tk.lineMain,
+    sacredLineColor: mix(tk.shimmer, tk.lineMain, 70),
+  });
+  const routeLen = sm ? Math.max(0, sm.timeLen - sm.nowScreenY) : 0;
 
   const mergeFlowProps = useDashFlow(
     operation.kind === "confirming-merge" && !reducedMotion,
@@ -1183,8 +1335,10 @@ export function LifeTimeline() {
 
   // +84: breathing room below the lanes, so the lowest one can be pulled up
   // clear of the pinned date strip and the bonk bar. Inside the canvas (not a
-  // spacer view) so the day dividers run through it.
-  const svgHeight = layout.height + Math.round(bottomInset) + 84;
+  // spacer view) so the day dividers run through it. Summit overflows
+  // sideways instead: the canvas widens with the rope columns.
+  const svgHeight = vertical ? size.height : layout.height + Math.round(bottomInset) + 84;
+  const svgWidth = vertical && sm ? Math.max(size.width, sm.laneSpan + 84) : size.width;
   const previewBranch = preview ? byId.get(preview.branchId) : undefined;
 
   return (
@@ -1234,14 +1388,17 @@ export function LifeTimeline() {
             while the +, help and wholeness chip stay pinned to the stage */}
         <ScrollView
           ref={scrollRef}
+          horizontal={vertical}
           style={{ flex: 1, minHeight: 0 }}
           scrollEnabled={!scrollLocked}
           onLayout={(e) => setScrollH(e.nativeEvent.layout.height)}
           onScroll={(e) => {
             scrollYRef.current = e.nativeEvent.contentOffset.y;
+            scrollXRef.current = e.nativeEvent.contentOffset.x;
           }}
           scrollEventThrottle={16}
           showsVerticalScrollIndicator
+          showsHorizontalScrollIndicator
           overScrollMode="never"
         >
           <View
@@ -1253,18 +1410,24 @@ export function LifeTimeline() {
             }}
           >
             <Svg
-              width={size.width}
+              width={svgWidth}
               height={svgHeight}
               accessibilityLabel={summary}
               accessibilityRole="image"
               // .timeline-svg parity: drags must never select label text, and
-              // the browser keeps vertical panning while we own horizontal.
+              // the browser keeps the native scroll axis while we own the
+              // other one (vertical themes scroll y; summit scrolls x).
               {...(Platform.OS === "web"
-                ? { style: { userSelect: "none", touchAction: "pan-y" } as object }
+                ? {
+                    style: {
+                      userSelect: "none",
+                      touchAction: vertical ? "pan-x" : "pan-y",
+                    } as object,
+                  }
                 : null)}
             >
               {/* today softly glows: where life is happening */}
-              {layout.nowX - todayX > 0 && (
+              {!vertical && layout.nowX - todayX > 0 && (
                 <Rect
                   x={todayX}
                   y={0}
@@ -1274,22 +1437,80 @@ export function LifeTimeline() {
                   opacity={0.05}
                 />
               )}
+              {vertical &&
+                sm &&
+                (() => {
+                  const todayY = dateToScreenY(today, layout.window, sm.timeLen);
+                  if (todayY - sm.nowScreenY <= 0) return null;
+                  return (
+                    <Rect
+                      x={0}
+                      y={sm.nowScreenY}
+                      width={svgWidth}
+                      height={todayY - sm.nowScreenY}
+                      fill={tk.accent}
+                      opacity={0.05}
+                    />
+                  );
+                })()}
 
-              {/* axis gridlines — full canvas height, including the scroll
-                  headroom; their date labels live on the pinned strip at the
-                  stage bottom, so they never scroll out of view */}
+              {/* axis gridlines — full canvas, including the scroll headroom;
+                  their date labels live on the pinned strip (bottom edge, or
+                  the right-hand rail on the summit map) */}
               {ticks.map((tick) => {
+                if (vertical && sm) {
+                  const y = dateToScreenY(tick.date, layout.window, sm.timeLen);
+                  return (
+                    <Line key={tick.date} x1={0} y1={y} x2={svgWidth} y2={y} stroke={tk.lineAxis} />
+                  );
+                }
                 const x = dateToX(tick.date, layout.window, layout.metrics.width);
                 return (
                   <Line key={tick.date} x1={x} y1={0} x2={x} y2={svgHeight} stroke={tk.lineAxis} />
                 );
               })}
 
+              {/* the summit route: the same gathering current, standing up.
+                  The ledge marks Now; the pennant climbs with the day. */}
+              {vertical && sm && (
+                <>
+                  {sm.nowScreenY > 4 && (
+                    <Rect
+                      x={0}
+                      y={0}
+                      width={svgWidth}
+                      height={sm.nowScreenY}
+                      fill={tk.inkFaint}
+                      opacity={0.05}
+                    />
+                  )}
+                  <SummitRoute
+                    current={summitCurrent}
+                    routeX={sm.routeX}
+                    nowScreenY={sm.nowScreenY}
+                    timeLen={sm.timeLen}
+                    tk={tk}
+                    calmProgress={calmProgress}
+                  />
+                  <Ledge routeX={sm.routeX} nowScreenY={sm.nowScreenY} tk={tk} />
+                  <ClimbPennant
+                    routeX={sm.routeX}
+                    nowScreenY={sm.nowScreenY}
+                    timeLen={sm.timeLen}
+                    progress={calmProgress}
+                    tk={tk}
+                    reducedMotion={reducedMotion}
+                  />
+                </>
+              )}
+
               {/* main life line, with a slow current flowing toward Now.
                   As the day's threads get their answers it gathers strength —
                   wave rising, stroke thickening — until it breathes as one
                   calm, sacred current under a soft shimmer halo. Each answer
                   sends a shimmer streak sweeping down the line. */}
+              {!vertical && (
+              <>
               <AnimatedPath
                 animatedProps={calmCurrent.haloOuter}
                 d={`M 0 ${layout.mainY} L ${layout.nowX} ${layout.mainY}`}
@@ -1350,10 +1571,12 @@ export function LifeTimeline() {
                 strokeWidth={3.25 + calmProgress}
                 fill="none"
               />
+              </>
+              )}
 
               {/* the future stays one line: the main line continues faded,
                   nothing branches ahead of Now */}
-              {layout.fullWidth - layout.nowX > 4 && (
+              {!vertical && layout.fullWidth - layout.nowX > 4 && (
                 <G>
                   <Rect
                     x={layout.nowX}
@@ -1374,9 +1597,62 @@ export function LifeTimeline() {
                 </G>
               )}
 
+              {/* summit's day record: the decisions gather in the sky above
+                  the ledge. Tapping them opens the actions panel. */}
+              {vertical && sm && futureItems.length > 0 && sm.nowScreenY > 44 && (
+                <G onPress={guarded(() => setOperation({ kind: "viewing-actions" }))}>
+                  <Rect
+                    x={sm.routeX + 4}
+                    y={Math.max(0, sm.nowScreenY - 18 - futureItems.length * 16)}
+                    width={190}
+                    height={futureItems.length * 16 + 18}
+                    fill="transparent"
+                  />
+                  <Path
+                    d={`M ${sm.routeX} ${sm.nowScreenY} L ${sm.routeX} ${Math.max(
+                      6,
+                      sm.nowScreenY - 150,
+                    )}`}
+                    stroke={tk.accent}
+                    strokeWidth={2.5}
+                    fill="none"
+                    strokeLinecap="round"
+                    opacity={0.55}
+                  />
+                  {futureItems.map((it, i) => {
+                    const y = sm.nowScreenY - 14 - (futureItems.length - 1 - i) * 16;
+                    return (
+                      <DayRow
+                        key={it.id}
+                        arriving={!!it.ownerId && it.ownerId === arrivedFor && !it.done}
+                        reducedMotion={reducedMotion}
+                      >
+                        <Circle
+                          cx={sm.routeX + 16}
+                          cy={y - 4}
+                          r={3}
+                          fill={it.color}
+                          opacity={it.done ? 0.35 : 0.55}
+                        />
+                        <SvgText
+                          x={sm.routeX + 24}
+                          y={y}
+                          fontSize={11}
+                          fontFamily={tk.fontBody}
+                          letterSpacing={0.11}
+                          fill={it.done ? tk.inkFaint : tk.inkSoft}
+                        >
+                          {it.label}
+                        </SvgText>
+                      </DayRow>
+                    );
+                  })}
+                </G>
+              )}
+
               {/* every decision gathers around the main line past Now — a calm
                   record of the day. Tapping it opens the actions panel. */}
-              {futureItems.length > 0 && layout.fullWidth - layout.nowX > 40 && (
+              {!vertical && futureItems.length > 0 && layout.fullWidth - layout.nowX > 40 && (
                 <G onPress={guarded(() => setOperation({ kind: "viewing-actions" }))}>
                   <Rect
                     x={layout.nowX + 4}
@@ -1454,8 +1730,11 @@ export function LifeTimeline() {
                     geometry={g}
                     theme={theme}
                     nowMs={nowTick}
-                    wave={calmCurrent.wave}
-                    waveNowX={layout.nowX}
+                    orientation={vertical ? "vertical" : "horizontal"}
+                    timeLen={sm?.timeLen ?? 0}
+                    wave={vertical ? null : calmCurrent.wave}
+                    routeWave={vertical ? summitCurrent.wave : null}
+                    waveNowX={vertical ? routeLen : layout.nowX}
                     wavePeriodMs={wavePeriodMs}
                     loudnessPreview={
                       preview?.branchId === branch.id ? preview.level : undefined
@@ -1484,13 +1763,17 @@ export function LifeTimeline() {
                 );
               })}
 
-              {/* fire consuming a burned thread */}
+              {/* fire consuming a burned thread — or, on the summit, the cut */}
               {burn &&
                 !reducedMotion &&
                 (() => {
                   const g = layout.geometries.find((x) => x.branchId === burn.branchId);
                   if (!g || !g.inWindow) return null;
-                  return <BurnAway key={burn.key} path={g.path} />;
+                  return vertical ? (
+                    <RopeCut key={burn.key} path={g.path} />
+                  ) : (
+                    <BurnAway key={burn.key} path={g.path} />
+                  );
                 })()}
 
               {/* the impact of Pip's strike */}
@@ -1526,9 +1809,10 @@ export function LifeTimeline() {
                 const g = layout.geometries.find((x) => x.branchId === c.branchId);
                 if (!g || !g.inWindow) return null;
                 const cx = g.endX + COIN_LEAD;
+                const fadeW = vertical ? svgWidth : layout.metrics.width;
                 const fade = Math.max(
                   0,
-                  Math.min(1, (layout.metrics.width - 40 - cx) / 45, (cx + 20) / 45),
+                  Math.min(1, (fadeW - 40 - cx) / 45, (cx + 20) / 45),
                 );
                 if (fade <= 0) return null;
                 return (
@@ -1552,11 +1836,21 @@ export function LifeTimeline() {
                     const g = layout.geometries.find((x) => x.branchId === id);
                     const branch = byId.get(id);
                     if (!g || !branch || g.endsOnMain || !g.inWindow) return null;
+                    // The summit variant is the same curve transposed: from
+                    // the rope's column up into the ledge on the route.
+                    const cl = layout.metrics.curveLength;
+                    const d =
+                      vertical && sm
+                        ? `M ${g.laneX ?? g.endX} ${Math.min(g.forkY - 24, sm.nowScreenY + cl * 1.4)}` +
+                          ` C ${g.laneX ?? g.endX} ${sm.nowScreenY + cl * 0.5},` +
+                          ` ${sm.routeX} ${sm.nowScreenY + cl * 0.55},` +
+                          ` ${sm.routeX} ${sm.nowScreenY}`
+                        : mergePreviewPath(g, layout.metrics);
                     return (
                       <AnimatedPath
                         key={id}
                         animatedProps={mergeFlowProps}
-                        d={mergePreviewPath(g, layout.metrics)}
+                        d={d}
                         stroke={branchColor(branch, theme)}
                         strokeWidth={2.25}
                         fill="none"
@@ -1568,8 +1862,8 @@ export function LifeTimeline() {
                   })}
                   {operation.branchIds.length > 0 && (
                     <MergePreviewTarget
-                      cx={layout.nowX - 2}
-                      cy={layout.mainY}
+                      cx={nowPt.x - (vertical ? 0 : 2)}
+                      cy={nowPt.y}
                       stroke={tk.accent}
                       reducedMotion={reducedMotion}
                     />
@@ -1590,16 +1884,21 @@ export function LifeTimeline() {
                 accessibilityLabel={t("Now. Select to see integrated threads.")}
               >
                 <NowGlow
-                  cx={layout.nowX - 2}
-                  cy={layout.mainY}
+                  cx={nowPt.x - (vertical ? 0 : 2)}
+                  cy={nowPt.y}
                   fill={tk.accent}
                   theme={theme}
                   reducedMotion={reducedMotion}
                 />
-                <Circle cx={layout.nowX - 2} cy={layout.mainY} r={7} fill={tk.accent} />
+                <Circle
+                  cx={nowPt.x - (vertical ? 0 : 2)}
+                  cy={nowPt.y}
+                  r={7}
+                  fill={tk.accent}
+                />
                 <SvgText
-                  x={layout.nowX - 8}
-                  y={layout.mainY - 18}
+                  x={vertical ? nowPt.x - 22 : layout.nowX - 8}
+                  y={vertical ? nowPt.y + 4 : layout.mainY - 18}
                   textAnchor="end"
                   fontSize={13}
                   fontWeight="600"
@@ -1629,7 +1928,7 @@ export function LifeTimeline() {
                 <Mascot
                   posX={mascot.posX}
                   posY={mascot.posY}
-                  viewW={layout.metrics.width}
+                  viewW={vertical ? svgWidth : layout.metrics.width}
                   runPhase={mascot.runPhase}
                   frame={hit && !hit.calm ? "LAND_A" : mascot.frame}
                   flip={mascot.flip}
@@ -1661,10 +1960,12 @@ export function LifeTimeline() {
                   if (decidedToday(b, now) || restingToday(b, now)) return null;
                   const spriteW = PX * 12;
                   const spriteH = PX * 16;
+                  const stageW = vertical ? svgWidth : layout.metrics.width;
+                  const worldH = vertical && sm ? sm.timeLen : layout.height;
                   // Pip fades out at the canvas edges (viewing the past);
                   // his offers must never linger there half-clipped either.
                   if (
-                    mascot.pos.x > layout.metrics.width - 70 ||
+                    mascot.pos.x > stageW - 70 ||
                     mascot.pos.x < -10
                   ) {
                     return null;
@@ -1676,9 +1977,9 @@ export function LifeTimeline() {
                   const optionLabels = { reflect: t("Reflect"), dial: t("How loud?") };
                   const bubbleW = pillRowW([optionLabels.reflect, optionLabels.dial], tk.fontBody) + BUBBLE_PAD * 2;
                   const wouldOverflowRight =
-                    mascot.pos.x + spriteW + 14 + bubbleW + 10 > layout.metrics.width;
+                    mascot.pos.x + spriteW + 14 + bubbleW + 10 > stageW;
                   const pipOnScreen =
-                    mascot.pos.x > -spriteW && mascot.pos.x < layout.metrics.width - spriteW / 2;
+                    mascot.pos.x > -spriteW && mascot.pos.x < stageW - spriteW / 2;
                   const dir: 1 | -1 = wouldOverflowRight && pipOnScreen ? -1 : 1;
                   const originX = dir === 1 ? mascot.pos.x + spriteW + 5 : mascot.pos.x - 5;
                   // On his right the bubble's top row sits at his shoulder
@@ -1690,7 +1991,7 @@ export function LifeTimeline() {
                       ? mascot.pos.y + spriteH * 0.55
                       : mascot.pos.y + PX * 10 + 4 + BUBBLE_PAD + ROW_H / 2;
                   const maxCy =
-                    layout.height - 26 - (ROW_H * 1.5 + ROW_GAP + BUBBLE_PAD);
+                    worldH - 26 - (ROW_H * 1.5 + ROW_GAP + BUBBLE_PAD);
                   const cy = Math.max(20, Math.min(desired, maxCy));
                   // The tail aims back at Pip's middle (capped to stay a beak).
                   const pipMidY = mascot.pos.y + spriteH / 2;
@@ -1777,11 +2078,13 @@ export function LifeTimeline() {
           >
             <CelebrationBurst
               theme={theme}
-              nowX={layout.nowX}
-              mainY={layout.mainY}
+              nowX={vertical ? nowPt.x - scrollXRef.current : nowPt.x}
+              mainY={nowPt.y}
               shimmer={tk.shimmer}
               accent={tk.accent}
               danger={tk.danger}
+              spreadAxis={vertical ? "y" : "x"}
+              spreadLen={routeLen}
             />
           </View>
         )}
@@ -1805,8 +2108,16 @@ export function LifeTimeline() {
               <SmokeFly
                 key={i}
                 index={i}
-                x0={layout.nowX * (0.1 + (0.8 * i) / Math.max(1, bloom.count - 1))}
-                y0={layout.mainY - 3}
+                x0={
+                  vertical
+                    ? nowPt.x - scrollXRef.current - 3
+                    : layout.nowX * (0.1 + (0.8 * i) / Math.max(1, bloom.count - 1))
+                }
+                y0={
+                  vertical
+                    ? nowPt.y + routeLen * (0.1 + (0.8 * i) / Math.max(1, bloom.count - 1))
+                    : layout.mainY - 3
+                }
               >
                 <View
                   style={{
@@ -1821,7 +2132,10 @@ export function LifeTimeline() {
           </View>
         )}
 
-        {/* the dates, pinned: lanes scroll behind them, they never move */}
+        {/* the dates, pinned: lanes scroll behind them, they never move.
+            The summit map hangs them on a rail along the right edge instead —
+            the face scrolls sideways behind it. */}
+        {!vertical && (
         <View
           pointerEvents="none"
           style={{
@@ -1855,6 +2169,42 @@ export function LifeTimeline() {
             );
           })}
         </View>
+        )}
+        {vertical && sm && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 64,
+            zIndex: 5,
+            backgroundColor: alpha(tk.bg, 0.88),
+          }}
+        >
+          {ticks.map((tick) => {
+            const y = dateToScreenY(tick.date, layout.window, sm.timeLen);
+            if (y < -20 || y > size.height + 8) return null;
+            return (
+              <T
+                key={tick.date}
+                style={{
+                  position: "absolute",
+                  left: 6,
+                  top: y - 7,
+                  fontSize: 11,
+                  lineHeight: 13,
+                  fontWeight: tick.major ? "600" : "400",
+                  color: tick.major ? tk.inkSoft : tk.inkFaint,
+                }}
+              >
+                {tick.label === "Today" ? t("Today") : tick.label}
+              </T>
+            );
+          })}
+        </View>
+        )}
 
         {/* One round +, unmistakable and wordless, floating on the water. */}
         {showFab && (
@@ -1909,6 +2259,8 @@ export function LifeTimeline() {
           const usable = target && !isClosed(target);
           if (operation.kind !== "idle") return null;
           const cooling = Date.now() < attackCooldownUntil || !usable;
+          // summit has no entry on purpose: THEME_COPY (src/ui/theme-copy.ts)
+          // remaps "Bonk!" → "Chalk!" and "SUPER BONK!" → "FULL SEND!".
           const VERBS: Partial<Record<typeof theme, string>> = {
             demonfire: "Douse!",
             koipond: "Splash!",
@@ -1923,7 +2275,13 @@ export function LifeTimeline() {
           const openTargets = activeLines
             .map((b) => ({ b, g: layout.geometries.find((x) => x.branchId === b.id) }))
             .filter((x) => x.g && x.g.inWindow)
-            .sort((a, bx) => (a.g!.endY ?? 0) - (bx.g!.endY ?? 0));
+            // Summit's sweep runs along the ledge (left → right); elsewhere
+            // top → bottom through the lanes.
+            .sort((a, bx) =>
+              vertical
+                ? (a.g!.endX ?? 0) - (bx.g!.endX ?? 0)
+                : (a.g!.endY ?? 0) - (bx.g!.endY ?? 0),
+            );
           const superReady = bonkCharge >= 100 && openTargets.length > 0;
           const fireSuperBonk = () => {
             if (!superReady) return;
@@ -2109,7 +2467,8 @@ export function LifeTimeline() {
         )}
 
         {awayFromNow && (
-          <View style={{ position: "absolute", top: 12, right: 14.4, zIndex: 5 }}>
+          // summit's date rail owns the right edge: the button steps left of it
+          <View style={{ position: "absolute", top: 12, right: vertical ? 78 : 14.4, zIndex: 5 }}>
             <Button
               label={`⇥ ${t("Return to Now")}`}
               onPress={returnToNow}
@@ -2124,7 +2483,9 @@ export function LifeTimeline() {
           (() => {
             const g = layout.geometries.find((x) => x.branchId === burn.branchId);
             if (!g) return null;
-            const x0 = Math.min(g.labelX, layout.metrics.width - 80);
+            const x0 = vertical
+              ? Math.max(8, Math.min(g.labelX - scrollXRef.current, size.width - 80))
+              : Math.min(g.labelX, layout.metrics.width - 80);
             const y0 = g.labelY;
             return (
               <View
@@ -2165,8 +2526,8 @@ export function LifeTimeline() {
                     index={0}
                     x0={x0}
                     y0={y0}
-                    dx={layout.nowX - 24 - x0}
-                    dy={layout.mainY - y0}
+                    dx={(vertical ? nowPt.x - scrollXRef.current : layout.nowX - 24) - x0}
+                    dy={nowPt.y - y0}
                   >
                     <Tag label={burn.lesson} quality />
                   </ReclaimFly>
@@ -2181,7 +2542,9 @@ export function LifeTimeline() {
           (() => {
             const g = layout.geometries.find((x) => x.branchId === reclaim.branchId);
             if (!g) return null;
-            const x0 = Math.min(g.labelX, layout.metrics.width - 60);
+            const x0 = vertical
+              ? Math.max(8, Math.min(g.labelX - scrollXRef.current, size.width - 60))
+              : Math.min(g.labelX, layout.metrics.width - 60);
             const y0 = g.labelY;
             return (
               <View
@@ -2203,8 +2566,8 @@ export function LifeTimeline() {
                     index={i}
                     x0={x0}
                     y0={y0}
-                    dx={layout.nowX - 24 - x0}
-                    dy={layout.mainY - y0}
+                    dx={(vertical ? nowPt.x - scrollXRef.current : layout.nowX - 24) - x0}
+                    dy={nowPt.y - y0}
                   >
                     <Tag label={t(f)} quality />
                   </ReclaimFly>

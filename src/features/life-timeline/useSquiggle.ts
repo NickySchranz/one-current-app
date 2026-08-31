@@ -24,6 +24,18 @@ const SPEED = [0, 0, 0.8, 1.3, 2.1, 3.2]; // wave cycles per second
 const LAMBDA = [56, 56, 56, 48, 40, 34]; // px of line per wave cycle
 const TAPER = 18; // px over which the wave fades to zero at both ends
 
+// The sway (summit's ropes): not a travelling wave but a hanging rope's slow
+// pendulum. The path runs fork (bottom, s=0) → anchor (top, s=total); the
+// displacement is zero at the anchor, grows toward the low end, and is
+// clamped back to zero just above the fork so both ends stay seated on the
+// map. Loudness scales amplitude and pace — a quiet rope (1) hangs still.
+const SWAY_AMP = [0, 0, 5, 8, 11, 14]; // px at the freest point
+const SWAY_HZ = [0, 0, 0.28, 0.4, 0.55, 0.75]; // pendulum cycles per second
+const KROPE = (2 * Math.PI) / 900; // slight phase lag down the rope's length
+const FORK_CLAMP = 26; // px above the fork that re-seat on the route
+
+export type StrokeMode = "slither" | "sway";
+
 /** Linear blend between neighbouring table entries for fractional levels. */
 function lerpTable(table: number[], level: number): number {
   "worklet";
@@ -69,6 +81,10 @@ export function useBranchStrokes(opts: {
   attachStart?: boolean;
   /** The path ends on the main line (integrated — merge curve). */
   attachEnd?: boolean;
+  /** "slither" is the travelling wave; "sway" is summit's hanging rope. */
+  mode?: StrokeMode;
+  /** Per-rope phase offset so a face of ropes never sways in sync. */
+  swayPhase?: number;
 }): BranchStrokeProps {
   const {
     trembling,
@@ -83,6 +99,8 @@ export function useBranchStrokes(opts: {
     wavePeriodMs = 1,
     attachStart = false,
     attachEnd = false,
+    mode = "slither",
+    swayPhase = 0,
   } = opts;
 
   const riding = wave != null && !reducedMotion && (attachStart || attachEnd);
@@ -140,10 +158,30 @@ export function useBranchStrokes(opts: {
     if (!trembling && !waveOn) return basePath;
     const freqP = wave ? wave.progressSV.value : 0;
     const waveT = wave ? wave.tick.value : 0;
+    const t = tick.value;
+    if (mode === "sway") {
+      // Summit never rides the calm wave (wave is null there), so this is
+      // always the full rebuild — same cost class as a loud slither. No
+      // frozen middle is possible: every point below the anchor moves.
+      const swayAmp = trembling ? lerpTable(SWAY_AMP, level) : 0;
+      const swayOmega = 2 * Math.PI * lerpTable(SWAY_HZ, level);
+      let out = "";
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const a = total - p.s; // arc distance below the top anchor
+        const pend = a / Math.max(total, 1);
+        const seat = attachStart ? Math.min(1, p.s / FORK_CLAMP) : 1;
+        const off =
+          swayAmp * pend * seat * Math.sin(swayOmega * t - KROPE * a + swayPhase);
+        const x = p.x + p.nx * off;
+        const y = p.y + p.ny * off;
+        out += `${out ? "L" : "M"}${Math.round(x * 10) / 10} ${Math.round(y * 10) / 10}`;
+      }
+      return out;
+    }
     const amp = trembling ? lerpTable(AMP, level) : 0;
     const k = (2 * Math.PI) / lerpTable(LAMBDA, level);
     const omega = 2 * Math.PI * lerpTable(SPEED, level);
-    const t = tick.value;
     if (!trembling && waveOn && rideSplit) {
       // Fast path: bend only the attached ends around the frozen middle.
       let out = "";
@@ -180,7 +218,7 @@ export function useBranchStrokes(opts: {
       out += `${out ? "L" : "M"}${Math.round(x * 10) / 10} ${Math.round(y * 10) / 10}`;
     }
     return out;
-  }, [trembling, riding, pts, level, basePath, total, attachStart, attachEnd, waveNowX, wavePeriodMs, wave, tick, rideSplit]);
+  }, [trembling, riding, pts, level, basePath, total, attachStart, attachEnd, waveNowX, wavePeriodMs, wave, tick, rideSplit, mode, swayPhase]);
 
   // Newborn draw-in: dash the full length, sweep the offset to zero.
   const drawing = born && !reducedMotion;

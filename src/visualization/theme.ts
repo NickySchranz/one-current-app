@@ -97,6 +97,14 @@ export const THEMES = [
     paper: "#17161c",
     accent: "#8a86b5",
   },
+  {
+    id: "summit",
+    name: "Summit",
+    hint: "Granite and morning snow. Every open thread is a rope up the face — answer it and the climber moves higher.",
+    mode: "light",
+    paper: "#eef3f7",
+    accent: "#3e6b8f",
+  },
 ] as const;
 
 export type ThemeId = (typeof THEMES)[number]["id"];
@@ -108,4 +116,15 @@ export function isThemeId(value: string): value is ThemeId {
 /** Whether a theme sits on dark ground — line colours pick their lightness from this. */
 export function themeMode(id: ThemeId): "light" | "dark" {
   return THEMES.find((t) => t.id === id)?.mode ?? "light";
+}
+
+export type ThemeOrientation = "horizontal" | "vertical";
+
+/**
+ * Which way the map flows. Summit re-stages the whole timeline as a mountain
+ * climb: time runs upward, threads hang as ropes. Every other theme keeps the
+ * horizontal life line.
+ */
+export function themeOrientation(id: ThemeId): ThemeOrientation {
+  return id === "summit" ? "vertical" : "horizontal";
 }

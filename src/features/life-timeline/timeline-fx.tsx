@@ -157,6 +157,8 @@ const GLOWS: Partial<Record<ThemeId, GlowSpec | null>> = {
       { at: 1, opacity: 0.1, scale: 0.9 },
     ],
   },
+  // summit: thin-air breathing — slow, wide, unhurried
+  summit: { duration: 5000, easing: easeInOut, stops: breathe },
 };
 // riverbed / inkwash and any theme without a character: the default breathe.
 const DEFAULT_GLOW: GlowSpec = { duration: 3000, easing: easeInOut, stops: breathe };
@@ -867,6 +869,8 @@ const CELEBRATIONS: Partial<Record<ThemeId, CelebrationSpec>> = {
   abyss: { shape: "dot", motion: "rise", count: 18, palette: (c) => [c.shimmer, c.accent] },
   pompom: { shape: "dot", motion: "drift", count: 18, palette: (c) => [c.shimmer, "#ffd7b0"] },
   gravemist: { shape: "dot", motion: "drift", count: 14, twinkle: true, palette: (c) => [c.shimmer, "#cfe3dd"] },
+  // summit: a snow burst at the ledge, glinting in alpenglow
+  summit: { shape: "dot", motion: "fall", count: 18, twinkle: true, palette: (c) => [c.shimmer, "#ffffff", c.accent] },
 };
 
 export function celebrationFor(theme: ThemeId): CelebrationSpec {
@@ -987,6 +991,8 @@ export function CelebrationBurst({
   shimmer,
   accent,
   danger,
+  spreadAxis = "x",
+  spreadLen = 0,
 }: {
   theme: ThemeId;
   nowX: number;
@@ -994,6 +1000,10 @@ export function CelebrationBurst({
   shimmer: string;
   accent: string;
   danger: string;
+  /** "x" spreads along the horizontal line (default); "y" down a vertical
+   * route (summit), over `spreadLen` px below (nowX, mainY). */
+  spreadAxis?: "x" | "y";
+  spreadLen?: number;
 }) {
   const spec = celebrationFor(theme);
   const palette = spec.palette({ shimmer, accent, danger });
@@ -1007,8 +1017,16 @@ export function CelebrationBurst({
           key={i}
           spec={spec}
           index={i}
-          x0={nowX * (0.06 + 0.88 * seeded(i, 9))}
-          y0={mainY - 4 + (seeded(i, 8) - 0.5) * 10}
+          x0={
+            spreadAxis === "y"
+              ? nowX - 4 + (seeded(i, 8) - 0.5) * 10
+              : nowX * (0.06 + 0.88 * seeded(i, 9))
+          }
+          y0={
+            spreadAxis === "y"
+              ? mainY + spreadLen * (0.06 + 0.88 * seeded(i, 9))
+              : mainY - 4 + (seeded(i, 8) - 0.5) * 10
+          }
           color={palette[i % palette.length]}
         />
       ))}
@@ -1058,6 +1076,8 @@ const BACKDROPS: Partial<Record<ThemeId, BackdropSpec>> = {
   abyss: { kind: "rise", count: 16, size: [1.5, 3.5], opacity: [0.10, 0.26], speed: [0.55, 1.2], palette: (c) => [c.inkFaint, c.shimmer] },
   pompom: { kind: "drift", count: 14, size: [3, 6], opacity: [0.07, 0.18], speed: [0.7, 1.3], palette: (c) => ["#e8c9ad", c.shimmer] },
   gravemist: { kind: "drift", count: 14, size: [26, 54], opacity: [0.05, 0.16], speed: [0.7, 1.3], palette: (c) => [c.inkFaint, c.shimmer], clears: true },
+  // summit: gentle snowfall that warms toward alpenglow as the day gathers
+  summit: { kind: "fall", count: 16, size: [2, 4], opacity: [0.08, 0.2], speed: [0.6, 1.2], palette: (c) => [c.inkFaint, "#ffffff"] },
 };
 
 export function backdropFor(theme: ThemeId): BackdropSpec {
@@ -1357,6 +1377,15 @@ const SCENES: Partial<Record<ThemeId, SceneSpec>> = {
       { kind: "slabs", heightFrac: 0.12, color: (c) => c.inkFaint, salt: 16 },
     ],
     deco: "tree",
+  },
+  summit: {
+    opacity: [0.1, 0.22],
+    wash: { top: () => "#bcd4e6", bottom: () => "#5c7284", topO: 0.12, bottomO: 0.28 },
+    orb: { xFrac: 0.85, yFrac: 0.12, r: 30, color: (c) => c.shimmer },
+    silhouettes: [
+      { kind: "rocks", heightFrac: 0.3, color: () => "#8fa3b2", salt: 17 },
+      { kind: "rocks", heightFrac: 0.18, color: () => "#6b8090", salt: 18 },
+    ],
   },
 };
 

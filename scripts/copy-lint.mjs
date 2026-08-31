@@ -46,10 +46,17 @@ const DYNAMIC_KEYS = [
   // bonk verbs + super state (src/features/life-timeline/LifeTimeline.tsx)
   "Bonk!", "Douse!", "Splash!", "Whoosh!", "Boop!", "Dim it!", "Shoo!", "Ruffle!",
   "SUPER BONK!",
-  // paywall COPY table (src/features/paywall/PaywallPrompt.tsx)
+  // paywall COPY table (src/features/paywall/PaywallPrompt.tsx) — titles AND
+  // bodies render via t(copy.title)/t(copy.body)
   "This look is part of Pro",
   "The free current holds {n} threads",
   "Sharing is part of Pro",
+  "The five plain looks are always free. The living themes — where the timeline itself comes alive — come with One Current Pro.",
+  "The free plan holds {n} open threads at a time. Integrate or close one to make room — or let One Current Pro carry as many as your days do.",
+  "Creating a file for your psychologist comes with One Current Pro. Everything else about your data stays yours, on this device, either way.",
+  // per-theme copy overlay (src/ui/theme-copy.ts): every VALUE is a live key
+  // reached via THEME_COPY[theme]?.[text], invisible to the t("...") regex.
+  ...themeCopyValues(),
   // walkthrough steps render via t(step.text)/t(step.subtext)
   // (src/features/tutorial/steps.ts). Parsed from the file so new step copy
   // can never ship without its translations.
@@ -72,6 +79,27 @@ function walkthroughStepTexts() {
   let m;
   while ((m = re.exec(text))) out.add(m[1].replace(/\\(.)/g, "$1"));
   return [...out];
+}
+
+/**
+ * Every "key": "value" pair in the per-theme copy overlay
+ * (src/ui/theme-copy.ts). Values become DYNAMIC_KEYS (they must exist in
+ * both Spanish dictionaries); keys are checked below against the rest of
+ * src, so a reworded original can never leave a dead remap behind.
+ */
+function themeCopyPairs() {
+  const text = readFileSync(join(SRC, "ui", "theme-copy.ts"), "utf8");
+  const pairs = [];
+  const re = /"((?:[^"\\]|\\.)*)"\s*:\s*\n?\s*"((?:[^"\\]|\\.)*)"/g;
+  let m;
+  while ((m = re.exec(text))) {
+    pairs.push([m[1].replace(/\\(.)/g, "$1"), m[2].replace(/\\(.)/g, "$1")]);
+  }
+  return pairs;
+}
+
+function themeCopyValues() {
+  return [...new Set(themeCopyPairs().map(([, v]) => v))];
 }
 
 function shareFieldLabels() {
@@ -143,11 +171,13 @@ const dicts = {
 let bannedHits = 0;
 const usedKeys = new Set(DYNAMIC_KEYS);
 const srcChunks = [];
+const srcSansOverlayChunks = [];
 for (const file of walk(SRC)) {
   const rel = relative(process.cwd(), file);
   if (rel.startsWith(join("src", "i18n") + "/")) continue;
   const text = readFileSync(file, "utf8");
   srcChunks.push(text);
+  if (rel !== join("src", "ui", "theme-copy.ts")) srcSansOverlayChunks.push(text);
   for (const { text: lit, line } of stringLiterals(text)) {
     if (ALLOW.some((rule) => rule.test(lit))) continue;
     for (const rule of BANNED) {
@@ -169,6 +199,19 @@ for (const [name, keys] of Object.entries(dicts)) {
   problems += missing.length;
   console.log(`${missing.length} key(s) missing from the ${name} dictionary (fall back to English):`);
   for (const key of missing) console.log(`  MISSING(${name})  ${key}`);
+}
+
+// Overlay keys must still exist in the rest of src: a reworded original
+// would otherwise leave a remap behind that silently never matches at runtime.
+{
+  const srcSansOverlay = srcSansOverlayChunks.join("\n");
+  const dead = themeCopyPairs()
+    .map(([k]) => k)
+    .filter((k) => !srcSansOverlay.includes(k))
+    .sort();
+  problems += dead.length;
+  console.log(`${dead.length} overlay key(s) in theme-copy.ts whose English source is gone:`);
+  for (const key of dead) console.log(`  OVERLAY-DEAD  ${key.slice(0, 90)}`);
 }
 
 // Dead keys: translations whose English source string no longer exists.

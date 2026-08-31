@@ -12,6 +12,7 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import { Circle, G, Path, Text as SvgText } from "react-native-svg";
+import type { CircleProps } from "react-native-svg";
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import type { BranchGeometry } from "@/visualization/branch-lines/paths";
 import { branchColor, restingToday } from "@/visualization/branch-lines/style";
@@ -29,6 +30,7 @@ import { AnglerHead } from "./AnglerHead";
 import { Ghost } from "./Ghost";
 import { Pomeranian } from "./Pomeranian";
 import { calmWaveOffset, useBranchStrokes, type WaveHandles } from "./useSquiggle";
+import { AnchorKnot, CoiledRope } from "./SummitScene";
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -91,7 +93,20 @@ type Props = {
   wave?: WaveHandles | null;
   waveNowX?: number;
   wavePeriodMs?: number;
+  /** Summit: the map runs vertically — ropes sway, anchors knot, coils rest. */
+  orientation?: "horizontal" | "vertical";
+  /** Summit: time-axis length, for mapping screen y to route arc length. */
+  timeLen?: number;
+  /** Summit: the route's wave — only the fork/merge dots ride it. */
+  routeWave?: WaveHandles | null;
 };
+
+/** Cheap stable hash → [0, 2π): every rope sways on its own phase. */
+function phaseFromId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return (Math.abs(h) % 1000) / 1000 * 2 * Math.PI;
+}
 
 /** One branch: fork curve, run, optional merge curve, moments, label, endpoint. */
 export const BranchLine = memo(function BranchLine({
@@ -117,7 +132,11 @@ export const BranchLine = memo(function BranchLine({
   wavePeriodMs = 1,
   holding = false,
   holdP,
+  orientation = "horizontal",
+  timeLen = 0,
+  routeWave = null,
 }: Props) {
+  const vertical = orientation === "vertical";
   const t = useT();
   const tk = useTheme();
   const now = nowMs !== undefined ? new Date(nowMs) : new Date();
@@ -176,38 +195,78 @@ export const BranchLine = memo(function BranchLine({
     wavePeriodMs,
     attachStart: g.forkVisible,
     attachEnd: g.endsOnMain,
+    mode: vertical ? "sway" : "slither",
+    swayPhase: vertical ? phaseFromId(branch.id) : 0,
   });
 
   // The fork and merge dots sit ON the main line, so they rise and fall
-  // with its wave — same clock, same formula, no drift.
-  const forkDotProps = useAnimatedProps(() => ({
-    cy:
-      g.forkY -
-      (wave
-        ? calmWaveOffset(
-            g.forkX,
-            wave.tick.value,
-            Math.min(1.35, wave.progressSV.value + wave.surgeSV.value),
-            wave.progressSV.value,
-            waveNowX,
-            wavePeriodMs,
-          )
-        : 0),
-  }), [g.forkX, g.forkY, wave, waveNowX, wavePeriodMs]);
-  const mergeDotProps = useAnimatedProps(() => ({
-    cy:
-      g.endY -
-      (wave && g.endsOnMain
-        ? calmWaveOffset(
-            g.endX,
-            wave.tick.value,
-            Math.min(1.35, wave.progressSV.value + wave.surgeSV.value),
-            wave.progressSV.value,
-            waveNowX,
-            wavePeriodMs,
-          )
-        : 0),
-  }), [g.endX, g.endY, g.endsOnMain, wave, waveNowX, wavePeriodMs]);
+  // with its wave — same clock, same formula, no drift. On the summit map
+  // the route runs vertically and its wave displaces x, so the dots ride
+  // sideways instead (routeWave; arc length runs canvas bottom → ledge).
+  const forkDotProps = useAnimatedProps<CircleProps>(() => {
+    if (vertical) {
+      return {
+        cx:
+          g.forkX -
+          (routeWave
+            ? calmWaveOffset(
+                timeLen - g.forkY,
+                routeWave.tick.value,
+                Math.min(1.35, routeWave.progressSV.value + routeWave.surgeSV.value),
+                routeWave.progressSV.value,
+                waveNowX,
+                wavePeriodMs,
+              )
+            : 0),
+      };
+    }
+    return {
+      cy:
+        g.forkY -
+        (wave
+          ? calmWaveOffset(
+              g.forkX,
+              wave.tick.value,
+              Math.min(1.35, wave.progressSV.value + wave.surgeSV.value),
+              wave.progressSV.value,
+              waveNowX,
+              wavePeriodMs,
+            )
+          : 0),
+    };
+  }, [g.forkX, g.forkY, wave, routeWave, vertical, timeLen, waveNowX, wavePeriodMs]);
+  const mergeDotProps = useAnimatedProps<CircleProps>(() => {
+    if (vertical) {
+      return {
+        cx:
+          g.endX -
+          (routeWave && g.endsOnMain
+            ? calmWaveOffset(
+                timeLen - g.endY,
+                routeWave.tick.value,
+                Math.min(1.35, routeWave.progressSV.value + routeWave.surgeSV.value),
+                routeWave.progressSV.value,
+                waveNowX,
+                wavePeriodMs,
+              )
+            : 0),
+      };
+    }
+    return {
+      cy:
+        g.endY -
+        (wave && g.endsOnMain
+          ? calmWaveOffset(
+              g.endX,
+              wave.tick.value,
+              Math.min(1.35, wave.progressSV.value + wave.surgeSV.value),
+              wave.progressSV.value,
+              waveNowX,
+              wavePeriodMs,
+            )
+          : 0),
+    };
+  }, [g.endX, g.endY, g.endsOnMain, wave, routeWave, vertical, timeLen, waveNowX, wavePeriodMs]);
 
   // `.branch-dimmed { transition: opacity 0.25s ease }` — the whole group
   // steps back while another line holds the focus.
@@ -252,14 +311,36 @@ export const BranchLine = memo(function BranchLine({
   if (!g.inWindow) return null;
 
   const color = branchColor(branch, theme, emphasized ? "raised" : g.style.saturation);
-  const label = branch.title.length > 34 ? branch.title.slice(0, 32) + "…" : branch.title;
+  // Rope labels ladder above narrow columns: they earn less room than lanes.
+  const maxChars = vertical ? 22 : 34;
+  const label =
+    branch.title.length > maxChars ? branch.title.slice(0, maxChars - 2) + "…" : branch.title;
   const Creature = CREATURES[theme];
   const labelText =
     label +
     (branch.recurrenceCount > 0 ? t(" · returned") : "") +
     (acted ? t(" · decided today") : "");
-  const labelX = g.reachesNow ? g.endX - 12 : g.labelX;
-  const labelAnchor = g.reachesNow ? ("end" as const) : undefined;
+  const labelX = vertical ? g.labelX : g.reachesNow ? g.endX - 12 : g.labelX;
+  const labelAnchor = vertical
+    ? (g.labelAnchor ?? ("middle" as const))
+    : g.reachesNow
+      ? ("end" as const)
+      : undefined;
+
+  // Answered for the day on the summit map: the rope leaves the face and a
+  // small coil rests at its anchor — still tappable, back as a rope tomorrow
+  // (the same date compare that lets a faint lane return elsewhere).
+  if (vertical && (resting || acted) && !g.endsOnMain) {
+    return (
+      <AnimatedG
+        animatedProps={groupProps}
+        accessible
+        accessibilityLabel={describeBranch(branch, t)}
+      >
+        <CoiledRope x={g.endX} y={g.endY} color={color} bg={tk.bg} onPress={select} />
+      </AnimatedG>
+    );
+  }
 
   return (
     <AnimatedG
@@ -360,7 +441,16 @@ export const BranchLine = memo(function BranchLine({
           In a creature theme an undecided open thread is a small creature
           facing you; a decision today calms it back into the plain circle. */}
       {!g.endsOnMain &&
-        (Creature && !acted && !resting ? (
+        (vertical ? (
+          <AnchorKnot
+            x={g.endX}
+            y={g.endY}
+            color={color}
+            bg={tk.bg}
+            opacity={endpointStaticOpacity}
+            onPress={select}
+          />
+        ) : Creature && !acted && !resting ? (
           <Creature
             x={g.endX}
             y={g.endY}

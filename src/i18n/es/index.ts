@@ -12,6 +12,7 @@ import { paywall } from "./paywall";
 import { auth } from "./auth";
 import { tutorial } from "./tutorial";
 import { sweep } from "./sweep";
+import { summit } from "./summit";
 import { shareFields } from "./share-fields";
 
 export const es: Record<string, string> = {
@@ -25,5 +26,6 @@ export const es: Record<string, string> = {
   ...auth,
   ...tutorial,
   ...sweep,
+  ...summit,
   ...shareFields,
 };

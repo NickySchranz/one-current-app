@@ -286,9 +286,13 @@ export function Mascot({
   const frames = CHARACTER_FRAMES[mascotType];
   const pixels = frames[frame] ?? frames['IDLE_A'];
   const spriteW = PX * 12;
-  // While running, both gait frames are mounted and the UI thread swaps
-  // their opacity — the 9Hz gait never re-renders React.
-  const running = (frame === 'RUN_A' || frame === 'RUN_B') && !!runPhase;
+  // While running (or climbing on the summit map), both gait frames are
+  // mounted and the UI thread swaps their opacity — the 9Hz gait never
+  // re-renders React.
+  const climbing = (frame === 'CLIMB_A' || frame === 'CLIMB_B') && !!runPhase;
+  const running = ((frame === 'RUN_A' || frame === 'RUN_B') && !!runPhase) || climbing;
+  const gaitFrameA: FrameName = climbing ? 'CLIMB_A' : 'RUN_A';
+  const gaitFrameB: FrameName = climbing ? 'CLIMB_B' : 'RUN_B';
   const gaitA = useAnimatedProps(
     () => ({ opacity: runPhase ? (runPhase.value === 0 ? 1 : 0) : 1 }),
     [runPhase],
@@ -341,10 +345,10 @@ export function Mascot({
         {running ? (
           <>
             <AnimatedG animatedProps={gaitA}>
-              <PixelGrid pixels={frames['RUN_A'] ?? pixels} palette={palette} />
+              <PixelGrid pixels={frames[gaitFrameA] ?? pixels} palette={palette} />
             </AnimatedG>
             <AnimatedG animatedProps={gaitB}>
-              <PixelGrid pixels={frames['RUN_B'] ?? pixels} palette={palette} />
+              <PixelGrid pixels={frames[gaitFrameB] ?? pixels} palette={palette} />
             </AnimatedG>
           </>
         ) : (

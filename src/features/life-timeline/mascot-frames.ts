@@ -40,6 +40,7 @@ export type MascotType = 'chronicler' | 'wisp' | 'wanderer';
 export type FrameName  =
   | 'IDLE_A' | 'IDLE_B'
   | 'RUN_A'  | 'RUN_B'
+  | 'CLIMB_A' | 'CLIMB_B'
   | 'LAND_A'
   | 'INSPECT_A' | 'INSPECT_B'
   | 'TALK_A'    | 'TALK_B'
@@ -184,6 +185,17 @@ const ARM_POINT: Pixel[] = [   // left idle, right pointing with wand/quill
   {c:11,r:8,k:'A'},{c:11,r:7,k:'D'},{c:11,r:6,k:'Ah'},       // right pointing
 ];
 
+// Climbing arms (summit): one arm reaches overhead for the next hold while
+// the other hangs low on the rope — alternating, like the run gait.
+const ARM_CLIMB_A: Pixel[] = [ // left overhead, right low
+  {c:0,r:6,k:'Ah'},{c:0,r:7,k:'A'},{c:1,r:6,k:'D'},          // left reaching up
+  {c:11,r:10,k:'D'},{c:11,r:11,k:'A'},                       // right gripping low
+];
+const ARM_CLIMB_B: Pixel[] = [ // right overhead, left low
+  {c:10,r:6,k:'D'},{c:11,r:6,k:'Ah'},{c:11,r:7,k:'A'},       // right reaching up
+  {c:0,r:10,k:'D'},{c:0,r:11,k:'A'},                         // left gripping low
+];
+
 // ─── FEET ─────────────────────────────────────────────────────────────────────
 
 const FEET_STAND: Pixel[] = [
@@ -240,6 +252,11 @@ function frame(
   return clip(merge(head, BODY, arms, dy(feet, feetDy), SHADOW, ...extras.map(p => [p])));
 }
 
+/** A climbing frame casts no ground shadow — he's on the face, not the floor. */
+function climbFrame(head: Pixel[], arms: Pixel[], feet: Pixel[], extras: Pixel[] = []): Pixel[] {
+  return clip(merge(head, BODY, arms, feet, ...extras.map(p => [p])));
+}
+
 // ─── CHARACTER 1: CHRONICLER ──────────────────────────────────────────────────
 // Scroll quill at top. Round spectacles (small Ad circles over pupils).
 // Gold scroll hanging off right side.
@@ -267,6 +284,8 @@ const CHRONICLER_FRAMES: Record<FrameName, Pixel[]> = {
   IDLE_B:    frame(chrHead(H_NORMAL,-1), ARM_IDLE,  FEET_BOB,   CHR_SCROLL),
   RUN_A:     frame(chrHead(H_NORMAL),    ARM_RUN_A, FEET_RUN_A, CHR_SCROLL),
   RUN_B:     frame(chrHead(H_NORMAL),    ARM_RUN_B, FEET_RUN_B, CHR_SCROLL),
+  CLIMB_A:   climbFrame(chrHead(H_FOCUSED), ARM_CLIMB_A, FEET_RUN_A, CHR_SCROLL),
+  CLIMB_B:   climbFrame(chrHead(H_FOCUSED), ARM_CLIMB_B, FEET_RUN_B, CHR_SCROLL),
   LAND_A:    frame(chrHead(H_NORMAL,+1), ARM_IDLE,  FEET_SQUAT, CHR_SCROLL),
   INSPECT_A: frame(chrHead(H_FOCUSED),   ARM_POINT, FEET_STAND, CHR_SCROLL),
   INSPECT_B: frame(chrHead(H_FOCUSED),   [...ARM_POINT, {c:11,r:5,k:'Ah' as const}], FEET_STAND, CHR_SCROLL),
@@ -322,6 +341,8 @@ const WISPS_FRAMES: Record<FrameName, Pixel[]> = {
   IDLE_B:    wispFrame(H_NORMAL,  WISP_STARS_B, ARM_IDLE, -1),
   RUN_A:     wispFrame(H_NORMAL,  WISP_STARS_A, ARM_RUN_A),
   RUN_B:     wispFrame(H_NORMAL,  WISP_STARS_B, ARM_RUN_B),
+  CLIMB_A:   clip(merge(WISP_STARS_A, merge(H_FOCUSED(), WISP_CROWN), BODY, WISP_BODY_GLOW, ARM_CLIMB_A, WISP_TRAIL)),
+  CLIMB_B:   clip(merge(WISP_STARS_B, merge(H_FOCUSED(), WISP_CROWN), BODY, WISP_BODY_GLOW, ARM_CLIMB_B, WISP_TRAIL)),
   LAND_A:    wispFrame(H_NORMAL,  WISP_STARS_A, ARM_IDLE,  1),
   INSPECT_A: wispFrame(H_FOCUSED, WISP_STARS_A, ARM_POINT),
   INSPECT_B: wispFrame(H_FOCUSED, WISP_STARS_B, [...ARM_POINT, {c:11,r:5,k:'Ah' as const}]),
@@ -361,6 +382,8 @@ const WANDERER_FRAMES: Record<FrameName, Pixel[]> = {
   IDLE_B:    frame(wanHead(H_NORMAL,-1), ARM_IDLE,  FEET_BOB,   WAN_STAFF),
   RUN_A:     frame(wanHead(H_NORMAL),    ARM_RUN_A, FEET_RUN_A, WAN_STAFF),
   RUN_B:     frame(wanHead(H_NORMAL),    ARM_RUN_B, FEET_RUN_B, WAN_STAFF),
+  CLIMB_A:   climbFrame(wanHead(H_FOCUSED), ARM_CLIMB_A, FEET_RUN_A, WAN_STAFF),
+  CLIMB_B:   climbFrame(wanHead(H_FOCUSED), ARM_CLIMB_B, FEET_RUN_B, WAN_STAFF),
   LAND_A:    frame(wanHead(H_NORMAL,+1), ARM_IDLE,  FEET_SQUAT, WAN_STAFF),
   INSPECT_A: frame(wanHead(H_FOCUSED),   ARM_POINT, FEET_STAND, WAN_STAFF),
   INSPECT_B: frame(wanHead(H_FOCUSED),   [...ARM_POINT, {c:11,r:5,k:'Ah' as const}], FEET_STAND, WAN_STAFF),

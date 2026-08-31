@@ -37,6 +37,10 @@ export type BranchGeometry = {
   inWindow: boolean;
   /** Closed lines keep their label inside their own time frame; hidden when cramped. */
   labelVisible: boolean;
+  /** Summit only: the rope column's screen x (set by the transpose layer). */
+  laneX?: number;
+  /** Summit only: how the label text anchors at (labelX, labelY). */
+  labelAnchor?: "start" | "middle" | "end";
 };
 
 export type TimelineMetrics = {

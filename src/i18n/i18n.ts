@@ -1,4 +1,5 @@
 import { useAppStore } from "@/stores/app-store";
+import { THEME_COPY } from "@/ui/theme-copy";
 import { es } from "./es";
 import { esCO } from "./es-co";
 
@@ -29,8 +30,16 @@ export function translate(
   return out;
 }
 
-/** The app's translator, bound to the language chosen in settings. */
+/**
+ * The app's translator, bound to the language chosen in settings. The active
+ * theme may re-skin key terms (summit: thread→rope, burn→cut): the overlay
+ * remaps the English KEY before dictionary lookup, so overlay values are
+ * ordinary keys with their own translations. `translate()` itself stays
+ * theme-neutral for non-UI callers.
+ */
 export function useT(): (text: string, vars?: Record<string, string | number>) => string {
   const lang = useAppStore((s) => s.language);
-  return (text, vars) => translate(lang, text, vars);
+  const theme = useAppStore((s) => s.theme);
+  const overlay = THEME_COPY[theme];
+  return (text, vars) => translate(lang, overlay?.[text] ?? text, vars);
 }

@@ -83,6 +83,7 @@ const SHIMMER: Record<ThemeId, string> = {
   abyss: "#9fe8ff",
   pompom: "#f4a95c",
   gravemist: "#ffd98a",
+  summit: "#f0a852",
 };
 
 const base: Omit<PartialTokens, "shimmer"> = {
@@ -374,6 +375,29 @@ export const THEME_TOKENS: Record<ThemeId, ThemeTokens> = {
     flowDash: [1, 14],
     mainFlowDuration: 5000,
     mainFlowDash: [2, 24],
+  }),
+  summit: theme("summit", "light", {
+    bg: "#eef3f7",
+    bgRaised: "#f9fbfd",
+    bgSunken: "#dfe8ef",
+    ink: "#26313a",
+    inkSoft: "#5f7080",
+    inkFaint: "#98a9b8",
+    lineMain: "#3a4c5c",
+    lineAxis: "#cfdce6",
+    accent: "#3e6b8f",
+    accentInk: "#f2f8fd",
+    accentSoft: "#dbe7f1",
+    danger: "#b0524a",
+    focus: "#35678c",
+    fontBody: FONT_FUTURA,
+    radius: 8,
+    radiusLg: 14,
+    btnRadius: 8,
+    flowDuration: 3000,
+    flowDash: [1, 12],
+    mainFlowDuration: 3800,
+    mainFlowDash: [2, 22],
   }),
 };
 

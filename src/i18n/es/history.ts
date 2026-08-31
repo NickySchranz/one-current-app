@@ -104,6 +104,8 @@ export const history: Record<string, string> = {
   "Peach fluff and button eyes. Every open thread is a pomeranian pup — leave it waiting and it barks.": "Pelusa melocotón y ojos de botón. Cada hilo abierto es un cachorro pomerania: déjalo esperando y ladra.",
   "Gravemist": "Niebla del camposanto",
   "Fog and lantern light. Every open thread is a small ghost — its wail widens until you answer.": "Niebla y luz de farol. Cada hilo abierto es un pequeño fantasma: su lamento crece hasta que respondes.",
+  "Summit": "Cumbre",
+  "Granite and morning snow. Every open thread is a rope up the face — answer it and the climber moves higher.": "Granito y nieve de la mañana. Cada hilo abierto es una cuerda en la pared: respóndelo y quien escala sube más alto.",
   "Language": "Idioma",
   "Changes every word the app says. Your own words stay as you wrote them.": "Cambia cada palabra que dice la app. Tus propias palabras se quedan como las escribiste.",
   "Comfort": "Comodidad",

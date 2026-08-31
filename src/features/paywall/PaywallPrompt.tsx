@@ -23,7 +23,7 @@ export function useThreadGate(): boolean {
 const COPY: Record<PaywallReason, { title: string; body: string }> = {
   themes: {
     title: "This look is part of Pro",
-    body: "The five plain looks are always free. The creature themes — where every open thread becomes a small companion — come with One Current Pro.",
+    body: "The five plain looks are always free. The living themes — where the timeline itself comes alive — come with One Current Pro.",
   },
   "thread-limit": {
     title: "The free current holds {n} threads",

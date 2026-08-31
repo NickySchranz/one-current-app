@@ -198,10 +198,13 @@ function scoreBranch(
   g: BranchGeometry,
   nowX: number,
   lastVisited: Map<string, number>,
+  vertical: boolean,
 ): number {
   if (isClosed(b)) return -Infinity;
   if (!g.inWindow) return -Infinity;
-  if (nowX > 0 && g.endX > nowX + 20) return -Infinity;
+  // On the summit map anchors sit in lane columns, not on the time axis —
+  // the past-Now cull is meaningless there; inWindow already gates them.
+  if (!vertical && nowX > 0 && g.endX > nowX + 20) return -Infinity;
   // Skip branches already handled today — Pip only patrols undecided threads
   const now = new Date();
   if (decidedToday(b, now) || restingToday(b, now)) return -Infinity;
@@ -257,8 +260,13 @@ export function useMascot(
    * world coords) — the stage can pan its camera to keep him on screen.
    */
   onTravel?: (x: number, y: number) => void,
+  /** Summit: steep segments climb (CLIMB frames), and patrol skips the
+   * endpoint-past-Now cull that only makes sense on a horizontal map. */
+  opts?: { vertical?: boolean },
 ): MascotState {
   const lang = getLang(language);
+  const verticalRef = useRef(opts?.vertical ?? false);
+  verticalRef.current = opts?.vertical ?? false;
   const langRef = useRef(lang);
   langRef.current = lang;
   // Stable refs for latest values
@@ -398,8 +406,11 @@ export function useMascot(
       const dist = Math.hypot(dx, dy_) || 1;
       const duration = Math.max(120, dist / pxPerMs);
 
-      // Face the direction of this segment
+      // Face the direction of this segment; on the summit a steep segment
+      // is climbed hand over hand (one setState per segment, like setFlip —
+      // the 9Hz gait itself stays on the UI thread via runPhase).
       setFlip(dx >= 0 ? 1 : -1);
+      setFrame(verticalRef.current && Math.abs(dy_) > Math.abs(dx) ? 'CLIMB_A' : 'RUN_A');
 
       const t0 = performance.now();
 
@@ -594,7 +605,7 @@ export function useMascot(
       if (b.id === avoidRef.current) continue; // burning line — never land on it
       const g = geoMap.get(b.id);
       if (!g) continue;
-      const s = scoreBranch(b, g, nX, lastVisited.current);
+      const s = scoreBranch(b, g, nX, lastVisited.current, verticalRef.current);
       if (s > bestScore) { bestScore = s; best = b; }
     }
     if (!best || bestScore === -Infinity) {
