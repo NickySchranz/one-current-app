@@ -337,6 +337,15 @@ export const BranchLine = memo(function BranchLine({
         accessible
         accessibilityLabel={describeBranch(branch, t)}
       >
+        {/* the sling still hangs over the top edge — the coil rests on it */}
+        <Path
+          d={`M ${g.endX} 0 L ${g.endX} ${g.endY - 8}`}
+          stroke={color}
+          strokeWidth={1.6}
+          fill="none"
+          opacity={0.3}
+          pointerEvents="none"
+        />
         <CoiledRope x={g.endX} y={g.endY} color={color} bg={tk.bg} onPress={select} />
       </AnimatedG>
     );
@@ -442,14 +451,26 @@ export const BranchLine = memo(function BranchLine({
           facing you; a decision today calms it back into the plain circle. */}
       {!g.endsOnMain &&
         (vertical ? (
-          <AnchorKnot
-            x={g.endX}
-            y={g.endY}
-            color={color}
-            bg={tk.bg}
-            opacity={endpointStaticOpacity}
-            onPress={select}
-          />
+          <>
+            {/* the rope hangs from above the screen: its sling runs over the
+                top edge down to the anchor knot */}
+            <Path
+              d={`M ${g.endX} 0 L ${g.endX} ${g.endY - 7}`}
+              stroke={color}
+              strokeWidth={1.6}
+              fill="none"
+              opacity={0.35}
+              pointerEvents="none"
+            />
+            <AnchorKnot
+              x={g.endX}
+              y={g.endY}
+              color={color}
+              bg={tk.bg}
+              opacity={endpointStaticOpacity}
+              onPress={select}
+            />
+          </>
         ) : Creature && !acted && !resting ? (
           <Creature
             x={g.endX}

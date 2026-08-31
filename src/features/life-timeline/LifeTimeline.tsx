@@ -51,7 +51,7 @@ import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
 import { useCalmCurrent } from "./useSquiggle";
 import { useSummitCurrent } from "./useSummit";
-import { ClimbPennant, climbSpan, Ledge, RopeCut, SummitRoute } from "./SummitScene";
+import { ClimbPennant, climbSpan, Ledge, LedgeSteps, RopeCut, SummitRoute } from "./SummitScene";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -769,8 +769,12 @@ export function LifeTimeline() {
               // Dragging beside the date rail scrubs faster than the face.
               const stageX = gs.moveX - stagePosRef.current.x;
               const nearDates = stageX > sizeRef.current.width - 64;
-              const timeLen = (layoutRef.current as SummitLayout).timeLen ?? 1;
-              panBy((dy / Math.max(1, timeLen)) * (nearDates ? 4 : 1));
+              const summit = layoutRef.current as SummitLayout;
+              const timeLen = summit.timeLen ?? 1;
+              // panBy takes a fraction of the STORE window; scale so a px of
+              // finger moves a px of the (shorter) display window.
+              const scale = summit.panScale ?? 1;
+              panBy((dy / Math.max(1, timeLen)) * scale * (nearDates ? 4 : 1));
               return;
             }
             const dx = gs.moveX - lastXRef.current;
@@ -922,8 +926,10 @@ export function LifeTimeline() {
         e.preventDefault();
         const rect = el.getBoundingClientRect();
         const nearDates = e.clientX - rect.left > rect.width - 64;
-        const timeLen = (layoutRef.current as SummitLayout).timeLen ?? rect.height;
-        panBy((-e.deltaY / Math.max(1, timeLen)) * (nearDates ? 4 : 1));
+        const summit = layoutRef.current as SummitLayout;
+        const timeLen = summit.timeLen ?? rect.height;
+        const scale = summit.panScale ?? 1;
+        panBy((-e.deltaY / Math.max(1, timeLen)) * scale * (nearDates ? 4 : 1));
         return;
       }
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
@@ -950,11 +956,14 @@ export function LifeTimeline() {
 
   // "Return to Now" appears once you have moved away from the default view:
   // the recent week with the right edge at the furthest future we extend.
+  // Summit trims the DISPLAY window (Now pinned near the top), so being
+  // "away" is judged against the untrimmed store window.
+  const navWindow = sm?.baseWindow ?? layout.window;
   const today = now.toISOString().slice(0, 10);
-  const span = Date.parse(layout.window.end) - Date.parse(layout.window.start);
+  const span = Date.parse(navWindow.end) - Date.parse(navWindow.start);
   const restingEnd = Date.parse(today) + span / 2;
   const awayFromNow =
-    Math.abs(restingEnd - Date.parse(layout.window.end)) > 0.25 * DAY ||
+    Math.abs(restingEnd - Date.parse(navWindow.end)) > 0.25 * DAY ||
     Math.abs(span - 8 * DAY) > 0.75 * DAY;
 
   const todayX = dateToX(today, layout.window, layout.metrics.width);
@@ -1124,6 +1133,17 @@ export function LifeTimeline() {
   const mascotRef = useRef(mascot);
   mascotRef.current = mascot;
 
+  // Summit: every answered rope raises the climber's rest point one ledge —
+  // and the ascent is watched, not implied: a beat after the answer lands
+  // (letting the sweep read first), Pip climbs the face to his new ledge.
+  useEffect(() => {
+    if (!vertical || !sm || pulseKey === 0 || !showMascot || !mascot.visible) return;
+    const x = sm.routeX - PX * 12 - 10;
+    const y = mascotNowY - PX * 10;
+    const t = setTimeout(() => mascotRef.current?.climbTo(x, y), 700);
+    return () => clearTimeout(t);
+  }, [pulseKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Token drops: they pop off their threads, then fly into the meter ──
   // Each store coin becomes a waiting token (SVG, over its thread), then a
   // flight (screen overlay, into the bonk pill), then charge. Pip never
@@ -1248,6 +1268,14 @@ export function LifeTimeline() {
       setTimeout(() => setArrivedFor(null), 1400);
     }
     if (!showMascot || !mascot.visible) return;
+    if (vertical && sm) {
+      // Back from a reflection stage: this map just remounted, so the
+      // progress-rise effect above never saw the change — climb from here.
+      const x = sm.routeX - PX * 12 - 10;
+      const y = mascotNowY - PX * 10;
+      setTimeout(() => mascotRef.current?.climbTo(x, y), 600);
+      return;
+    }
     mascot.focusBranch(branchId);
     const pool = kind === "act" ? mascot.phrases.action : mascot.phrases.note;
     setTimeout(() => mascotReactionRef.current?.(randomFrom(pool)), 500);
@@ -1493,6 +1521,13 @@ export function LifeTimeline() {
                     calmProgress={calmProgress}
                   />
                   <Ledge routeX={sm.routeX} nowScreenY={sm.nowScreenY} tk={tk} />
+                  <LedgeSteps
+                    routeX={sm.routeX}
+                    nowScreenY={sm.nowScreenY}
+                    timeLen={sm.timeLen}
+                    steps={activeLines.length}
+                    tk={tk}
+                  />
                   <ClimbPennant
                     routeX={sm.routeX}
                     nowScreenY={sm.nowScreenY}
@@ -1597,30 +1632,19 @@ export function LifeTimeline() {
                 </G>
               )}
 
-              {/* summit's day record: the decisions gather in the sky above
-                  the ledge. Tapping them opens the actions panel. */}
-              {vertical && sm && futureItems.length > 0 && sm.nowScreenY > 44 && (
+              {/* summit's day record: the decisions carved into the face just
+                  below the ledge. Tapping them opens the actions panel. */}
+              {vertical && sm && futureItems.length > 0 && sm.timeLen - sm.nowScreenY > 80 && (
                 <G onPress={guarded(() => setOperation({ kind: "viewing-actions" }))}>
                   <Rect
                     x={sm.routeX + 4}
-                    y={Math.max(0, sm.nowScreenY - 18 - futureItems.length * 16)}
+                    y={sm.nowScreenY + 6}
                     width={190}
                     height={futureItems.length * 16 + 18}
                     fill="transparent"
                   />
-                  <Path
-                    d={`M ${sm.routeX} ${sm.nowScreenY} L ${sm.routeX} ${Math.max(
-                      6,
-                      sm.nowScreenY - 150,
-                    )}`}
-                    stroke={tk.accent}
-                    strokeWidth={2.5}
-                    fill="none"
-                    strokeLinecap="round"
-                    opacity={0.55}
-                  />
                   {futureItems.map((it, i) => {
-                    const y = sm.nowScreenY - 14 - (futureItems.length - 1 - i) * 16;
+                    const y = sm.nowScreenY + 24 + i * 16;
                     return (
                       <DayRow
                         key={it.id}
@@ -1628,14 +1652,14 @@ export function LifeTimeline() {
                         reducedMotion={reducedMotion}
                       >
                         <Circle
-                          cx={sm.routeX + 16}
+                          cx={sm.routeX + 30}
                           cy={y - 4}
                           r={3}
                           fill={it.color}
                           opacity={it.done ? 0.35 : 0.55}
                         />
                         <SvgText
-                          x={sm.routeX + 24}
+                          x={sm.routeX + 38}
                           y={y}
                           fontSize={11}
                           fontFamily={tk.fontBody}
@@ -1776,17 +1800,21 @@ export function LifeTimeline() {
                   );
                 })()}
 
-              {/* the impact of Pip's strike */}
+              {/* the impact of Pip's strike — on the summit it lands on the
+                  rope where HE holds it, at his altitude, not at the anchor */}
               {hit &&
                 !reducedMotion &&
                 (() => {
                   const g = layout.geometries.find((x) => x.branchId === hit.branchId);
                   if (!g || !g.inWindow) return null;
+                  const strikeY = vertical
+                    ? Math.max(g.endY, Math.min(g.forkY, mascot.pos.y + PX * 10))
+                    : g.endY;
                   return (
                     <AttackFx
                       key={hit.key}
                       x={g.endX}
-                      y={g.endY}
+                      y={strikeY}
                       path={g.path}
                       variant={attackVariantFor(theme)}
                       accent={tk.accent}
@@ -1922,7 +1950,11 @@ export function LifeTimeline() {
                   dy={(() => {
                     if (!hit) return 0;
                     const g = layout.geometries.find((x) => x.branchId === hit.branchId);
-                    return g ? Math.max(-44, Math.min(44, g.endY - mascot.pos.y)) * 0.85 : 0;
+                    if (!g) return 0;
+                    const strikeY = vertical
+                      ? Math.max(g.endY, Math.min(g.forkY, mascot.pos.y + PX * 10))
+                      : g.endY;
+                    return Math.max(-44, Math.min(44, strikeY - mascot.pos.y)) * 0.85;
                   })()}
                 >
                 <Mascot

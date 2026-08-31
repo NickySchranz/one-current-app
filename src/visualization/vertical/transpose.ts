@@ -15,7 +15,14 @@
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import { buildTimelineLayout, type TimelineLayout } from "../main-line/layout";
 import type { BranchGeometry } from "../branch-lines/paths";
-import { dateToX, type TimeWindow } from "../zoom/time-scale";
+import { dateToX, defaultWindow, type TimeWindow } from "../zoom/time-scale";
+
+/**
+ * Where the day's ledge (Now) hangs below the top edge. The ropes dangle
+ * from here — the summit view trims the window's future projection so Now
+ * always maps this close to the top instead of mid-canvas.
+ */
+export const LEDGE_Y = 64;
 
 export type SummitLayout = TimelineLayout & {
   orientation: "vertical";
@@ -29,6 +36,15 @@ export type SummitLayout = TimelineLayout & {
   timeLen: number;
   /** Canvas width needed to hold every rope column; may exceed the stage. */
   laneSpan: number;
+  /**
+   * The untrimmed store window. `window` on the layout is the DISPLAY window
+   * (future projection cut so Now sits at LEDGE_Y); navigation state like
+   * "away from Now" must judge against this one.
+   */
+  baseWindow: TimeWindow;
+  /** displaySpan / storeSpan — pan gestures scale by this so a px of finger
+   * moves a px of mountain, not a px of the (longer) store window. */
+  panScale: number;
 };
 
 export function tp(x: number, y: number, timeLen: number): { x: number; y: number } {
@@ -96,12 +112,33 @@ export function buildSummitLayout(
   opts: SummitLayoutOptions,
 ): SummitLayout {
   const timeLen = Math.max(240, opts.stageHeight - Math.round(opts.trayInset));
+  const now = opts.now ?? new Date();
+  // Trim the window's future projection so Now maps LEDGE_Y below the top:
+  // the ropes dangle from the top of the screen, the climbed past falls
+  // away below. Panning back still pushes the ledge off the top (the store
+  // window is never mutated here); panning forward has nowhere to go —
+  // above the ledge is unclimbed mountain.
+  const storeWindow =
+    opts.window ?? defaultWindow(branches.map((b) => b.forkDate), now);
+  const startMs = Date.parse(storeWindow.start);
+  const endMs = Date.parse(storeWindow.end);
+  const nowMs = now.getTime();
+  const frac = (timeLen - LEDGE_Y) / timeLen;
+  let dispEndMs = endMs;
+  if (nowMs > startMs && frac > 0) {
+    dispEndMs = Math.min(endMs, startMs + (nowMs - startMs) / frac);
+  }
+  const window: TimeWindow = {
+    start: storeWindow.start,
+    end: new Date(dispEndMs).toISOString(),
+  };
+  const panScale = (dispEndMs - startMs) / Math.max(1, endMs - startMs);
   const base = buildTimelineLayout(branches, {
     width: timeLen,
     height: opts.stageWidth,
-    window: opts.window,
+    window,
     compact: opts.compact,
-    now: opts.now,
+    now,
     mainShift: opts.mainShift,
     // In base coords "top" is the lane side that transposes to the left
     // edge; keep the outermost rope clear of it.
@@ -165,5 +202,7 @@ export function buildSummitLayout(
     nowScreenY,
     timeLen,
     laneSpan: base.height,
+    baseWindow: storeWindow,
+    panScale,
   };
 }

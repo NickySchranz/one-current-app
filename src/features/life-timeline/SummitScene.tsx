@@ -31,10 +31,53 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const AnimatedG = Animated.createAnimatedComponent(G);
 
 /** How far below the ledge the climber starts an unanswered day. */
-export const CLIMB_SPAN_MAX = 160;
+export const CLIMB_SPAN_MAX = 380;
 
 export function climbSpan(nowScreenY: number, timeLen: number): number {
-  return Math.max(0, Math.min(CLIMB_SPAN_MAX, timeLen - nowScreenY - 40));
+  return Math.max(0, Math.min(CLIMB_SPAN_MAX, timeLen - nowScreenY - 90));
+}
+
+/**
+ * The rock face's ledges: one notch per open rope plus base camp, evenly up
+ * the climb band. Each answered rope moves the climber one notch higher —
+ * these are the exact altitudes his rest point steps through.
+ */
+export function LedgeSteps({
+  routeX,
+  nowScreenY,
+  timeLen,
+  steps,
+  tk,
+}: {
+  routeX: number;
+  nowScreenY: number;
+  timeLen: number;
+  /** Open ropes today — the number of climbs between base camp and the ledge. */
+  steps: number;
+  tk: ThemeTokens;
+}) {
+  if (steps <= 0) return null;
+  const span = climbSpan(nowScreenY, timeLen);
+  if (span <= 0) return null;
+  const marks: React.JSX.Element[] = [];
+  for (let k = 0; k < steps; k++) {
+    // base camp (k=0) up to just below the day's ledge; the ledge itself
+    // (k=steps) is the big one drawn by <Ledge/>.
+    const y = nowScreenY + (1 - k / steps) * span;
+    const side = k % 2 === 0 ? -1 : 1;
+    marks.push(
+      <Path
+        key={k}
+        d={`M ${routeX + (side === -1 ? -14 : 2)} ${y} h 12`}
+        stroke={tk.inkSoft}
+        strokeWidth={2.5}
+        strokeLinecap="round"
+        fill="none"
+        opacity={0.5}
+      />,
+    );
+  }
+  return <G pointerEvents="none">{marks}</G>;
 }
 
 /**

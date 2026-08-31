@@ -49,6 +49,12 @@ export type MascotState = {
   showReaction: (text: string) => void;
   focusBranch: (branchId: string) => void;
   /**
+   * Summit: run/climb to the given rest point (the ledge just earned).
+   * Fired after each answered rope so the ascent is watched, not implied;
+   * patrol resumes on its own after a beat at the ledge.
+   */
+  climbTo: (x: number, y: number) => void;
+  /**
    * The full sweep: Pip sprints through every given thread's endpoint,
    * calling `onBonk` at each, then finishes at Now with a triumphant line.
    * Under reduced motion the bonks land staggered with no run.
@@ -345,6 +351,25 @@ export function useMascot(
     setArrivedVia(via);
   };
 
+  // Where Pip stands to visit a rope. On the summit he works the face at HIS
+  // altitude — the ledge he has earned today — grabbing each rope where it
+  // passes him, instead of hanging off its anchor at the top. Horizontal
+  // themes keep the endpoint perch.
+  const ropeSpot = (g: BranchGeometry): { x: number; y: number } => {
+    if (verticalRef.current) {
+      const x = (g.laneX ?? g.endX) + 10;
+      // never below the rope's lower end (its fork) nor above its anchor
+      const y = Math.max(
+        g.endY,
+        Math.min(g.forkY, nowYRef.current),
+      ) - PX * 10;
+      return { x, y };
+    }
+    return { x: g.endX + 10, y: g.endY - PX * 10 };
+  };
+  const ropeSpotRef = useRef(ropeSpot);
+  ropeSpotRef.current = ropeSpot;
+
   const clearTimer = () => {
     if (timerRef.current !== null) { clearTimeout(timerRef.current); timerRef.current = null; }
   };
@@ -362,6 +387,7 @@ export function useMascot(
 
   const jumpRef = useRef<() => void>(() => {});
   const focusBranchRef = useRef<(id: string) => void>(() => {});
+  const climbToRef = useRef<(x: number, y: number) => void>(() => {});
 
   // The only door back to patrol. While the user holds a thread (or a panel
   // is open, or they browse the past) the jump is parked, not scheduled —
@@ -494,7 +520,18 @@ export function useMascot(
         return;
       }
       // Chilling at Now: the Now point pans with the timeline, and so does he.
+      // On the summit a big vertical move means the ledge itself rose (an
+      // answer landed while he rested) — that ascent is climbed, not snapped;
+      // small drifts are pans and stay glued.
       const cur = posRef.current;
+      if (
+        verticalRef.current &&
+        phase.current === 'idle' &&
+        Math.abs(cur.y - ty) > 30
+      ) {
+        climbToRef.current(tx, ty);
+        return;
+      }
       if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
         placeRef.current(tx, ty, true);
       }
@@ -517,8 +554,7 @@ export function useMascot(
 
     const geo = geometries.find(g => g.branchId === id);
     if (!geo) return;
-    const tx = geo.endX + 10;
-    const ty = geo.endY - PX * 10;
+    const { x: tx, y: ty } = ropeSpotRef.current(geo);
 
     if (phase.current === 'jumping') {
       // The world panned under him mid-run: fold the drift into the pan
@@ -541,7 +577,17 @@ export function useMascot(
 
     // Stationary — snap to follow the branch (handles panning + loudness shifts).
     // Pip naturally scrolls off-screen when the user pans away from today.
+    // A big vertical shift on the summit is an earned ledge — climbed, not
+    // snapped (climbTo releases the rope; its coil stays behind).
     const cur = posRef.current;
+    if (
+      verticalRef.current &&
+      phase.current === 'idle' &&
+      Math.abs(cur.y - ty) > 30
+    ) {
+      climbToRef.current(tx, ty);
+      return;
+    }
     if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
       placeRef.current(tx, ty, true);
     }
@@ -653,8 +699,7 @@ export function useMascot(
     chillingRef.current = false;
     const destGeo = geoMap.get(best.id)!;
 
-    const toX = destGeo.endX + 10;
-    const toY = destGeo.endY - PX * 10;
+    const { x: toX, y: toY } = ropeSpotRef.current(destGeo);
 
     const targetId = best.id;
     jumpDestRef.current = { x: toX, y: toY, branchId: targetId };
@@ -676,8 +721,9 @@ export function useMascot(
       runWaypoints(wps, () => {
         // Use live geometry in case timeline was panned during the run
         const liveGeo = geometriesRef.current.find(g => g.branchId === targetId);
-        const fx = liveGeo ? liveGeo.endX + 10 : (jumpDestRef.current?.x ?? toX);
-        const fy = liveGeo ? liveGeo.endY - PX * 10 : (jumpDestRef.current?.y ?? toY);
+        const live = liveGeo ? ropeSpotRef.current(liveGeo) : null;
+        const fx = live ? live.x : (jumpDestRef.current?.x ?? toX);
+        const fy = live ? live.y : (jumpDestRef.current?.y ?? toY);
         placeRef.current(fx, fy, true);
         jumpDestRef.current = null;
         setPendingIdState(null);
@@ -763,8 +809,7 @@ export function useMascot(
         const id = branchIds[i];
         const geo = geometriesRef.current.find((g) => g.branchId === id);
         if (!geo) { hop(i + 1); return; }
-        const tx = geo.endX + 10;
-        const ty = geo.endY - PX * 10;
+        const { x: tx, y: ty } = ropeSpotRef.current(geo);
         phase.current = 'jumping';
         inspectedId.current = id;
         jumpDestRef.current = { x: tx, y: ty, branchId: id };
@@ -789,8 +834,7 @@ export function useMascot(
     const geo = geometriesRef.current.find(g => g.branchId === branchId);
     if (!geo) return;
 
-    const toX = geo.endX + 10;
-    const toY = geo.endY - PX * 10;
+    const { x: toX, y: toY } = ropeSpotRef.current(geo);
 
     // Already there — just update focus silently
     if (inspectedId.current === branchId && phase.current !== 'jumping') {
@@ -816,8 +860,9 @@ export function useMascot(
     runWaypoints(wps, () => {
       // Use live geometry in case timeline was panned
       const liveGeo = geometriesRef.current.find(g => g.branchId === branchId);
-      const fx = liveGeo ? liveGeo.endX + 10 : (jumpDestRef.current?.x ?? toX);
-      const fy = liveGeo ? liveGeo.endY - PX * 10 : (jumpDestRef.current?.y ?? toY);
+      const live = liveGeo ? ropeSpotRef.current(liveGeo) : null;
+      const fx = live ? live.x : (jumpDestRef.current?.x ?? toX);
+      const fy = live ? live.y : (jumpDestRef.current?.y ?? toY);
       placeRef.current(fx, fy, true);
       jumpDestRef.current = null;
       setFrame('INSPECT_A');
@@ -843,6 +888,41 @@ export function useMascot(
   }, [fadeBubble, runWaypoints, lang, scheduleJump]); // eslint-disable-line react-hooks/exhaustive-deps
   focusBranchRef.current = focusBranch;
 
+  // ── Climb to the ledge just earned (summit) ──
+  // Marked as chilling with a "__now__" destination so the pan-tracking
+  // effect folds any mid-climb pan into the run, exactly like the walk to
+  // Now — because that is what this is: the rest point moved up a ledge.
+  const climbTo = useCallback((x: number, y: number) => {
+    if (superBonkActiveRef.current) return; // the sweep owns him until it ends
+    // No held-rope guard: this only ever fires after that rope was answered —
+    // the climb IS the answer's payoff, even while its sheet is still up.
+    if (viewingIntegratedRef.current) return;
+    clearTimer();
+    cancelRaf();
+    chillingRef.current = true;
+    inspectedId.current = null;
+    setInspectedIdState(null);
+    setPendingIdState(null);
+    setArrivedIdState(null);
+    fadeBubble(0, 120);
+    phase.current = 'jumping';
+    jumpDestRef.current = { x, y, branchId: "__now__" };
+    setFrame('RUN_A');
+    const cur = posRef.current;
+    runWaypoints(makeZigWaypoints(cur.x, cur.y, x, y, 1, 10), () => {
+      const dest = jumpDestRef.current;
+      placeRef.current(dest?.x ?? x, dest?.y ?? y, true);
+      jumpDestRef.current = null;
+      phase.current = 'idle';
+      setFrame('LAND_A');
+      timerRef.current = setTimeout(() => {
+        setFrame('IDLE_A');
+        scheduleJump(2200 + Math.random() * 1200);
+      }, 340);
+    }, 0.22);
+  }, [fadeBubble, runWaypoints, scheduleJump]); // eslint-disable-line react-hooks/exhaustive-deps
+  climbToRef.current = climbTo;
+
   // ── Bootstrap ──
   useEffect(() => {
     if (initialised.current) return;
@@ -864,7 +944,7 @@ export function useMascot(
     if (!geo) return;
 
     initialised.current = true;
-    const startPos = { x: geo.endX + 10, y: geo.endY - PX * 10 };
+    const startPos = ropeSpotRef.current(geo);
     placeRef.current(startPos.x, startPos.y, true);
     inspectedId.current = best.id;
     setInspectedIdState(best.id);
@@ -936,6 +1016,6 @@ export function useMascot(
     pendingBranchId: pendingIdState,
     arrivedBranchId: arrivedIdState,
     arrivedVia,
-    onPress, showReaction, focusBranch, superBonk, phrases: lang, visible,
+    onPress, showReaction, focusBranch, climbTo, superBonk, phrases: lang, visible,
   };
 }

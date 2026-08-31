@@ -91,11 +91,11 @@ check(
   verticalCount >= Math.ceil(ropes.length / 2),
   `ropes are vertical (${verticalCount}/${ropes.length} steeper than wide)`,
 );
-// Now sits mid-canvas (the window projects into the future above it), so
-// anchors gather just above the middle — never in the bottom half.
+// The display window pins Now (the ledge) near the top — every rope dangles
+// from up there.
 check(
-  ropes.some((r) => r.end.y < 800 * 0.55),
-  "at least one anchor sits above the canvas middle (the ledge)",
+  ropes.some((r) => r.end.y < 800 * 0.3),
+  "at least one anchor hangs in the top 30% (the ledge)",
 );
 
 // ── 2. the pill speaks climbing ──
