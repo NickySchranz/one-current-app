@@ -15,7 +15,7 @@
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import { buildTimelineLayout, type TimelineLayout } from "../main-line/layout";
 import type { BranchGeometry } from "../branch-lines/paths";
-import { dateToX, defaultWindow, type TimeWindow } from "../zoom/time-scale";
+import { dateToX, dateToXRaw, defaultWindow, type TimeWindow } from "../zoom/time-scale";
 
 /**
  * The highest the day's ledge (Now) ever hangs below the top edge. The
@@ -36,6 +36,9 @@ export type SummitLayout = TimelineLayout & {
   nowScreenY: number;
   /** Length of the time axis in px (the stage height less the tray inset). */
   timeLen: number;
+  /** The built axis including the pan-back headroom above the canvas —
+   * date→y mapping must use THIS length: y = timeLen − dateToX(d, w, axisLen). */
+  axisLen: number;
   /** Canvas width needed to hold every rope column; may exceed the stage. */
   laneSpan: number;
   /**
@@ -79,9 +82,16 @@ function round1(v: number): number {
   return Math.round(v * 10) / 10;
 }
 
-/** Map an ISO date to its screen y on the summit map (top = future). */
-export function dateToScreenY(date: string, window: TimeWindow, timeLen: number): number {
-  return timeLen - dateToX(date, window, timeLen);
+/** Map an ISO date to its world y on the summit map (top = future).
+ * `timeLen` is the canvas span, `axisLen` the built axis (with pan-back
+ * headroom); they are equal unless the user has panned past Now. */
+export function dateToScreenY(
+  date: string,
+  window: TimeWindow,
+  timeLen: number,
+  axisLen: number = timeLen,
+): number {
+  return timeLen - dateToX(date, window, axisLen);
 }
 
 export type SummitLayoutOptions = {
@@ -124,26 +134,31 @@ export function buildSummitLayout(
   const ledgeY = Math.max(LEDGE_Y, Math.min(timeLen * 0.5, opts.ledgeY ?? LEDGE_Y));
   // Trim the window's future projection so Now maps at the camera's ledge
   // height: the ropes dangle from up there, the climbed past falls away
-  // below. Panning back still pushes the ledge off the top (the store
-  // window is never mutated here); panning forward has nowhere to go —
-  // above the ledge is unclimbed mountain.
+  // below. When the user pans back past Now, the canvas keeps the STORE
+  // window in view but the geometry is built on an EXTENDED axis reaching
+  // up to Now (capped headroom) — so the whole scene above the canvas top
+  // (ledge, ropes, merge points, Now) has real unclamped positions and
+  // rides up off the screen with the dates instead of pinning at the edge.
   const storeWindow =
     opts.window ?? defaultWindow(branches.map((b) => b.forkDate), now);
   const startMs = Date.parse(storeWindow.start);
   const endMs = Date.parse(storeWindow.end);
   const nowMs = now.getTime();
   const frac = (timeLen - ledgeY) / timeLen;
-  let dispEndMs = endMs;
-  if (nowMs > startMs && frac > 0) {
-    dispEndMs = Math.min(endMs, startMs + (nowMs - startMs) / frac);
-  }
+  const idealEndMs =
+    nowMs > startMs && frac > 0 ? startMs + (nowMs - startMs) / frac : endMs;
+  const visEndMs = Math.min(endMs, idealEndMs);
+  const visSpanMs = Math.max(1, visEndMs - startMs);
+  const pxPerMs = timeLen / visSpanMs;
+  const extraPx = Math.min(1200, Math.max(0, (idealEndMs - visEndMs) * pxPerMs));
+  const axisLen = timeLen + extraPx;
   const window: TimeWindow = {
     start: storeWindow.start,
-    end: new Date(dispEndMs).toISOString(),
+    end: new Date(startMs + axisLen / pxPerMs).toISOString(),
   };
-  const panScale = (dispEndMs - startMs) / Math.max(1, endMs - startMs);
+  const panScale = visSpanMs / Math.max(1, endMs - startMs);
   const base = buildTimelineLayout(branches, {
-    width: timeLen,
+    width: axisLen,
     height: opts.stageWidth,
     window,
     compact: opts.compact,
@@ -157,7 +172,12 @@ export function buildSummitLayout(
 
   const routeX = base.mainY;
   const bandX = base.bandY;
-  const nowScreenY = timeLen - base.nowX;
+  // While the trim is active this equals ledgeY exactly; panned back it goes
+  // negative (up to the headroom cap) and the scene rides up off-screen.
+  const nowScreenY = Math.max(
+    -extraPx - 40,
+    timeLen - dateToXRaw(now.toISOString(), window, axisLen),
+  );
 
   // The label ladder: rope titles are horizontal text and cannot ride
   // 34–56px columns, so open ropes stack their labels in three rows above
@@ -173,6 +193,7 @@ export function buildSummitLayout(
     const fork = tp(g.forkX, g.forkY, timeLen);
     const end = tp(g.endX, g.endY, timeLen);
     const laneX = g.laneY;
+    const path = transposePath(g.path, timeLen);
     let labelX: number;
     let labelY: number;
     if (g.reachesNow) {
@@ -188,7 +209,7 @@ export function buildSummitLayout(
     }
     return {
       ...g,
-      path: transposePath(g.path, timeLen),
+      path,
       forkX: fork.x,
       forkY: fork.y,
       endX: end.x,
@@ -212,6 +233,7 @@ export function buildSummitLayout(
     bandX,
     nowScreenY,
     timeLen,
+    axisLen,
     laneSpan: base.height,
     baseWindow: storeWindow,
     panScale,

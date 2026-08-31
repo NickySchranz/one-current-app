@@ -12,8 +12,7 @@ import { cancelAnimation, useSharedValue, withTiming, Easing, type SharedValue }
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import type { BranchGeometry } from "@/visualization/branch-lines/paths";
 import { isClosed } from "@/domain/branches/logic";
-import { restingToday } from "@/visualization/branch-lines/style";
-import { decidedToday } from "@/domain/feelings/logic";
+import { handledToday } from "@/domain/feelings/logic";
 import type { FrameName, MascotType } from "./mascot-frames";
 
 const PX = 2.2; // must match PX in mascot-frames.ts
@@ -212,8 +211,9 @@ function scoreBranch(
   // the past-Now cull is meaningless there; inWindow already gates them.
   if (!vertical && nowX > 0 && g.endX > nowX + 20) return -Infinity;
   // Skip branches already handled today — Pip only patrols undecided threads
+  // (a pending planned step does NOT count: its rope still hangs).
   const now = new Date();
-  if (decidedToday(b, now) || restingToday(b, now)) return -Infinity;
+  if (handledToday(b, now)) return -Infinity;
 
   const msSince = Date.now() - (lastVisited.get(b.id) ?? 0);
   let score = b.loudness * 2;
@@ -437,7 +437,9 @@ export function useMascot(
       const t0 = performance.now();
 
       const tick = (now: number) => {
-        const t = Math.min(1, (now - t0) / duration);
+        // rAF timestamps can precede the performance.now() taken at segment
+        // start — without the lower clamp the first tick runs BACKWARDS.
+        const t = Math.min(1, Math.max(0, (now - t0) / duration));
         const s = panShiftRef.current;
         const nx = fromX + dx * t + s.x;
         const ny = fromY + dy_ * t + s.y;
@@ -503,6 +505,7 @@ export function useMascot(
         // exactly like a jump toward a thread.
         const dest = jumpDestRef.current;
         if (dest?.branchId === "__now__") {
+          if (verticalRef.current) return; // summit: climbs are pure runs
           const dx = tx - dest.x, dy = ty - dest.y;
           if (dx !== 0 || dy !== 0) {
             jumpDestRef.current = { x: tx, y: ty, branchId: "__now__" };
@@ -521,7 +524,10 @@ export function useMascot(
       // small drifts are pans and stay glued.
       const cur = posRef.current;
       // even mid-talk: the earned ledge is always CLIMBED, never snapped
-      // (a jump in flight already returned above and folds the drift itself)
+      // (a jump in flight already returned above and folds the drift itself).
+      // INVARIANT: this 30px threshold must stay > LEDGE_Y (28) — panning
+      // past Now slides the ledge by at most that much, and pan drift must
+      // snap, never climb.
       if (verticalRef.current && Math.abs(cur.y - ty) > 30) {
         climbToRef.current(tx, ty);
         return;
@@ -556,6 +562,7 @@ export function useMascot(
       // he keeps his place relative to Now, never to the screen.
       const dest = jumpDestRef.current;
       if (dest?.branchId === id) {
+        if (verticalRef.current) return; // summit: runs are never folded
         const dx = tx - dest.x, dy = ty - dest.y;
         if (dx !== 0 || dy !== 0) {
           jumpDestRef.current = { x: tx, y: ty, branchId: id };
@@ -861,8 +868,7 @@ export function useMascot(
       setArrivedIdState(branchId);
       // A thread already answered today gets praise, not a prompt.
       const focused = branchesRef.current.find(x => x.id === branchId);
-      const answered =
-        focused && (decidedToday(focused, new Date()) || restingToday(focused, new Date()));
+      const answered = focused && handledToday(focused, new Date());
       setBubbleText(randomFrom(answered ? lang.handled : lang.focus));
       fadeBubble(1, 150);
       timerRef.current = setTimeout(() => {
@@ -887,6 +893,17 @@ export function useMascot(
     // No held-rope guard: this only ever fires after that rope was answered —
     // the climb IS the answer's payoff, even while its sheet is still up.
     if (viewingIntegratedRef.current) return;
+    // Already climbing to this very spot (e.g. a nowTick layout rebuild
+    // re-fired the tracker mid-run): let the run finish — a restart stutters.
+    const dest = jumpDestRef.current;
+    if (
+      phase.current === 'jumping' &&
+      dest?.branchId === "__now__" &&
+      Math.abs(dest.x - x) < 1 &&
+      Math.abs(dest.y - y) < 1
+    ) {
+      return;
+    }
     clearTimer();
     cancelRaf();
     chillingRef.current = true;

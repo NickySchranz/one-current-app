@@ -15,6 +15,7 @@ import Animated, {
   useAnimatedProps,
   useAnimatedReaction,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withDelay,
   withRepeat,
@@ -27,12 +28,12 @@ import { useLayoutStore } from "@/stores/layout-store";
 import { measureNode } from "@/ui/measure";
 import { setWalkthroughPoint, useWalkthroughTarget } from "@/features/tutorial/targets";
 import { buildTimelineLayout } from "@/visualization/main-line/layout";
-import { buildSummitLayout, dateToScreenY, type SummitLayout } from "@/visualization/vertical/transpose";
+import { buildSummitLayout, dateToScreenY, LEDGE_Y, type SummitLayout } from "@/visualization/vertical/transpose";
 import { themeOrientation } from "@/visualization/theme";
 import { generateTicks, dateToX, addDays } from "@/visualization/zoom/time-scale";
 import { describeTimeline } from "@/visualization/a11y/describe";
 import { effectiveLoudness, isClosed, mostActivated } from "@/domain/branches/logic";
-import { decidedToday, energySplit } from "@/domain/feelings/logic";
+import { decidedToday, energySplit, handledToday } from "@/domain/feelings/logic";
 import type { PsychologicalBranch, Loudness } from "@/domain/branches/types";
 import { BranchLine } from "./BranchLine";
 import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
@@ -51,7 +52,7 @@ import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
 import { useCalmCurrent } from "./useSquiggle";
 import { useSummitCurrent } from "./useSummit";
-import { ClimbPennant, Ledge, LEDGE_STEP, LedgeSteps, MountainFace, PEAK_GAP, RopeCut, SummitRoute } from "./SummitScene";
+import { ClimbPennant, Ledge, LEDGE_STEP, LedgeSteps, MountainFace, PEAK_GAP_MIN, peakGapFor, RopeCut, SummitRoute } from "./SummitScene";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -252,6 +253,10 @@ function MascotOptionsBubble({
 
 /** Movement below this is still a tap; beyond it the gesture picks an axis. */
 const DECIDE_PX = 8;
+
+/** Survives the remount around a reflect stage: the ledge count the climber
+ * last stood on, so the returning summit map can replay the climb he earned. */
+let summitPrevUnattended: number | null = null;
 /** Vertical pixels per loudness step — up is louder, down is quieter. */
 const STEP_PX = 36;
 
@@ -474,14 +479,16 @@ export function LifeTimeline() {
   // How much of today is answered: each Act / rest / integration nudges the
   // main line toward its full strength (an empty current is a whole one).
   // A planned step still ahead counts as answered — same as the Actions panel.
+  // NOTE the one accepted divergence from the summit climb: a pending step
+  // raises calmProgress (sacred current, celebration) but does NOT coil the
+  // rope or earn a ledge — the climb counts handledToday only.
   const hasPendingStep = (b: PsychologicalBranch) =>
     actions.some((a) => !a.completedAt && a.branchesIntegrated[0]?.branchId === b.id);
   const calmProgress =
     activeLines.length === 0
       ? 1
-      : activeLines.filter(
-          (b) => decidedToday(b, now) || restingToday(b, now) || hasPendingStep(b),
-        ).length / activeLines.length;
+      : activeLines.filter((b) => handledToday(b, now) || hasPendingStep(b)).length /
+        activeLines.length;
 
   const layout = useMemo(
     () =>
@@ -522,22 +529,108 @@ export function LifeTimeline() {
     ? { x: sm.routeX, y: sm.nowScreenY }
     : { x: layout.nowX, y: layout.mainY };
 
-  // The climbing camera: the climber stands one fixed ledge-step below the
-  // summit for every rope still unattended — far enough that the top starts
-  // out of view — and the whole world slides down a step with each answer,
-  // keeping him at screen center until he tops out.
-  const unattended = Math.round((1 - calmProgress) * activeLines.length);
-  // Every rope handled: the last answer sends him past the ledge, up onto
-  // the summit cap itself.
+  // ── The climbing camera ────────────────────────────────────────────────
+  // One truth for "handled": the same predicate that coils a rope earns a
+  // ledge — so the climber can only top out when every rope has left the
+  // face. (A pending planned step keeps its rope hanging AND its ledge.)
+  const unattended = activeLines.filter((b) => !handledToday(b, now)).length;
+  const peakGap = sm ? peakGapFor(sm.timeLen) : PEAK_GAP_MIN;
+  /** His feet at top-out (world): standing on the summit cap. */
+  const summitSpotY = sm ? sm.nowScreenY - peakGap - 8 : 0;
+  // One fixed ledge-step below the summit per unattended rope; the LAST
+  // answer sends him past the ledge onto the cap itself. A new/reopened rope
+  // moves this DOWN (a smooth descent — user-driven, not an answer; the
+  // "never moves up" rule covers answer transitions only).
   const pipWorldY = sm
     ? unattended === 0
-      ? sm.nowScreenY - PEAK_GAP - 8
+      ? summitSpotY
       : sm.nowScreenY + unattended * LEDGE_STEP
     : 0;
-  const easedPipY = useEased(pipWorldY, reducedMotion);
-  const camY = vertical && sm ? Math.round(sm.timeLen / 2 - easedPipY) : 0;
-  const camYRef = useRef(camY);
-  camYRef.current = camY;
+  // Back from a reflect stage this map replays the climb it missed: boot at
+  // the ledge he stood on before the stage, then climb (answeredKey effect).
+  const [bootLedge, setBootLedge] = useState<number | null>(() =>
+    vertical && answered && summitPrevUnattended !== null
+      ? Math.min(summitPrevUnattended, activeLines.length)
+      : null,
+  );
+  useEffect(() => {
+    if (vertical) summitPrevUnattended = unattended;
+  }, [vertical, unattended]);
+  const restPipY =
+    vertical && sm && bootLedge !== null && bootLedge > unattended
+      ? sm.nowScreenY + bootLedge * LEDGE_STEP
+      : pipWorldY;
+
+  const half = sm ? Math.round(sm.timeLen * 0.5) : 0;
+  const third = sm ? Math.round(sm.timeLen * 0.3) : 0;
+  // The camera works in LEDGE-RELATIVE space: rel = feetY − ledgeY + LEDGE_Y.
+  // During a climb the ledge is still, so rel moves with the climber and the
+  // world slides down in lockstep; during a TIME PAN the climber rides his
+  // ledge, so rel — and the camera — hold still, and the whole scene
+  // (mountain, ledge, climber, dates) flows together, letting the past fill
+  // the screen to the very top when panning back beyond Now.
+  const relSummit = LEDGE_Y - peakGap - 8;
+  const rel1 = LEDGE_Y + LEDGE_STEP;
+  const relDeepest = LEDGE_Y + Math.max(1, activeLines.length) * LEDGE_STEP;
+  const ledgeWorldY = sm ? sm.nowScreenY : 0;
+  /** Screen anchor for the climber's feet at rest: mid-screen while any rope
+   * waits, gliding to 30%-from-top as he tops out. A function of ALTITUDE,
+   * not time — so composed with his climb the world's motion stays strictly
+   * downward (d(anchor−rel)/d(rel) = A′−1 with A′ ≤ 0.2L/(0.5L+48) < 1). */
+  const anchorAt = (rel: number): number => {
+    "worklet";
+    if (rel1 <= relSummit) return half;
+    const t = Math.min(1, Math.max(0, (rel1 - rel) / (rel1 - relSummit)));
+    return half - (half - third) * t;
+  };
+  const relRest = restPipY - ledgeWorldY + LEDGE_Y;
+  /** The camera's analytic rest value: exact whenever no climb is in flight.
+   * Transient overlays (coin flights, burn smoke, walkthrough halo) spawn at
+   * rest and use this; a spawn mid-climb is off by the climb remainder —
+   * accepted for short-lived screen-space effects. */
+  const camYRest = vertical && sm ? Math.round(anchorAt(relRest) - relRest) : 0;
+  const camYRef = useRef(camYRest);
+  camYRef.current = camYRest;
+  /** Where the climber sits on screen at rest — celebrations anchor here
+   * (rides up with the scene when the user has panned into the past). */
+  const anchorRestY = vertical && sm ? Math.round(restPipY + camYRest) : 0;
+
+  // The freshly earned ledge marks fade out instead of popping away — and
+  // the LAST rope handled earns the summit party: a burst around the
+  // climber, a banner, and Pip's own cheer once he tops out.
+  const prevUnattendedRef = useRef(unattended);
+  const [leavingSteps, setLeavingSteps] = useState<number | null>(null);
+  const [summitParty, setSummitParty] = useState(0);
+  useEffect(() => {
+    const prev = prevUnattendedRef.current;
+    prevUnattendedRef.current = unattended;
+    if (!vertical || unattended >= prev) return;
+    if (!reducedMotion) {
+      setLeavingSteps(prev);
+      const t1 = setTimeout(() => setLeavingSteps(null), 1400);
+      if (unattended === 0 && activeLines.length > 0) {
+        setSummitParty((k) => k + 1);
+        // his cheer waits out the climb (showReaction skips mid-jump)
+        const say = setTimeout(
+          () => mascotRef.current?.showReaction(t("You did it!")),
+          3400,
+        );
+        const t2 = setTimeout(() => setSummitParty(0), 5600);
+        return () => {
+          clearTimeout(t1);
+          clearTimeout(say);
+          clearTimeout(t2);
+        };
+      }
+      return () => clearTimeout(t1);
+    }
+    if (unattended === 0 && activeLines.length > 0) {
+      setSummitParty((k) => k + 1);
+      const t2 = setTimeout(() => setSummitParty(0), 5600);
+      return () => clearTimeout(t2);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t stable per language
+  }, [vertical, unattended, reducedMotion]);
 
   useEffect(() => {
     const wantsThread = tutorialStep === "meet-thread" || tutorialStep === "pip-arrives";
@@ -1143,9 +1236,9 @@ export function LifeTimeline() {
     const y = Math.max(0, Math.min(maxScroll, destY - vh / 2));
     scrollRef.current?.scrollTo({ y, animated: true });
   }, []);
-  // On the summit map the climber's rest point is his current ledge — one
-  // step per unattended rope below the summit; the camera keeps it centered.
-  const mascotNowY = vertical && sm ? pipWorldY : layout.mainY;
+  // On the summit map the climber's rest point is his current ledge (or,
+  // returning from a stage, the ledge he is about to leave — restPipY).
+  const mascotNowY = vertical && sm ? restPipY : layout.mainY;
   const mascot = useMascot(
     visible,
     layout.geometries,
@@ -1167,16 +1260,32 @@ export function LifeTimeline() {
   const mascotRef = useRef(mascot);
   mascotRef.current = mascot;
 
-  // Summit: every answered rope raises the climber's rest point one ledge —
-  // and the ascent is watched, not implied: a beat after the answer lands
-  // (letting the sweep read first), Pip climbs the face to his new ledge.
-  useEffect(() => {
-    if (!vertical || !sm || pulseKey === 0 || !showMascot || !mascot.visible) return;
-    const x = sm.routeX - PX * 12 - 10;
-    const y = mascotNowY - PX * 10;
-    const t = setTimeout(() => mascotRef.current?.climbTo(x, y), 700);
-    return () => clearTimeout(t);
-  }, [pulseKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The camera is slaved to the climber's own position on the UI thread:
+  // the mountain moves down exactly as he moves up — synced by construction,
+  // no separate ease to drift against. (useMascot's tracking effect is the
+  // single climb trigger; every big vertical target change is climbed.)
+  const trackPip = vertical && showMascot;
+  const mascotPosY = mascot.posY;
+  /** His feet in world coords, clamped to the ledge system (patrol wobble
+   * and pan excursions can't drag the camera); falls back to the rest ledge
+   * while he is unborn (-999) or hidden — identical to where the bootstrap
+   * places him, so his appearance never jumps the camera. */
+  const pipFeetY = useDerivedValue(() => {
+    if (!vertical) return 0;
+    const raw = mascotPosY.value;
+    if (!trackPip || raw < -900) return restPipY;
+    const lo = ledgeWorldY + (relSummit - LEDGE_Y);
+    const hi = ledgeWorldY + (relDeepest - LEDGE_Y);
+    return Math.round(Math.min(hi, Math.max(lo, raw + PX * 10)) * 2) / 2;
+  }, [vertical, trackPip, restPipY, ledgeWorldY, relSummit, relDeepest, mascotPosY]);
+  const camTranslate = useDerivedValue(() => {
+    if (!vertical) return 0;
+    const rel = pipFeetY.value - ledgeWorldY + LEDGE_Y;
+    return Math.round((anchorAt(rel) - rel) * 2) / 2;
+  }, [vertical, pipFeetY, ledgeWorldY, half, third, rel1, relSummit]);
+  const camProps = useAnimatedProps(() => ({ translateY: camTranslate.value }), [camTranslate]);
+  // The pinned date rail rides the same value, staying in lockstep mid-climb.
+  const railProps = useAnimatedProps(() => ({ translateY: camTranslate.value }), [camTranslate]);
 
   // ── Token drops: they pop off their threads, then fly into the meter ──
   // Each store coin becomes a waiting token (SVG, over its thread), then a
@@ -1303,11 +1412,14 @@ export function LifeTimeline() {
     }
     if (!showMascot || !mascot.visible) return;
     if (vertical && sm) {
-      // Back from a reflection stage: this map just remounted, so the
-      // progress-rise effect above never saw the change — climb from here.
-      const x = sm.routeX - PX * 12 - 10;
-      const y = mascotNowY - PX * 10;
-      setTimeout(() => mascotRef.current?.climbTo(x, y), 600);
+      // Back from a reflection stage: this map remounted booted at the OLD
+      // ledge (restPipY) — if the answer earned a new one, replay the climb.
+      if (bootLedge !== null && bootLedge > unattended) {
+        setBootLedge(null); // rest targets flip to the new ledge
+        const x = sm.routeX - PX * 12 - 10;
+        const y = pipWorldY - PX * 10;
+        setTimeout(() => mascotRef.current?.climbTo(x, y), 600);
+      }
       return;
     }
     mascot.focusBranch(branchId);
@@ -1493,9 +1605,9 @@ export function LifeTimeline() {
                   }
                 : null)}
             >
-              {/* the climbing camera: the whole world rides this group; on
-                  horizontal themes it holds still at 0 */}
-              <G y={camY}>
+              {/* the climbing camera: the whole world rides this group on the
+                  UI thread; horizontal themes get a plain static group */}
+              <AnimatedOptionG {...(vertical ? { animatedProps: camProps } : null)}>
               {/* today softly glows: where life is happening */}
               {!vertical && layout.nowX - todayX > 0 && (
                 <Rect
@@ -1510,7 +1622,7 @@ export function LifeTimeline() {
               {vertical &&
                 sm &&
                 (() => {
-                  const todayY = dateToScreenY(today, layout.window, sm.timeLen);
+                  const todayY = dateToScreenY(today, layout.window, sm.timeLen, sm.axisLen);
                   if (todayY - sm.nowScreenY <= 0) return null;
                   return (
                     <Rect
@@ -1529,7 +1641,7 @@ export function LifeTimeline() {
                   the right-hand rail on the summit map) */}
               {ticks.map((tick) => {
                 if (vertical && sm) {
-                  const y = dateToScreenY(tick.date, layout.window, sm.timeLen);
+                  const y = dateToScreenY(tick.date, layout.window, sm.timeLen, sm.axisLen);
                   return (
                     <Line key={tick.date} x1={0} y1={y} x2={svgWidth} y2={y} stroke={tk.lineAxis} />
                   );
@@ -1544,21 +1656,22 @@ export function LifeTimeline() {
                   The ledge marks Now; the pennant climbs with the day. */}
               {vertical && sm && (
                 <>
-                  {sm.nowScreenY > 4 && (
-                    <Rect
-                      x={0}
-                      y={0}
-                      width={svgWidth}
-                      height={sm.nowScreenY}
-                      fill={tk.inkFaint}
-                      opacity={0.05}
-                    />
-                  )}
+                  {/* the unclimbed tint runs from above the peak down to the
+                      ledge, so no stray stripe shows in the top-out framing */}
+                  <Rect
+                    x={0}
+                    y={sm.nowScreenY - (peakGap + 260)}
+                    width={svgWidth}
+                    height={peakGap + 260}
+                    fill={tk.inkFaint}
+                    opacity={0.05}
+                  />
                   <MountainFace
                     routeX={sm.routeX}
-                    peakY={sm.nowScreenY - PEAK_GAP}
+                    peakY={sm.nowScreenY - peakGap}
                     width={svgWidth}
                     timeLen={sm.timeLen}
+                    depth={Math.max(900, activeLines.length * LEDGE_STEP + 200)}
                     tk={tk}
                   />
                   <SummitRoute
@@ -1568,21 +1681,18 @@ export function LifeTimeline() {
                     timeLen={sm.timeLen}
                     tk={tk}
                     calmProgress={calmProgress}
-                    peakY={sm.nowScreenY - PEAK_GAP}
+                    peakY={sm.nowScreenY - peakGap}
+                    depth={Math.max(900, activeLines.length * LEDGE_STEP + 200)}
                   />
                   <Ledge routeX={sm.routeX} nowScreenY={sm.nowScreenY} tk={tk} />
                   <LedgeSteps
                     routeX={sm.routeX}
                     nowScreenY={sm.nowScreenY}
                     steps={unattended}
+                    fading={leavingSteps}
                     tk={tk}
                   />
-                  <ClimbPennant
-                    routeX={sm.routeX}
-                    targetY={pipWorldY}
-                    tk={tk}
-                    reducedMotion={reducedMotion}
-                  />
+                  <ClimbPennant routeX={sm.routeX} liveY={pipFeetY} tk={tk} />
                 </>
               )}
 
@@ -2036,7 +2146,7 @@ export function LifeTimeline() {
                   const b = branches.find((x) => x.id === optId);
                   if (!b || isClosed(b)) return null;
                   // Patrol only ever lands where an answer is still open.
-                  if (decidedToday(b, now) || restingToday(b, now)) return null;
+                  if (handledToday(b, now)) return null;
                   const spriteW = PX * 12;
                   const spriteH = PX * 16;
                   const stageW = vertical ? svgWidth : layout.metrics.width;
@@ -2098,7 +2208,7 @@ export function LifeTimeline() {
                     />
                   );
                 })()}
-              </G>
+              </AnimatedOptionG>
             </Svg>
           </View>
         </ScrollView>
@@ -2140,6 +2250,62 @@ export function LifeTimeline() {
           </View>
         )}
 
+        {/* topping out: the summit party — a burst around the climber and
+            the banner that names the day */}
+        {summitParty > 0 && vertical && (
+          <View
+            key={`summit-party-${summitParty}`}
+            pointerEvents="none"
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              overflow: "hidden",
+              zIndex: 8,
+            }}
+          >
+            {!reducedMotion && (
+              <CelebrationBurst
+                theme={theme}
+                nowX={nowPt.x - scrollXRef.current}
+                mainY={anchorRestY}
+                shimmer={tk.shimmer}
+                accent={tk.accent}
+                danger={tk.danger}
+                spreadAxis="y"
+                spreadLen={200}
+              />
+            )}
+            <View
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: Math.max(20, anchorRestY - 170),
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <T
+                style={{
+                  fontSize: 36,
+                  lineHeight: 42,
+                  fontWeight: "800",
+                  color: tk.ink,
+                  textAlign: "center",
+                }}
+              >
+                {t("You did it!")}
+              </T>
+              <T style={{ fontSize: 15, color: tk.inkSoft, textAlign: "center" }}>
+                {t("Every rope handled. The summit is yours today.")}
+              </T>
+            </View>
+          </View>
+        )}
+
         {/* reaching the sacred state: the themed completion spectacle */}
         {celebration > 0 && (
           <View
@@ -2159,7 +2325,7 @@ export function LifeTimeline() {
             <CelebrationBurst
               theme={theme}
               nowX={vertical ? nowPt.x - scrollXRef.current : nowPt.x}
-              mainY={vertical ? pipWorldY + camY : nowPt.y}
+              mainY={vertical ? anchorRestY : nowPt.y}
               shimmer={tk.shimmer}
               accent={tk.accent}
               danger={tk.danger}
@@ -2195,7 +2361,7 @@ export function LifeTimeline() {
                 }
                 y0={
                   vertical
-                    ? pipWorldY + camY + routeLen * (0.1 + (0.8 * i) / Math.max(1, bloom.count - 1))
+                    ? anchorRestY + routeLen * (0.1 + (0.8 * i) / Math.max(1, bloom.count - 1))
                     : layout.mainY - 3
                 }
               >
@@ -2263,26 +2429,29 @@ export function LifeTimeline() {
             backgroundColor: alpha(tk.bg, 0.88),
           }}
         >
-          {ticks.map((tick) => {
-            const y = dateToScreenY(tick.date, layout.window, sm.timeLen) + camY;
-            if (y < -20 || y > size.height + 8) return null;
-            return (
-              <T
-                key={tick.date}
-                style={{
-                  position: "absolute",
-                  left: 6,
-                  top: y - 7,
-                  fontSize: 11,
-                  lineHeight: 13,
-                  fontWeight: tick.major ? "600" : "400",
-                  color: tick.major ? tk.inkSoft : tk.inkFaint,
-                }}
-              >
-                {tick.label === "Today" ? t("Today") : tick.label}
-              </T>
-            );
-          })}
+          {/* the labels ride the climbing camera on the UI thread, in exact
+              lockstep with the face beside them (tick counts are bounded, so
+              no viewport cull is needed) */}
+          <Svg width={64} height={size.height}>
+            <AnimatedOptionG animatedProps={railProps}>
+              {ticks.map((tick) => {
+                const y = dateToScreenY(tick.date, layout.window, sm.timeLen, sm.axisLen);
+                return (
+                  <SvgText
+                    key={tick.date}
+                    x={6}
+                    y={y + 4}
+                    fontSize={11}
+                    fontFamily={tk.fontBody}
+                    fontWeight={tick.major ? "600" : "400"}
+                    fill={tick.major ? tk.inkSoft : tk.inkFaint}
+                  >
+                    {tick.label === "Today" ? t("Today") : tick.label}
+                  </SvgText>
+                );
+              })}
+            </AnimatedOptionG>
+          </Svg>
         </View>
         )}
 
@@ -2566,7 +2735,7 @@ export function LifeTimeline() {
             const x0 = vertical
               ? Math.max(8, Math.min(g.labelX - scrollXRef.current, size.width - 80))
               : Math.min(g.labelX, layout.metrics.width - 80);
-            const y0 = g.labelY + (vertical ? camY : 0);
+            const y0 = g.labelY + (vertical ? camYRest : 0);
             return (
               <View
                 key={burn.key}
@@ -2625,7 +2794,7 @@ export function LifeTimeline() {
             const x0 = vertical
               ? Math.max(8, Math.min(g.labelX - scrollXRef.current, size.width - 60))
               : Math.min(g.labelX, layout.metrics.width - 60);
-            const y0 = g.labelY + (vertical ? camY : 0);
+            const y0 = g.labelY + (vertical ? camYRest : 0);
             return (
               <View
                 key={reclaim.key}

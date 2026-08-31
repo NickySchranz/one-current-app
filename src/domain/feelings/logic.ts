@@ -71,6 +71,17 @@ export function decidedToday(branch: PsychologicalBranch, now: Date = new Date()
 }
 
 /**
+ * This thread got its answer for the day: a decision, or resting until
+ * tomorrow. The one truth the summit map's coils, ledge counts and top-out
+ * all share. (The `leftOn` check matches the visualization layer's
+ * `restingToday` — implemented here directly, since domain code never
+ * imports visualization.)
+ */
+export function handledToday(branch: PsychologicalBranch, now: Date = new Date()): boolean {
+  return decidedToday(branch, now) || (!!branch.leftOn && branch.leftOn === isoDate(now));
+}
+
+/**
  * Feelings this line is holding right now. A merged line holds nothing —
  * you have moved past it. A decision today releases them for the day.
  */

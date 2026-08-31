@@ -5,6 +5,10 @@
  * the cut flow uses usted, matching quick.ts's burn flow.
  */
 export const summit: Record<string, string> = {
+  // the summit party
+  "You did it!": "¡Lo lograste, parce!",
+  "Every rope handled. The summit is yours today.": "Cada cuerda atendida. Hoy la cumbre es tuya.",
+
   // the pill
   "Chalk!": "¡Magnesio!",
   "FULL SEND!": "¡DE UNA!",

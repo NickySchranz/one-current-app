@@ -157,6 +157,109 @@ const after = await loudnessSnapshot();
 check(before !== after && after.length > 0, "horizontal drag dials loudness");
 
 await page.screenshot({ path: "/tmp/summit-04-final.png" });
+await page.close();
+
+// ── 6. the climbing camera: peak hidden, pin, monotonic descent, rail ──
+{
+  const p2 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  p2.on("pageerror", (e) => errors.push(e.message));
+  await p2.addInitScript(() => {
+    localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+    localStorage.setItem("one-current-tutorial-v1", "done");
+    localStorage.setItem("one-current-pro", "1");
+    localStorage.setItem("one-current-theme", "summit");
+  });
+  await p2.goto("http://localhost:4179/", { waitUntil: "networkidle" });
+  await p2.waitForTimeout(1500);
+  await p2.getByRole("button", { name: "More" }).first().click();
+  await p2.waitForTimeout(500);
+  await p2.getByRole("button", { name: "Load example threads" }).click();
+  await p2.waitForTimeout(800);
+  // leave exactly ONE rope unhandled: mark every other open branch rested today
+  const seeded = await p2.evaluate(() => {
+    const key = "one-current/table/branches";
+    const rows = JSON.parse(localStorage.getItem(key) ?? "[]");
+    const today = new Date().toISOString().slice(0, 10);
+    const open = rows.filter((b) => b.status !== "merged" && b.status !== "converted-to-project" && !b.mergeDate);
+    let left = 0;
+    for (const b of open) {
+      const handled = b.lastDecisionOn === today || b.leftOn === today;
+      if (handled) continue;
+      if (left === 0) { left++; continue; } // keep the first unhandled hanging
+      b.leftOn = today;
+      b.lastDecisionOn = today;
+    }
+    localStorage.setItem(key, JSON.stringify(rows));
+    return open.length;
+  });
+  await p2.reload({ waitUntil: "networkidle" });
+  await p2.waitForTimeout(2500);
+  const capTop = () =>
+    p2.evaluate(() => {
+      const cap = [...document.querySelectorAll('path[fill="#ffffff"]')].find(
+        (el) => el.getAttribute("opacity") === "0.65",
+      );
+      return cap ? cap.getBoundingClientRect().top : null;
+    });
+  const topBefore = await capTop();
+  check(topBefore !== null && topBefore < -20, `peak off-screen with one rope left (cap top ${Math.round(topBefore ?? 0)})`);
+  // start a monotonicity sampler on the WORLD group — the first g of the
+  // widest svg (the header logo and the date rail are svgs too)
+  await p2.evaluate(() => {
+    window.__cam = [];
+    const svg = [...document.querySelectorAll("svg")].sort(
+      (a, b) => Number(b.getAttribute("width") ?? 0) - Number(a.getAttribute("width") ?? 0),
+    )[0];
+    const g = svg?.querySelector(":scope > g");
+    const read = () => {
+      const m = /translate\([^,]+,\s*([-\d.]+)/.exec(g?.getAttribute("transform") ?? "");
+      window.__cam.push(m ? Number(m[1]) : 0);
+      if (window.__cam.length < 400) requestAnimationFrame(read);
+    };
+    requestAnimationFrame(read);
+  });
+  const lastRope = p2.locator('path[stroke="transparent"]').first();
+  const pt2 = await p2.evaluate(() => {
+    // the one open rope: pick a hit path whose top end sits in the upper half
+    for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+      const len = el.getTotalLength();
+      if (!len) continue;
+      const m = el.getScreenCTM();
+      const a = el.getPointAtLength(len);
+      const y = m.b * a.x + m.d * a.y + m.f;
+      const x = m.a * a.x + m.c * a.y + m.e;
+      if (y < 400) {
+        const mid = el.getPointAtLength(len * 0.5);
+        return { x: m.a * mid.x + m.c * mid.y + m.e, y: m.b * mid.x + m.d * mid.y + m.f };
+      }
+    }
+    return null;
+  });
+  check(!!pt2, "found the last hanging rope");
+  await p2.mouse.click(pt2.x, pt2.y);
+  await p2.waitForTimeout(500);
+  await p2.mouse.click(pt2.x, pt2.y);
+  await p2.waitForTimeout(1200);
+  await p2.getByText("What does this rope need from you now?", { exact: false }).first().click();
+  await p2.waitForTimeout(700);
+  await p2.getByText("Let it rest", { exact: false }).first().click();
+  await p2.waitForTimeout(4200);
+  const cam = await p2.evaluate(() => window.__cam);
+  let monotonic = true;
+  const dips = [];
+  for (let i = 1; i < cam.length; i++)
+    if (cam[i] < cam[i - 1] - 0.01) { monotonic = false; dips.push(`${i}:${cam[i - 1]}->${cam[i]}`); }
+  if (dips.length) console.log("  dips:", dips.slice(0, 6).join("  "));
+  check(cam.length > 60 && monotonic, `world only ever moves down during the climb (${cam.length} samples)`);
+  const topAfter = await capTop();
+  const stageH = 800 - 48;
+  check(
+    topAfter !== null && Math.abs(topAfter - (48 + stageH * 0.3)) < 30,
+    `top-out frames the summit near 30% from the top (cap top ${Math.round(topAfter ?? 0)})`,
+  );
+  await p2.screenshot({ path: "/tmp/summit-05-topout.png" });
+  await p2.close();
+}
 await browser.close();
 server.close();
 

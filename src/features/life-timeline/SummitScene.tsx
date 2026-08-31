@@ -18,6 +18,7 @@ import Animated, {
   withSequence,
   withTiming,
   Easing,
+  type SharedValue,
 } from "react-native-reanimated";
 import { Circle, G, Path } from "react-native-svg";
 import type { PathProps } from "react-native-svg";
@@ -38,12 +39,20 @@ const AnimatedG = Animated.createAnimatedComponent(G);
  */
 export const LEDGE_STEP = 64;
 
+/** The peak never rises less than this above the day's ledge. */
+export const PEAK_GAP_MIN = 380;
+
 /**
- * How far the summit tip rises above the day's ledge — far enough that the
- * top stays out of view while anything is unattended, and the last answer
- * earns the climb onto it.
+ * How far the summit tip rises above the day's ledge: wide enough that the
+ * peak clears the VIEWPORT top (stage offset included) by a comfortable
+ * margin even with only one rope remaining, for any stage height (peak
+ * stage y at one ledge = 0.5L - gap - LEDGE_STEP; the +40 absorbs the app
+ * header above the stage). The last answer earns the climb onto it, framed
+ * at 30% from the top by the camera's anchor glide.
  */
-export const PEAK_GAP = 380;
+export function peakGapFor(timeLen: number): number {
+  return Math.max(PEAK_GAP_MIN, Math.ceil(timeLen / 2) + 40);
+}
 
 /** Deterministic jitter — stable across re-renders (same as timeline-fx's). */
 function seeded(i: number, salt: number): number {
@@ -51,17 +60,23 @@ function seeded(i: number, salt: number): number {
   return x - Math.floor(x);
 }
 
-/** One jagged slope: points from (x0,y0) to (x1,y1) with rocky x-jitter. */
+/**
+ * One cliff slope from (x0,y0) to (x1,y1): stepped strata — a horizontal
+ * shelf, then a sheer face — with seeded variation so no two ledges match.
+ * Reads as climbable cliff ledges rather than random scree.
+ */
 function jaggedEdge(x0: number, y0: number, x1: number, y1: number, salt: number): string {
-  const steps = Math.max(3, Math.round(Math.abs(y1 - y0) / 56));
+  const steps = Math.max(3, Math.round(Math.abs(y1 - y0) / 76));
   let d = "";
+  let prevY = Math.round(y0);
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
-    const px = x0 + (x1 - x0) * t + (seeded(i, salt) - 0.35) * 30;
-    const py = y0 + (y1 - y0) * t + (seeded(i, salt + 1) - 0.5) * 14;
-    d += ` L ${Math.round(px)} ${Math.round(py)}`;
+    const xN = Math.round(x0 + (x1 - x0) * t + (seeded(i, salt) - 0.5) * 26);
+    const yN = Math.round(y0 + (y1 - y0) * t + (seeded(i, salt + 1) - 0.5) * 20);
+    d += ` L ${xN} ${prevY} L ${xN} ${yN}`;
+    prevY = yN;
   }
-  d += ` L ${Math.round(x1)} ${Math.round(y1)}`;
+  d += ` L ${Math.round(x1)} ${prevY} L ${Math.round(x1)} ${Math.round(y1)}`;
   return d;
 }
 
@@ -75,6 +90,7 @@ export function MountainFace({
   peakY,
   width,
   timeLen,
+  depth,
   tk,
 }: {
   routeX: number;
@@ -82,11 +98,12 @@ export function MountainFace({
   peakY: number;
   width: number;
   timeLen: number;
+  /** How far below the dated canvas the rock keeps going — the camera looks
+   * one ledge-step per unattended rope below it (see the stage's math). */
+  depth: number;
   tk: ThemeTokens;
 }) {
-  // The camera can look well below the dated canvas early in the day — the
-  // face keeps going down so there is always rock under the climber.
-  const bottom = timeLen + 900;
+  const bottom = timeLen + depth;
   const leftX = -24;
   const rightX = width + 24;
   const body = useMemo(
@@ -134,32 +151,62 @@ export function LedgeSteps({
   routeX,
   nowScreenY,
   steps,
+  fading = null,
   tk,
 }: {
   routeX: number;
   nowScreenY: number;
   /** Ropes still unattended — the climbs left between him and the summit. */
   steps: number;
+  /** The previous count while an answer's marks fade out (else null). */
+  fading?: number | null;
   tk: ThemeTokens;
 }) {
-  if (steps <= 0) return null;
+  const upTo = Math.max(steps, fading ?? 0);
+  if (upTo <= 0) return null;
   const marks: React.JSX.Element[] = [];
-  for (let k = 1; k <= steps; k++) {
+  for (let k = 1; k <= upTo; k++) {
     const y = nowScreenY + k * LEDGE_STEP;
     const side = k % 2 === 0 ? -1 : 1;
+    const d = `M ${routeX + (side === -1 ? -14 : 2)} ${y} h 12`;
     marks.push(
-      <Path
-        key={k}
-        d={`M ${routeX + (side === -1 ? -14 : 2)} ${y} h 12`}
-        stroke={tk.inkSoft}
-        strokeWidth={2.5}
-        strokeLinecap="round"
-        fill="none"
-        opacity={0.5}
-      />,
+      k <= steps ? (
+        <Path
+          key={k}
+          d={d}
+          stroke={tk.inkSoft}
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          fill="none"
+          opacity={0.5}
+        />
+      ) : (
+        // a just-earned step: its mark fades out instead of popping away
+        <FadingLedgeMark key={`f${k}`} d={d} tk={tk} />
+      ),
     );
   }
   return <G pointerEvents="none">{marks}</G>;
+}
+
+function FadingLedgeMark({ d, tk }: { d: string; tk: ThemeTokens }) {
+  const o = useSharedValue(0.5);
+  useEffect(() => {
+    o.value = 0.5;
+    o.value = withTiming(0, { duration: 1200, easing: Easing.out(Easing.quad) });
+    return () => cancelAnimation(o);
+  }, [o]);
+  const props = useAnimatedProps<PathProps>(() => ({ opacity: o.value }), [o]);
+  return (
+    <AnimatedPath
+      animatedProps={props}
+      d={d}
+      stroke={tk.inkSoft}
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      fill="none"
+    />
+  );
 }
 
 /**
@@ -172,6 +219,7 @@ export function SummitRoute({
   routeX,
   nowScreenY,
   timeLen,
+  depth,
   tk,
   calmProgress,
   peakY = 0,
@@ -180,6 +228,8 @@ export function SummitRoute({
   routeX: number;
   nowScreenY: number;
   timeLen: number;
+  /** How far below the dated canvas the faded route keeps going. */
+  depth: number;
   tk: ThemeTokens;
   calmProgress: number;
   /** Where the mountain peaks — the unclimbed route dashes end there. */
@@ -190,7 +240,7 @@ export function SummitRoute({
     <G>
       {/* the route fades on below the dated canvas — the camera may look there */}
       <Path
-        d={`M ${routeX} ${timeLen} L ${routeX} ${timeLen + 900}`}
+        d={`M ${routeX} ${timeLen} L ${routeX} ${timeLen + depth}`}
         stroke={tk.lineMain}
         strokeWidth={3.25}
         fill="none"
@@ -304,35 +354,22 @@ export function Ledge({
 }
 
 /**
- * The altitude pennant: a little flag planted at the climber's current
- * ledge, gliding up one step with each answer. Eased on the UI thread;
- * still under reduced motion.
+ * The altitude pennant: a little flag planted at the climber's feet — it
+ * rides the same live shared value the camera tracks, so flag, climber and
+ * mountain move as one (already quantized upstream). Under reduced motion
+ * the value is static, so the flag is too.
  */
 export function ClimbPennant({
   routeX,
-  targetY,
+  liveY,
   tk,
-  reducedMotion,
 }: {
   routeX: number;
-  /** The climber's current ledge altitude (world y). */
-  targetY: number;
+  /** The climber's feet in world coords — the stage's pipFeetY. */
+  liveY: SharedValue<number>;
   tk: ThemeTokens;
-  reducedMotion: boolean;
 }) {
-  const p = useSharedValue(targetY);
-  useEffect(() => {
-    cancelAnimation(p);
-    if (reducedMotion) {
-      p.value = targetY;
-      return;
-    }
-    p.value = withTiming(targetY, { duration: 700, easing: Easing.out(Easing.cubic) });
-    return () => cancelAnimation(p);
-  }, [targetY, reducedMotion, p]);
-  // Quantized so the DOM hears steps, not every frame of the ease.
-  const q = useDerivedValue(() => Math.round(p.value * 2) / 2, []);
-  const props = useAnimatedProps(() => ({ translateY: q.value }), [q]);
+  const props = useAnimatedProps(() => ({ translateY: liveY.value }), [liveY]);
   const x = routeX + 11;
   return (
     <AnimatedG animatedProps={props} pointerEvents="none">
