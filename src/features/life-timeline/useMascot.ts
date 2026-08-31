@@ -520,11 +520,9 @@ export function useMascot(
       // answer landed while he rested) — that ascent is climbed, not snapped;
       // small drifts are pans and stay glued.
       const cur = posRef.current;
-      if (
-        verticalRef.current &&
-        phase.current === 'idle' &&
-        Math.abs(cur.y - ty) > 30
-      ) {
+      // even mid-talk: the earned ledge is always CLIMBED, never snapped
+      // (a jump in flight already returned above and folds the drift itself)
+      if (verticalRef.current && Math.abs(cur.y - ty) > 30) {
         climbToRef.current(tx, ty);
         return;
       }
@@ -576,11 +574,7 @@ export function useMascot(
     // A big vertical shift on the summit is an earned ledge — climbed, not
     // snapped (climbTo releases the rope; its coil stays behind).
     const cur = posRef.current;
-    if (
-      verticalRef.current &&
-      phase.current === 'idle' &&
-      Math.abs(cur.y - ty) > 30
-    ) {
+    if (verticalRef.current && Math.abs(cur.y - ty) > 30) {
       climbToRef.current(tx, ty);
       return;
     }

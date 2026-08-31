@@ -51,7 +51,7 @@ import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
 import { useCalmCurrent } from "./useSquiggle";
 import { useSummitCurrent } from "./useSummit";
-import { ClimbPennant, Ledge, LEDGE_STEP, LedgeSteps, MountainFace, RopeCut, SummitRoute } from "./SummitScene";
+import { ClimbPennant, Ledge, LEDGE_STEP, LedgeSteps, MountainFace, PEAK_GAP, RopeCut, SummitRoute } from "./SummitScene";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -527,7 +527,13 @@ export function LifeTimeline() {
   // out of view — and the whole world slides down a step with each answer,
   // keeping him at screen center until he tops out.
   const unattended = Math.round((1 - calmProgress) * activeLines.length);
-  const pipWorldY = sm ? sm.nowScreenY + unattended * LEDGE_STEP : 0;
+  // Every rope handled: the last answer sends him past the ledge, up onto
+  // the summit cap itself.
+  const pipWorldY = sm
+    ? unattended === 0
+      ? sm.nowScreenY - PEAK_GAP - 8
+      : sm.nowScreenY + unattended * LEDGE_STEP
+    : 0;
   const easedPipY = useEased(pipWorldY, reducedMotion);
   const camY = vertical && sm ? Math.round(sm.timeLen / 2 - easedPipY) : 0;
   const camYRef = useRef(camY);
@@ -1550,7 +1556,7 @@ export function LifeTimeline() {
                   )}
                   <MountainFace
                     routeX={sm.routeX}
-                    peakY={sm.nowScreenY - 380}
+                    peakY={sm.nowScreenY - PEAK_GAP}
                     width={svgWidth}
                     timeLen={sm.timeLen}
                     tk={tk}
@@ -1562,7 +1568,7 @@ export function LifeTimeline() {
                     timeLen={sm.timeLen}
                     tk={tk}
                     calmProgress={calmProgress}
-                    peakY={sm.nowScreenY - 380}
+                    peakY={sm.nowScreenY - PEAK_GAP}
                   />
                   <Ledge routeX={sm.routeX} nowScreenY={sm.nowScreenY} tk={tk} />
                   <LedgeSteps
@@ -2153,7 +2159,7 @@ export function LifeTimeline() {
             <CelebrationBurst
               theme={theme}
               nowX={vertical ? nowPt.x - scrollXRef.current : nowPt.x}
-              mainY={nowPt.y + camY}
+              mainY={vertical ? pipWorldY + camY : nowPt.y}
               shimmer={tk.shimmer}
               accent={tk.accent}
               danger={tk.danger}
@@ -2189,7 +2195,7 @@ export function LifeTimeline() {
                 }
                 y0={
                   vertical
-                    ? nowPt.y + camY + routeLen * (0.1 + (0.8 * i) / Math.max(1, bloom.count - 1))
+                    ? pipWorldY + camY + routeLen * (0.1 + (0.8 * i) / Math.max(1, bloom.count - 1))
                     : layout.mainY - 3
                 }
               >

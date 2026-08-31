@@ -38,6 +38,13 @@ const AnimatedG = Animated.createAnimatedComponent(G);
  */
 export const LEDGE_STEP = 64;
 
+/**
+ * How far the summit tip rises above the day's ledge — far enough that the
+ * top stays out of view while anything is unattended, and the last answer
+ * earns the climb onto it.
+ */
+export const PEAK_GAP = 380;
+
 /** Deterministic jitter — stable across re-renders (same as timeline-fx's). */
 function seeded(i: number, salt: number): number {
   const x = Math.sin(i * 127.1 + salt * 311.7) * 43758.5453;
