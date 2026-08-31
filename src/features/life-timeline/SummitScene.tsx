@@ -30,16 +30,13 @@ import type { ThemeTokens } from "@/ui/theme";
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const AnimatedG = Animated.createAnimatedComponent(G);
 
-/** How far below the ledge the climber starts an unanswered day. */
-export const CLIMB_SPAN_MAX = 380;
-
 /**
- * The climbing camera keeps base camp at screen center: ledge = center −
- * (1 − progress) · span, so the span can never push the ledge past the top.
+ * One ledge per rope still unattended, one fixed step apart. The climber
+ * always stands exactly `unattended × LEDGE_STEP` below the summit ledge —
+ * far enough that the top starts out of view — and each answer climbs him
+ * one step while the camera slides the world down to keep him centered.
  */
-export function climbSpan(timeLen: number): number {
-  return Math.max(0, Math.min(CLIMB_SPAN_MAX, timeLen * 0.5 - 30));
-}
+export const LEDGE_STEP = 64;
 
 /** Deterministic jitter — stable across re-renders (same as timeline-fx's). */
 function seeded(i: number, salt: number): number {
@@ -80,7 +77,9 @@ export function MountainFace({
   timeLen: number;
   tk: ThemeTokens;
 }) {
-  const bottom = timeLen + 24;
+  // The camera can look well below the dated canvas early in the day — the
+  // face keeps going down so there is always rock under the climber.
+  const bottom = timeLen + 900;
   const leftX = -24;
   const rightX = width + 24;
   const body = useMemo(
@@ -120,32 +119,26 @@ export function MountainFace({
 }
 
 /**
- * The rock face's ledges: one notch per open rope plus base camp, evenly up
- * the climb band. Each answered rope moves the climber one notch higher —
- * these are the exact altitudes his rest point steps through.
+ * The rock face's ledges: one notch per unattended rope, a fixed step apart
+ * below the summit ledge. The climber stands on the lowest; each answer
+ * removes one and he climbs to the next.
  */
 export function LedgeSteps({
   routeX,
   nowScreenY,
-  timeLen,
   steps,
   tk,
 }: {
   routeX: number;
   nowScreenY: number;
-  timeLen: number;
-  /** Open ropes today — the number of climbs between base camp and the ledge. */
+  /** Ropes still unattended — the climbs left between him and the summit. */
   steps: number;
   tk: ThemeTokens;
 }) {
   if (steps <= 0) return null;
-  const span = climbSpan(timeLen);
-  if (span <= 0) return null;
   const marks: React.JSX.Element[] = [];
-  for (let k = 0; k < steps; k++) {
-    // base camp (k=0) up to just below the day's ledge; the ledge itself
-    // (k=steps) is the big one drawn by <Ledge/>.
-    const y = nowScreenY + (1 - k / steps) * span;
+  for (let k = 1; k <= steps; k++) {
+    const y = nowScreenY + k * LEDGE_STEP;
     const side = k % 2 === 0 ? -1 : 1;
     marks.push(
       <Path
@@ -188,6 +181,14 @@ export function SummitRoute({
   const base = `M ${routeX} ${timeLen} L ${routeX} ${nowScreenY}`;
   return (
     <G>
+      {/* the route fades on below the dated canvas — the camera may look there */}
+      <Path
+        d={`M ${routeX} ${timeLen} L ${routeX} ${timeLen + 900}`}
+        stroke={tk.lineMain}
+        strokeWidth={3.25}
+        fill="none"
+        opacity={0.35}
+      />
       <AnimatedPath
         animatedProps={current.haloOuter}
         d={base}
@@ -296,43 +297,35 @@ export function Ledge({
 }
 
 /**
- * The altitude pennant: a little flag that climbs toward the ledge as the
- * day's ropes get their answers, planted at the ledge when everything is
- * answered. Eased on the UI thread; still under reduced motion.
+ * The altitude pennant: a little flag planted at the climber's current
+ * ledge, gliding up one step with each answer. Eased on the UI thread;
+ * still under reduced motion.
  */
 export function ClimbPennant({
   routeX,
-  nowScreenY,
-  timeLen,
-  progress,
+  targetY,
   tk,
   reducedMotion,
 }: {
   routeX: number;
-  nowScreenY: number;
-  timeLen: number;
-  /** 0..1 — answered open ropes over all open ropes. */
-  progress: number;
+  /** The climber's current ledge altitude (world y). */
+  targetY: number;
   tk: ThemeTokens;
   reducedMotion: boolean;
 }) {
-  const span = climbSpan(timeLen);
-  const p = useSharedValue(progress);
+  const p = useSharedValue(targetY);
   useEffect(() => {
     cancelAnimation(p);
     if (reducedMotion) {
-      p.value = progress;
+      p.value = targetY;
       return;
     }
-    p.value = withTiming(progress, { duration: 700, easing: Easing.out(Easing.cubic) });
+    p.value = withTiming(targetY, { duration: 700, easing: Easing.out(Easing.cubic) });
     return () => cancelAnimation(p);
-  }, [progress, reducedMotion, p]);
+  }, [targetY, reducedMotion, p]);
   // Quantized so the DOM hears steps, not every frame of the ease.
-  const q = useDerivedValue(() => Math.round(p.value * 100) / 100, []);
-  const props = useAnimatedProps(
-    () => ({ translateY: nowScreenY + (1 - q.value) * span }),
-    [nowScreenY, span, q],
-  );
+  const q = useDerivedValue(() => Math.round(p.value * 2) / 2, []);
+  const props = useAnimatedProps(() => ({ translateY: q.value }), [q]);
   const x = routeX + 11;
   return (
     <AnimatedG animatedProps={props} pointerEvents="none">

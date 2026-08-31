@@ -351,19 +351,15 @@ export function useMascot(
     setArrivedVia(via);
   };
 
-  // Where Pip stands to visit a rope. On the summit he works the face at HIS
-  // altitude — the ledge he has earned today — grabbing each rope where it
-  // passes him, instead of hanging off its anchor at the top. Horizontal
-  // themes keep the endpoint perch.
+  // Where Pip stands to visit a rope. On the summit he NEVER leaves the
+  // route: every "visit" happens from his ledge — the focus (highlight,
+  // bubble, offer pills, bonk target) travels between ropes instead of him.
+  // His altitude IS the day: one ledge-step below the top for every rope
+  // still unattended, one level higher with each one attended (nowY carries
+  // that, fed by the stage). Horizontal themes keep the endpoint perch.
   const ropeSpot = (g: BranchGeometry): { x: number; y: number } => {
     if (verticalRef.current) {
-      const x = (g.laneX ?? g.endX) + 10;
-      // never below the rope's lower end (its fork) nor above its anchor
-      const y = Math.max(
-        g.endY,
-        Math.min(g.forkY, nowYRef.current),
-      ) - PX * 10;
-      return { x, y };
+      return { x: nowXRef.current - PX * 12 - 10, y: nowYRef.current - PX * 10 };
     }
     return { x: g.endX + 10, y: g.endY - PX * 10 };
   };

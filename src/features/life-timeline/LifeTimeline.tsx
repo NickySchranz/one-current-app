@@ -51,7 +51,7 @@ import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
 import { useCalmCurrent } from "./useSquiggle";
 import { useSummitCurrent } from "./useSummit";
-import { ClimbPennant, climbSpan, Ledge, LedgeSteps, MountainFace, RopeCut, SummitRoute } from "./SummitScene";
+import { ClimbPennant, Ledge, LEDGE_STEP, LedgeSteps, MountainFace, RopeCut, SummitRoute } from "./SummitScene";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -483,13 +483,6 @@ export function LifeTimeline() {
           (b) => decidedToday(b, now) || restingToday(b, now) || hasPendingStep(b),
         ).length / activeLines.length;
 
-  // The climbing camera: the ledge slides from just under the top edge down
-  // toward screen center as answers land — the world moves down and the
-  // climber holds the center. Eased so each earned ledge is a glide.
-  const easedClimb = useEased(vertical ? calmProgress : 0, reducedMotion);
-  const timeLenEst = Math.max(240, size.height - Math.round(bottomInset));
-  const camLedgeY = timeLenEst * 0.5 - (1 - easedClimb) * climbSpan(timeLenEst);
-
   const layout = useMemo(
     () =>
       vertical
@@ -502,7 +495,6 @@ export function LifeTimeline() {
             now,
             mainShift,
             pinnedBranchIds,
-            ledgeY: camLedgeY,
           })
         : buildTimelineLayout(visible, {
             width: size.width,
@@ -519,7 +511,7 @@ export function LifeTimeline() {
             // changes and past the save, while the quick menu is still open.
             pinnedBranchIds,
           }),
-    [vertical, visible, size, window_, compact, now, mainShift, topInset, pinnedBranchIds, bottomInset, camLedgeY],
+    [vertical, visible, size, window_, compact, now, mainShift, topInset, pinnedBranchIds, bottomInset],
   );
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -529,6 +521,17 @@ export function LifeTimeline() {
   const nowPt = sm
     ? { x: sm.routeX, y: sm.nowScreenY }
     : { x: layout.nowX, y: layout.mainY };
+
+  // The climbing camera: the climber stands one fixed ledge-step below the
+  // summit for every rope still unattended — far enough that the top starts
+  // out of view — and the whole world slides down a step with each answer,
+  // keeping him at screen center until he tops out.
+  const unattended = Math.round((1 - calmProgress) * activeLines.length);
+  const pipWorldY = sm ? sm.nowScreenY + unattended * LEDGE_STEP : 0;
+  const easedPipY = useEased(pipWorldY, reducedMotion);
+  const camY = vertical && sm ? Math.round(sm.timeLen / 2 - easedPipY) : 0;
+  const camYRef = useRef(camY);
+  camYRef.current = camY;
 
   useEffect(() => {
     const wantsThread = tutorialStep === "meet-thread" || tutorialStep === "pip-arrives";
@@ -548,7 +551,7 @@ export function LifeTimeline() {
       if (verticalRef.current) {
         setWalkthroughPoint("thread", {
           x: sx + g.endX - scrollXRef.current,
-          y: sy + g.endY + 24,
+          y: sy + g.endY + 24 + camYRef.current,
         });
       } else {
         setWalkthroughPoint("thread", { x: sx + g.endX - 24, y: sy + g.endY });
@@ -643,6 +646,9 @@ export function LifeTimeline() {
 
   const candidateRef = useRef<{ branchId: string; startLevel: number } | null>(null);
   const modeRef = useRef<"idle" | "dial" | "pan">("idle");
+  /** Face-drag anchor: scroll events lag the finger, so the drag offsets
+   * from the position captured at its start, not the live one. */
+  const hscrollStartRef = useRef(0);
   const dialLevelRef = useRef(0);
   const lastXRef = useRef(0);
   const lastYRef = useRef(0);
@@ -724,17 +730,18 @@ export function LifeTimeline() {
           if (verticalRef.current) {
             // Summit swaps the axes: sideways on a rope dials its loudness,
             // up/down anywhere climbs through time, and a plain sideways
-            // drag off any rope scrolls the face natively.
+            // drag off any rope pans across the face — RN-web ScrollViews
+            // don't drag-scroll with a mouse, so the gesture owns it.
             if (candidateRef.current && Math.abs(gs.dx) >= Math.abs(gs.dy)) {
               modeRef.current = "dial";
               return true;
             }
-            if (Math.abs(gs.dy) > Math.abs(gs.dx)) {
-              modeRef.current = "pan";
-              candidateRef.current = null;
-              return true;
-            }
-            return false;
+            // Any other drag is 2D: up/down climbs through time while
+            // sideways slides the face — one gesture, both axes (RN-web
+            // ScrollViews can't drag-scroll with a mouse, so the map owns it).
+            modeRef.current = "pan";
+            candidateRef.current = null;
+            return true;
           }
           if (candidateRef.current && Math.abs(gs.dy) >= Math.abs(gs.dx)) {
             // Vertical wins: the thumb is dialing loudness now.
@@ -754,6 +761,7 @@ export function LifeTimeline() {
         onPanResponderGrant: (_e, gs) => {
           lastXRef.current = gs.moveX || gs.x0;
           lastYRef.current = gs.moveY || gs.y0;
+          hscrollStartRef.current = scrollXRef.current;
           measureNode(stageRef.current, (x, y) => {
             stagePosRef.current = { x, y };
           });
@@ -787,6 +795,11 @@ export function LifeTimeline() {
           }
           if (modeRef.current === "pan") {
             if (verticalRef.current) {
+              // sideways: slide the face, anchored to the drag's start
+              scrollRef.current?.scrollTo({
+                x: Math.max(0, hscrollStartRef.current - gs.dx),
+                animated: false,
+              });
               const dy = gs.moveY - lastYRef.current;
               if (dy === 0) return;
               lastYRef.current = gs.moveY;
@@ -946,7 +959,15 @@ export function LifeTimeline() {
       if (verticalRef.current) {
         // Summit: the vertical wheel climbs through time; sideways scrolling
         // stays native (it pans the face's columns).
-        if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+        if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) {
+          // sideways wheel slides the face (the ScrollView is gesture-dead)
+          e.preventDefault();
+          scrollRef.current?.scrollTo({
+            x: Math.max(0, scrollXRef.current + e.deltaX),
+            animated: false,
+          });
+          return;
+        }
         e.preventDefault();
         const rect = el.getBoundingClientRect();
         const nearDates = e.clientX - rect.left > rect.width - 64;
@@ -1116,12 +1137,9 @@ export function LifeTimeline() {
     const y = Math.max(0, Math.min(maxScroll, destY - vh / 2));
     scrollRef.current?.scrollTo({ y, animated: true });
   }, []);
-  // On the summit map the climber's rest point starts below the ledge and
-  // rises with every answered rope; with the camera easing the ledge down at
-  // the same rate, his rest point lives at screen center all day.
-  const mascotNowY = vertical && sm
-    ? sm.nowScreenY + (1 - calmProgress) * climbSpan(sm.timeLen)
-    : layout.mainY;
+  // On the summit map the climber's rest point is his current ledge — one
+  // step per unattended rope below the summit; the camera keeps it centered.
+  const mascotNowY = vertical && sm ? pipWorldY : layout.mainY;
   const mascot = useMascot(
     visible,
     layout.geometries,
@@ -1200,7 +1218,7 @@ export function LifeTimeline() {
           setFlights((f) => [
             ...f,
             verticalRef.current
-              ? { key: c.key, branchId: c.branchId, x0: g.endX + COIN_LEAD - scrollXRef.current, y0: g.endY - COIN_HOVER }
+              ? { key: c.key, branchId: c.branchId, x0: g.endX + COIN_LEAD - scrollXRef.current, y0: g.endY - COIN_HOVER + camYRef.current }
               : { key: c.key, branchId: c.branchId, x0: g.endX + COIN_LEAD, y0: g.endY - COIN_HOVER - scrollYRef.current },
           ]);
           coinTimersRef.current.set(c.key, setTimeout(() => finishCoin(c.key), COIN_FLY_MS));
@@ -1428,7 +1446,10 @@ export function LifeTimeline() {
           ref={scrollRef}
           horizontal={vertical}
           style={{ flex: 1, minHeight: 0 }}
-          scrollEnabled={!scrollLocked}
+          // Summit: the 2D pan gesture owns both axes (a scroll-enabled
+          // ScrollView steals horizontally-initiated drags before the
+          // responder can claim them); programmatic scrollTo still works.
+          scrollEnabled={vertical ? false : !scrollLocked}
           onLayout={(e) => setScrollH(e.nativeEvent.layout.height)}
           onScroll={(e) => {
             scrollYRef.current = e.nativeEvent.contentOffset.y;
@@ -1452,18 +1473,23 @@ export function LifeTimeline() {
               height={svgHeight}
               accessibilityLabel={summary}
               accessibilityRole="image"
-              // .timeline-svg parity: drags must never select label text, and
-              // the browser keeps the native scroll axis while we own the
-              // other one (vertical themes scroll y; summit scrolls x).
+              // .timeline-svg parity: drags must never select label text.
+              // Horizontal themes keep native vertical panning; the summit's
+              // one 2D gesture owns both axes (time up/down, face sideways),
+              // so the browser gets none — pan-x would make the platform
+              // skip responder negotiation for sideways drags entirely.
               {...(Platform.OS === "web"
                 ? {
                     style: {
                       userSelect: "none",
-                      touchAction: vertical ? "pan-x" : "pan-y",
+                      touchAction: vertical ? "none" : "pan-y",
                     } as object,
                   }
                 : null)}
             >
+              {/* the climbing camera: the whole world rides this group; on
+                  horizontal themes it holds still at 0 */}
+              <G y={camY}>
               {/* today softly glows: where life is happening */}
               {!vertical && layout.nowX - todayX > 0 && (
                 <Rect
@@ -1524,7 +1550,7 @@ export function LifeTimeline() {
                   )}
                   <MountainFace
                     routeX={sm.routeX}
-                    peakY={Math.max(10, sm.nowScreenY - 150)}
+                    peakY={sm.nowScreenY - 380}
                     width={svgWidth}
                     timeLen={sm.timeLen}
                     tk={tk}
@@ -1536,21 +1562,18 @@ export function LifeTimeline() {
                     timeLen={sm.timeLen}
                     tk={tk}
                     calmProgress={calmProgress}
-                    peakY={Math.max(10, sm.nowScreenY - 150)}
+                    peakY={sm.nowScreenY - 380}
                   />
                   <Ledge routeX={sm.routeX} nowScreenY={sm.nowScreenY} tk={tk} />
                   <LedgeSteps
                     routeX={sm.routeX}
                     nowScreenY={sm.nowScreenY}
-                    timeLen={sm.timeLen}
-                    steps={activeLines.length}
+                    steps={unattended}
                     tk={tk}
                   />
                   <ClimbPennant
                     routeX={sm.routeX}
-                    nowScreenY={sm.nowScreenY}
-                    timeLen={sm.timeLen}
-                    progress={calmProgress}
+                    targetY={pipWorldY}
                     tk={tk}
                     reducedMotion={reducedMotion}
                   />
@@ -2069,6 +2092,7 @@ export function LifeTimeline() {
                     />
                   );
                 })()}
+              </G>
             </Svg>
           </View>
         </ScrollView>
@@ -2129,7 +2153,7 @@ export function LifeTimeline() {
             <CelebrationBurst
               theme={theme}
               nowX={vertical ? nowPt.x - scrollXRef.current : nowPt.x}
-              mainY={nowPt.y}
+              mainY={nowPt.y + camY}
               shimmer={tk.shimmer}
               accent={tk.accent}
               danger={tk.danger}
@@ -2165,7 +2189,7 @@ export function LifeTimeline() {
                 }
                 y0={
                   vertical
-                    ? nowPt.y + routeLen * (0.1 + (0.8 * i) / Math.max(1, bloom.count - 1))
+                    ? nowPt.y + camY + routeLen * (0.1 + (0.8 * i) / Math.max(1, bloom.count - 1))
                     : layout.mainY - 3
                 }
               >
@@ -2234,7 +2258,7 @@ export function LifeTimeline() {
           }}
         >
           {ticks.map((tick) => {
-            const y = dateToScreenY(tick.date, layout.window, sm.timeLen);
+            const y = dateToScreenY(tick.date, layout.window, sm.timeLen) + camY;
             if (y < -20 || y > size.height + 8) return null;
             return (
               <T
@@ -2536,7 +2560,7 @@ export function LifeTimeline() {
             const x0 = vertical
               ? Math.max(8, Math.min(g.labelX - scrollXRef.current, size.width - 80))
               : Math.min(g.labelX, layout.metrics.width - 80);
-            const y0 = g.labelY;
+            const y0 = g.labelY + (vertical ? camY : 0);
             return (
               <View
                 key={burn.key}
@@ -2577,7 +2601,7 @@ export function LifeTimeline() {
                     x0={x0}
                     y0={y0}
                     dx={(vertical ? nowPt.x - scrollXRef.current : layout.nowX - 24) - x0}
-                    dy={nowPt.y - y0}
+                    dy={nowPt.y - g.labelY}
                   >
                     <Tag label={burn.lesson} quality />
                   </ReclaimFly>
@@ -2595,7 +2619,7 @@ export function LifeTimeline() {
             const x0 = vertical
               ? Math.max(8, Math.min(g.labelX - scrollXRef.current, size.width - 60))
               : Math.min(g.labelX, layout.metrics.width - 60);
-            const y0 = g.labelY;
+            const y0 = g.labelY + (vertical ? camY : 0);
             return (
               <View
                 key={reclaim.key}
@@ -2617,7 +2641,7 @@ export function LifeTimeline() {
                     x0={x0}
                     y0={y0}
                     dx={(vertical ? nowPt.x - scrollXRef.current : layout.nowX - 24) - x0}
-                    dy={nowPt.y - y0}
+                    dy={nowPt.y - g.labelY}
                   >
                     <Tag label={t(f)} quality />
                   </ReclaimFly>
