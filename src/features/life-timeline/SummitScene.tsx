@@ -24,7 +24,7 @@ import type { PathProps } from "react-native-svg";
 import type { CalmCurrentProps } from "./useSquiggle";
 import { samplePath } from "@/visualization/path-sample";
 import { AnimatedPath, Fleck } from "./timeline-fx";
-import { alpha } from "@/ui/color";
+import { alpha, mix } from "@/ui/color";
 import type { ThemeTokens } from "@/ui/theme";
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -33,8 +33,90 @@ const AnimatedG = Animated.createAnimatedComponent(G);
 /** How far below the ledge the climber starts an unanswered day. */
 export const CLIMB_SPAN_MAX = 380;
 
-export function climbSpan(nowScreenY: number, timeLen: number): number {
-  return Math.max(0, Math.min(CLIMB_SPAN_MAX, timeLen - nowScreenY - 90));
+/**
+ * The climbing camera keeps base camp at screen center: ledge = center −
+ * (1 − progress) · span, so the span can never push the ledge past the top.
+ */
+export function climbSpan(timeLen: number): number {
+  return Math.max(0, Math.min(CLIMB_SPAN_MAX, timeLen * 0.5 - 30));
+}
+
+/** Deterministic jitter — stable across re-renders (same as timeline-fx's). */
+function seeded(i: number, salt: number): number {
+  const x = Math.sin(i * 127.1 + salt * 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/** One jagged slope: points from (x0,y0) to (x1,y1) with rocky x-jitter. */
+function jaggedEdge(x0: number, y0: number, x1: number, y1: number, salt: number): string {
+  const steps = Math.max(3, Math.round(Math.abs(y1 - y0) / 56));
+  let d = "";
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const px = x0 + (x1 - x0) * t + (seeded(i, salt) - 0.35) * 30;
+    const py = y0 + (y1 - y0) * t + (seeded(i, salt + 1) - 0.5) * 14;
+    d += ` L ${Math.round(px)} ${Math.round(py)}`;
+  }
+  d += ` L ${Math.round(x1)} ${Math.round(y1)}`;
+  return d;
+}
+
+/**
+ * The mountain itself: a granite face rising out of the canvas bottom to a
+ * snow-capped peak above the ledge, with jagged rocky edges. Lives inside
+ * the canvas, so it pans with the world and slides down with the camera.
+ */
+export function MountainFace({
+  routeX,
+  peakY,
+  width,
+  timeLen,
+  tk,
+}: {
+  routeX: number;
+  /** The summit's tip — a bit above wherever the ledge currently hangs. */
+  peakY: number;
+  width: number;
+  timeLen: number;
+  tk: ThemeTokens;
+}) {
+  const bottom = timeLen + 24;
+  const leftX = -24;
+  const rightX = width + 24;
+  const body = useMemo(
+    () =>
+      `M ${leftX} ${bottom}` +
+      jaggedEdge(leftX, bottom, routeX, peakY, 31) +
+      jaggedEdge(routeX, peakY, rightX, bottom, 33) +
+      ` Z`,
+    [leftX, bottom, routeX, peakY, rightX],
+  );
+  // the snow cap: the top stretch of both slopes, closed with a ragged hem
+  const cap = useMemo(() => {
+    const drop = 88;
+    const lx = routeX + (leftX - routeX) * (drop / Math.max(1, bottom - peakY));
+    const rx = routeX + (rightX - routeX) * (drop / Math.max(1, bottom - peakY));
+    let d = `M ${Math.round(lx)} ${peakY + drop}`;
+    d += jaggedEdge(lx, peakY + drop, routeX, peakY, 31);
+    d += jaggedEdge(routeX, peakY, rx, peakY + drop, 33);
+    // ragged hem back to the start
+    const hemSteps = 5;
+    for (let i = 1; i <= hemSteps; i++) {
+      const t = i / hemSteps;
+      const px = rx + (lx - rx) * t;
+      const py = peakY + drop + (seeded(i, 35) - 0.2) * 26;
+      d += ` L ${Math.round(px)} ${Math.round(py)}`;
+    }
+    return d + " Z";
+  }, [leftX, rightX, routeX, peakY, bottom]);
+  const rock = mix(tk.inkFaint, tk.bg, 48);
+  return (
+    <G pointerEvents="none">
+      <Path d={body} fill={rock} opacity={0.42} />
+      <Path d={body} fill="none" stroke={tk.inkFaint} strokeWidth={2.5} opacity={0.55} />
+      <Path d={cap} fill="#ffffff" opacity={0.65} />
+    </G>
+  );
 }
 
 /**
@@ -57,7 +139,7 @@ export function LedgeSteps({
   tk: ThemeTokens;
 }) {
   if (steps <= 0) return null;
-  const span = climbSpan(nowScreenY, timeLen);
+  const span = climbSpan(timeLen);
   if (span <= 0) return null;
   const marks: React.JSX.Element[] = [];
   for (let k = 0; k < steps; k++) {
@@ -92,6 +174,7 @@ export function SummitRoute({
   timeLen,
   tk,
   calmProgress,
+  peakY = 0,
 }: {
   current: CalmCurrentProps;
   routeX: number;
@@ -99,6 +182,8 @@ export function SummitRoute({
   timeLen: number;
   tk: ThemeTokens;
   calmProgress: number;
+  /** Where the mountain peaks — the unclimbed route dashes end there. */
+  peakY?: number;
 }) {
   const base = `M ${routeX} ${timeLen} L ${routeX} ${nowScreenY}`;
   return (
@@ -156,10 +241,10 @@ export function SummitRoute({
         fill="none"
         opacity={0}
       />
-      {/* the mountain keeps going: the unclimbed route above the ledge */}
-      {nowScreenY > 4 && (
+      {/* the mountain keeps going: the unclimbed route up to the peak */}
+      {nowScreenY - peakY > 4 && (
         <Path
-          d={`M ${routeX} ${nowScreenY} L ${routeX} 0`}
+          d={`M ${routeX} ${nowScreenY} L ${routeX} ${peakY}`}
           stroke={tk.lineMain}
           strokeWidth={2}
           fill="none"
@@ -231,7 +316,7 @@ export function ClimbPennant({
   tk: ThemeTokens;
   reducedMotion: boolean;
 }) {
-  const span = climbSpan(nowScreenY, timeLen);
+  const span = climbSpan(timeLen);
   const p = useSharedValue(progress);
   useEffect(() => {
     cancelAnimation(p);

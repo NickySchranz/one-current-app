@@ -91,11 +91,11 @@ check(
   verticalCount >= Math.ceil(ropes.length / 2),
   `ropes are vertical (${verticalCount}/${ropes.length} steeper than wide)`,
 );
-// The display window pins Now (the ledge) near the top — every rope dangles
-// from up there.
+// The climbing camera keeps the ledge between the top edge (unanswered day)
+// and screen center (day complete) — anchors never hang in the bottom half.
 check(
-  ropes.some((r) => r.end.y < 800 * 0.3),
-  "at least one anchor hangs in the top 30% (the ledge)",
+  ropes.some((r) => r.end.y < 800 * 0.55),
+  "at least one anchor hangs in the upper half (the ledge)",
 );
 
 // ── 2. the pill speaks climbing ──

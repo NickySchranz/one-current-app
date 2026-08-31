@@ -51,7 +51,7 @@ import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
 import { useCalmCurrent } from "./useSquiggle";
 import { useSummitCurrent } from "./useSummit";
-import { ClimbPennant, climbSpan, Ledge, LedgeSteps, RopeCut, SummitRoute } from "./SummitScene";
+import { ClimbPennant, climbSpan, Ledge, LedgeSteps, MountainFace, RopeCut, SummitRoute } from "./SummitScene";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -467,6 +467,29 @@ export function LifeTimeline() {
   // read together; everything else stays put.
   const [shiftTarget, setShiftTarget] = useState(0);
   const mainShift = useEased(shiftTarget, reducedMotion);
+
+  // How split the present is: open lines pull apart, decisions gather them.
+  const activeLines = visible.filter((b) => !isClosed(b));
+
+  // How much of today is answered: each Act / rest / integration nudges the
+  // main line toward its full strength (an empty current is a whole one).
+  // A planned step still ahead counts as answered — same as the Actions panel.
+  const hasPendingStep = (b: PsychologicalBranch) =>
+    actions.some((a) => !a.completedAt && a.branchesIntegrated[0]?.branchId === b.id);
+  const calmProgress =
+    activeLines.length === 0
+      ? 1
+      : activeLines.filter(
+          (b) => decidedToday(b, now) || restingToday(b, now) || hasPendingStep(b),
+        ).length / activeLines.length;
+
+  // The climbing camera: the ledge slides from just under the top edge down
+  // toward screen center as answers land — the world moves down and the
+  // climber holds the center. Eased so each earned ledge is a glide.
+  const easedClimb = useEased(vertical ? calmProgress : 0, reducedMotion);
+  const timeLenEst = Math.max(240, size.height - Math.round(bottomInset));
+  const camLedgeY = timeLenEst * 0.5 - (1 - easedClimb) * climbSpan(timeLenEst);
+
   const layout = useMemo(
     () =>
       vertical
@@ -479,6 +502,7 @@ export function LifeTimeline() {
             now,
             mainShift,
             pinnedBranchIds,
+            ledgeY: camLedgeY,
           })
         : buildTimelineLayout(visible, {
             width: size.width,
@@ -495,7 +519,7 @@ export function LifeTimeline() {
             // changes and past the save, while the quick menu is still open.
             pinnedBranchIds,
           }),
-    [vertical, visible, size, window_, compact, now, mainShift, topInset, pinnedBranchIds, bottomInset],
+    [vertical, visible, size, window_, compact, now, mainShift, topInset, pinnedBranchIds, bottomInset, camLedgeY],
   );
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -1007,21 +1031,6 @@ export function LifeTimeline() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t is stable per language
   }, [actions, branches, theme, today, language, tk.accent]);
 
-  // How split the present is: open lines pull apart, decisions gather them.
-  const activeLines = visible.filter((b) => !isClosed(b));
-
-  // How much of today is answered: each Act / rest / integration nudges the
-  // main line toward its full strength (an empty current is a whole one).
-  // A planned step still ahead counts as answered — same as the Actions panel.
-  const hasPendingStep = (b: PsychologicalBranch) =>
-    actions.some((a) => !a.completedAt && a.branchesIntegrated[0]?.branchId === b.id);
-  const calmProgress =
-    activeLines.length === 0
-      ? 1
-      : activeLines.filter(
-          (b) => decidedToday(b, now) || restingToday(b, now) || hasPendingStep(b),
-        ).length / activeLines.length;
-
   // How scattered the day is, 0..1 — the same wholeness score as the chip.
   // The backdrop weather warms and settles as it rises.
   const wholeness = useMemo(() => energySplit(branches, now).mainShare, [branches, now]);
@@ -1108,9 +1117,10 @@ export function LifeTimeline() {
     scrollRef.current?.scrollTo({ y, animated: true });
   }, []);
   // On the summit map the climber's rest point starts below the ledge and
-  // rises with every answered rope — the day's climb, made visible.
+  // rises with every answered rope; with the camera easing the ledge down at
+  // the same rate, his rest point lives at screen center all day.
   const mascotNowY = vertical && sm
-    ? sm.nowScreenY + (1 - calmProgress) * climbSpan(sm.nowScreenY, sm.timeLen)
+    ? sm.nowScreenY + (1 - calmProgress) * climbSpan(sm.timeLen)
     : layout.mainY;
   const mascot = useMascot(
     visible,
@@ -1512,6 +1522,13 @@ export function LifeTimeline() {
                       opacity={0.05}
                     />
                   )}
+                  <MountainFace
+                    routeX={sm.routeX}
+                    peakY={Math.max(10, sm.nowScreenY - 150)}
+                    width={svgWidth}
+                    timeLen={sm.timeLen}
+                    tk={tk}
+                  />
                   <SummitRoute
                     current={summitCurrent}
                     routeX={sm.routeX}
@@ -1519,6 +1536,7 @@ export function LifeTimeline() {
                     timeLen={sm.timeLen}
                     tk={tk}
                     calmProgress={calmProgress}
+                    peakY={Math.max(10, sm.nowScreenY - 150)}
                   />
                   <Ledge routeX={sm.routeX} nowScreenY={sm.nowScreenY} tk={tk} />
                   <LedgeSteps

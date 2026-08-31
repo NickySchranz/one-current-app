@@ -18,11 +18,13 @@ import type { BranchGeometry } from "../branch-lines/paths";
 import { dateToX, defaultWindow, type TimeWindow } from "../zoom/time-scale";
 
 /**
- * Where the day's ledge (Now) hangs below the top edge. The ropes dangle
- * from here — the summit view trims the window's future projection so Now
- * always maps this close to the top instead of mid-canvas.
+ * The highest the day's ledge (Now) ever hangs below the top edge. The
+ * summit view trims the window's future projection so Now maps wherever the
+ * camera wants it: near the top on an unanswered day (ropes dangling from
+ * the top of the screen), easing down toward screen center as the climber
+ * gains ledges — the world moves down, the climber stays centered.
  */
-export const LEDGE_Y = 64;
+export const LEDGE_Y = 28;
 
 export type SummitLayout = TimelineLayout & {
   orientation: "vertical";
@@ -93,6 +95,12 @@ export type SummitLayoutOptions = {
   /** Horizontal lean of the route toward a focused rope (base mainShift). */
   mainShift?: number;
   pinnedBranchIds?: readonly string[];
+  /**
+   * Where the ledge (Now) should sit on screen. The climbing camera drives
+   * this: high on an unanswered day, easing to screen center as answers
+   * land. Defaults to LEDGE_Y.
+   */
+  ledgeY?: number;
 };
 
 /** How many chars of a rope's title fit its ladder slot. */
@@ -113,9 +121,10 @@ export function buildSummitLayout(
 ): SummitLayout {
   const timeLen = Math.max(240, opts.stageHeight - Math.round(opts.trayInset));
   const now = opts.now ?? new Date();
-  // Trim the window's future projection so Now maps LEDGE_Y below the top:
-  // the ropes dangle from the top of the screen, the climbed past falls
-  // away below. Panning back still pushes the ledge off the top (the store
+  const ledgeY = Math.max(LEDGE_Y, Math.min(timeLen * 0.5, opts.ledgeY ?? LEDGE_Y));
+  // Trim the window's future projection so Now maps at the camera's ledge
+  // height: the ropes dangle from up there, the climbed past falls away
+  // below. Panning back still pushes the ledge off the top (the store
   // window is never mutated here); panning forward has nowhere to go —
   // above the ledge is unclimbed mountain.
   const storeWindow =
@@ -123,7 +132,7 @@ export function buildSummitLayout(
   const startMs = Date.parse(storeWindow.start);
   const endMs = Date.parse(storeWindow.end);
   const nowMs = now.getTime();
-  const frac = (timeLen - LEDGE_Y) / timeLen;
+  const frac = (timeLen - ledgeY) / timeLen;
   let dispEndMs = endMs;
   if (nowMs > startMs && frac > 0) {
     dispEndMs = Math.min(endMs, startMs + (nowMs - startMs) / frac);
@@ -167,9 +176,11 @@ export function buildSummitLayout(
     let labelX: number;
     let labelY: number;
     if (g.reachesNow) {
+      // Below the anchor: the ledge can hang right under the top edge, so
+      // there is no headroom above the knots — the ladder descends instead.
       const ordinal = ordinalOf.get(g.branchId) ?? 0;
       labelX = laneX;
-      labelY = end.y - LADDER_BASE - (ordinal % LADDER_ROWS) * LADDER_STEP;
+      labelY = end.y + LADDER_BASE + 8 + (ordinal % LADDER_ROWS) * LADDER_STEP;
     } else {
       const p = tp(g.labelX, g.labelY, timeLen);
       labelX = p.x;
