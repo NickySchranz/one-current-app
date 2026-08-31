@@ -41,6 +41,8 @@ export type BranchGeometry = {
   laneX?: number;
   /** Summit only: how the label text anchors at (labelX, labelY). */
   labelAnchor?: "start" | "middle" | "end";
+  /** Summit only: this rope is climbed for the day — coiled on its ledge. */
+  coiled?: boolean;
 };
 
 export type TimelineMetrics = {

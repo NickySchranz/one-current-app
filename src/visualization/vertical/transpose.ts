@@ -13,9 +13,76 @@
  */
 
 import type { PsychologicalBranch } from "@/domain/branches/types";
+import { handledToday } from "@/domain/feelings/logic";
 import { buildTimelineLayout, type TimelineLayout } from "../main-line/layout";
 import type { BranchGeometry } from "../branch-lines/paths";
 import { dateToX, dateToXRaw, defaultWindow, type TimeWindow } from "../zoom/time-scale";
+
+/**
+ * The day's climb is a LADDER above the Now ledge: each answered rope's
+ * cliff ledge sits one rung higher than the one before it, the peak one
+ * headroom above the last rung. Rungs are compact enough that at top-out
+ * every conquered ledge fits inside one screen height under the summit;
+ * the headroom is tall enough that the peak stays ≥40px off-screen until
+ * the LAST rope is climbed (the camera anchors his feet between 0.5·L and
+ * 0.3·L of the stage). Ropes still waiting hang from ABOVE the peak — so
+ * a rope left to climb always starts out of view — and only re-anchor at
+ * their rung the moment they are answered.
+ */
+export function summitLadder(
+  timeLen: number,
+  ropeCount: number,
+): { step: number; headroom: number; peakAbove: number } {
+  const n = Math.max(1, ropeCount);
+  const step = Math.max(
+    34,
+    Math.min(60, Math.round((0.4 * timeLen - 96) / Math.max(1, n - 2))),
+  );
+  const headroom = Math.max(
+    Math.round(0.3 * timeLen) + 56 - step,
+    Math.round(0.5 * timeLen) + 96 - n * step,
+  );
+  return { step, headroom, peakAbove: n * step + headroom };
+}
+
+/** Deterministic jitter, stable within a day (same as timeline-fx's). */
+function seeded(i: number, salt: number): number {
+  const x = Math.sin(i * 127.1 + salt * 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function idHash(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return Math.abs(h) % 9973;
+}
+
+/** The day-seeded rope order — shared by the builder's rung fallback and the
+ * caller's climb-order bookkeeping, so both tell the same story of the day. */
+export function daySeedOrder(ids: readonly string[], now: Date): string[] {
+  const dayNo = Math.floor(now.getTime() / 86400000);
+  return [...ids].sort(
+    (a, b) =>
+      seeded(idHash(a), dayNo) - seeded(idHash(b), dayNo) || (a < b ? -1 : 1),
+  );
+}
+
+/**
+ * The mountain's half-width at a given depth below the peak — one profile
+ * shared by the drawn face and the anchor placement, so every cliff ledge
+ * lands ON the rock: a narrow cap, quickly broadening shoulders, then the
+ * massif running near-vertical to the valley.
+ */
+export function mountainHalfWidth(depth: number, width: number): number {
+  const capW = 70;
+  const shW = 0.3 * width;
+  const brW = 0.47 * width;
+  if (depth <= 0) return 8;
+  if (depth <= 90) return 8 + (capW - 8) * (depth / 90);
+  if (depth <= 260) return capW + (shW - capW) * ((depth - 90) / 170);
+  if (depth <= 480) return shW + (brW - shW) * ((depth - 260) / 220);
+  return Math.min(0.54 * width, brW + (depth - 480) * 0.08);
+}
 
 /**
  * The highest the day's ledge (Now) ever hangs below the top edge. The
@@ -50,6 +117,10 @@ export type SummitLayout = TimelineLayout & {
   /** displaySpan / storeSpan — pan gestures scale by this so a px of finger
    * moves a px of mountain, not a px of the (longer) store window. */
   panScale: number;
+  /** World px from the Now ledge up to the summit tip (see summitLadder). */
+  peakAbove: number;
+  /** World px between consecutive conquered cliff ledges. */
+  ladderStep: number;
 };
 
 export function tp(x: number, y: number, timeLen: number): { x: number; y: number } {
@@ -111,6 +182,12 @@ export type SummitLayoutOptions = {
    * land. Defaults to LEDGE_Y.
    */
   ledgeY?: number;
+  /**
+   * Climb order of the ropes answered today (branchId → rung index, 0 =
+   * first climbed = lowest ledge). Ropes missing from the map fall back to
+   * a day-seeded order, so a reload mid-day still builds a stable ladder.
+   */
+  climbRanks?: Record<string, number>;
 };
 
 /** How many chars of a rope's title fit its ladder slot. */
@@ -179,48 +256,97 @@ export function buildSummitLayout(
     timeLen - dateToXRaw(now.toISOString(), window, axisLen),
   );
 
-  // The label ladder: rope titles are horizontal text and cannot ride
-  // 34–56px columns, so open ropes stack their labels in three rows above
-  // their anchors, cycling by left-to-right order so neighbours never share
-  // a row.
+  // ── Open ropes become CLIFF ROPES ────────────────────────────────────
+  // A rope answered today anchors at its rung of the day's ladder: a little
+  // cliff ledge just above the previous one, day-seeded jitter keeping the
+  // rock honest, the lane offset squeezed by the mountain's own profile so
+  // every ledge lands ON the face. A rope still waiting hangs from ABOVE
+  // the peak — its anchor never in view until it is climbed — down past the
+  // Now ledge where the climber can grab it. Closed (integrated) ropes keep
+  // their true time-anchored geometry — they are history on the mountain.
+  const byBranch = new Map(branches.map((b) => [b.id, b]));
+  const dayNo = Math.floor(nowMs / 86400000);
   const openOrder = base.geometries
     .filter((g) => g.reachesNow && g.inWindow)
-    .sort((a, b) => a.laneY - b.laneY)
     .map((g) => g.branchId);
-  const ordinalOf = new Map(openOrder.map((id, i) => [id, i]));
+  const seedOrder = daySeedOrder(openOrder, now);
+  const ladder = summitLadder(timeLen, openOrder.length);
+  const peakY = nowScreenY - ladder.peakAbove;
+  // Fallback rung order for climbed ropes the caller has no record of
+  // (mid-day reload): the day-seeded order, offset past the known ranks.
+  const known = Object.values(opts.climbRanks ?? {});
+  let nextRank = known.length ? Math.max(...known) + 1 : 0;
+  const rungOf = new Map<string, number>();
+  for (const id of seedOrder) {
+    const b = byBranch.get(id);
+    if (!b || !handledToday(b, now)) continue;
+    const r = opts.climbRanks?.[id];
+    rungOf.set(id, r ?? nextRank++);
+  }
 
   const geometries: BranchGeometry[] = base.geometries.map((g) => {
+    if (g.reachesNow) {
+      const b = byBranch.get(g.branchId);
+      const seedBase = idHash(g.branchId) + dayNo;
+      const coiled = !!b && handledToday(b, now);
+      const rung = rungOf.get(g.branchId) ?? 0;
+      const ay = coiled
+        ? nowScreenY -
+          ladder.step * (rung + 1) +
+          Math.round((seeded(seedBase, 61) - 0.5) * Math.min(18, ladder.step * 0.3))
+        : nowScreenY - ladder.peakAbove - 70 - Math.round(seeded(seedBase, 61) * 90);
+      const laneOffset = g.laneY - base.bandY;
+      // A conquered ledge must sit on rock; a waiting rope's anchor is out
+      // of view, so its column keeps the full lane spread for grabbing.
+      const hw = coiled
+        ? mountainHalfWidth(ay - peakY, opts.stageWidth) - 30
+        : Number.POSITIVE_INFINITY;
+      const ax = Math.round(
+        base.mainY + Math.sign(laneOffset || 1) * Math.min(Math.abs(laneOffset), Math.max(24, hw)),
+      );
+      const dangleY = Math.round(nowScreenY + 26 + seeded(seedBase, 62) * 64);
+      const ordinal = openOrder.indexOf(g.branchId);
+      const runSpan = Math.max(1, base.nowX - g.forkX);
+      return {
+        ...g,
+        path: `M ${ax} ${dangleY} L ${ax} ${Math.round(ay)}`,
+        forkX: ax,
+        forkY: dangleY, // the free, dangling end
+        endX: ax,
+        endY: Math.round(ay), // the anchor: a cliff ledge on the face
+        forkVisible: false,
+        laneX: ax,
+        labelX: ax,
+        labelY: dangleY + LADDER_BASE + 8 + (Math.max(0, ordinal) % LADDER_ROWS) * LADDER_STEP,
+        labelAnchor: "middle",
+        coiled,
+        // A waiting rope's anchor is out of view: its moments stay within
+        // reach of the dangling end. A coiled rope's short stub keeps them
+        // between ledge and coil.
+        momentPoints: g.momentPoints.map((m) => {
+          const t = Math.max(0, Math.min(1, (m.x - g.forkX) / runSpan));
+          const top = coiled ? ay : dangleY - 240;
+          return { ...m, x: ax, y: Math.round(dangleY + t * (top - dangleY)) };
+        }),
+      };
+    }
     const fork = tp(g.forkX, g.forkY, timeLen);
     const end = tp(g.endX, g.endY, timeLen);
-    const laneX = g.laneY;
-    const path = transposePath(g.path, timeLen);
-    let labelX: number;
-    let labelY: number;
-    if (g.reachesNow) {
-      // Below the anchor: the ledge can hang right under the top edge, so
-      // there is no headroom above the knots — the ladder descends instead.
-      const ordinal = ordinalOf.get(g.branchId) ?? 0;
-      labelX = laneX;
-      labelY = end.y + LADDER_BASE + 8 + (ordinal % LADDER_ROWS) * LADDER_STEP;
-    } else {
-      const p = tp(g.labelX, g.labelY, timeLen);
-      labelX = p.x;
-      labelY = p.y;
-    }
+    const p = tp(g.labelX, g.labelY, timeLen);
     return {
       ...g,
-      path,
+      path: transposePath(g.path, timeLen),
       forkX: fork.x,
       forkY: fork.y,
       endX: end.x,
       endY: end.y,
-      laneX,
-      labelX,
-      labelY,
+      laneX: g.laneY,
+      labelX: p.x,
+      labelY: p.y,
       labelAnchor: "middle",
       momentPoints: g.momentPoints.map((m) => {
-        const p = tp(m.x, m.y, timeLen);
-        return { ...m, x: p.x, y: p.y };
+        const q = tp(m.x, m.y, timeLen);
+        return { ...m, x: q.x, y: q.y };
       }),
     };
   });
@@ -237,5 +363,7 @@ export function buildSummitLayout(
     laneSpan: base.height,
     baseWindow: storeWindow,
     panScale,
+    peakAbove: ladder.peakAbove,
+    ladderStep: ladder.step,
   };
 }

@@ -54,6 +54,12 @@ const DYNAMIC_KEYS = [
   "The five plain looks are always free. The living themes — where the timeline itself comes alive — come with One Current Pro.",
   "The free plan holds {n} open threads at a time. Integrate or close one to make room — or let One Current Pro carry as many as your days do.",
   "Creating a file for your psychologist comes with One Current Pro. Everything else about your data stays yours, on this device, either way.",
+  // summit's rope prompts (GRAB_PROMPTS in LifeTimeline.tsx): picked from an
+  // array, so the t("...") regex can't see them.
+  "Grab on!",
+  "Take hold!",
+  "This one's swaying — grab on.",
+  "Ready? Grab the rope.",
   // per-theme copy overlay (src/ui/theme-copy.ts): every VALUE is a live key
   // reached via THEME_COPY[theme]?.[text], invisible to the t("...") regex.
   ...themeCopyValues(),

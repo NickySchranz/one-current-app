@@ -4,6 +4,12 @@
  * The cut flow keeps the same register as quick.ts's burn flow.
  */
 export const summit: Record<string, string> = {
+  // the rope prompts
+  "Grab on!": "¡Agárrate!",
+  "Take hold!": "¡Sujétala!",
+  "This one's swaying — grab on.": "Esta se balancea — agárrala.",
+  "Ready? Grab the rope.": "¿Listo? Agarra la cuerda.",
+
   // the summit party
   "You did it!": "¡Lo lograste!",
   "Every rope handled. The summit is yours today.": "Cada cuerda atendida. Hoy la cumbre es tuya.",

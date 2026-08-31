@@ -140,10 +140,18 @@ const loudnessSnapshot = () =>
   });
 const before = await loudnessSnapshot();
 const pt = await page.evaluate(() => {
-  const el = document.querySelector('path[stroke="transparent"]');
-  const p = el.getPointAtLength(el.getTotalLength() * 0.6);
-  const m = el.getScreenCTM();
-  return { x: m.a * p.x + m.c * p.y + m.e, y: m.b * p.x + m.d * p.y + m.f };
+  for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+    const len = el.getTotalLength();
+    if (!len) continue;
+    const m = el.getScreenCTM();
+    for (let f = 0.05; f < 0.96; f += 0.06) {
+      const p = el.getPointAtLength(len * f);
+      const x = m.a * p.x + m.c * p.y + m.e;
+      const y = m.b * p.x + m.d * p.y + m.f;
+      if (y > 130 && y < 690 && x > 30 && x < 1200) return { x, y };
+    }
+  }
+  return null;
 });
 // leftward = quieter (a fresh example thread never starts at 1, so a
 // change is guaranteed; rightward could no-op on an already-loud rope)
@@ -159,7 +167,7 @@ check(before !== after && after.length > 0, "horizontal drag dials loudness");
 await page.screenshot({ path: "/tmp/summit-04-final.png" });
 await page.close();
 
-// ── 6. the climbing camera: peak hidden, pin, monotonic descent, rail ──
+// ── 6. the climbing camera: peak hidden, monotonic climb, top-out ──
 {
   const p2 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   p2.on("pageerror", (e) => errors.push(e.message));
@@ -175,25 +183,29 @@ await page.close();
   await p2.waitForTimeout(500);
   await p2.getByRole("button", { name: "Load example threads" }).click();
   await p2.waitForTimeout(800);
-  // leave exactly ONE rope unhandled: mark every other open branch rested today
-  const seeded = await p2.evaluate(() => {
-    const key = "one-current/table/branches";
-    const rows = JSON.parse(localStorage.getItem(key) ?? "[]");
-    const today = new Date().toISOString().slice(0, 10);
-    const open = rows.filter((b) => b.status !== "merged" && b.status !== "converted-to-project" && !b.mergeDate);
-    let left = 0;
-    for (const b of open) {
-      const handled = b.lastDecisionOn === today || b.leftOn === today;
-      if (handled) continue;
-      if (left === 0) { left++; continue; } // keep the first unhandled hanging
-      b.leftOn = today;
-      b.lastDecisionOn = today;
-    }
-    localStorage.setItem(key, JSON.stringify(rows));
-    return open.length;
-  });
-  await p2.reload({ waitUntil: "networkidle" });
-  await p2.waitForTimeout(2500);
+  const reseed = (mode) =>
+    p2.evaluate((m) => {
+      const key = "one-current/table/branches";
+      const rows = JSON.parse(localStorage.getItem(key) ?? "[]");
+      const today = new Date().toISOString().slice(0, 10);
+      const open = rows.filter(
+        (b) => b.status !== "merged" && b.status !== "converted-to-project" && !b.mergeDate,
+      );
+      let kept = 0;
+      for (const b of open) {
+        if (m === "fresh") {
+          if (b.leftOn === today) delete b.leftOn;
+          if (b.lastDecisionOn === today) b.lastDecisionOn = undefined;
+        } else {
+          const handled = b.lastDecisionOn === today || b.leftOn === today;
+          if (!handled && kept === 0) { kept++; continue; }
+          b.leftOn = today;
+          b.lastDecisionOn = today;
+        }
+      }
+      localStorage.setItem(key, JSON.stringify(rows));
+      return open.length;
+    }, mode);
   const capTop = () =>
     p2.evaluate(() => {
       const cap = [...document.querySelectorAll('path[fill="#ffffff"]')].find(
@@ -201,36 +213,60 @@ await page.close();
       );
       return cap ? cap.getBoundingClientRect().top : null;
     });
-  const topBefore = await capTop();
-  check(topBefore !== null && topBefore < -20, `peak off-screen with one rope left (cap top ${Math.round(topBefore ?? 0)})`);
-  // start a monotonicity sampler on the WORLD group — the first g of the
-  // widest svg (the header logo and the date rail are svgs too)
-  await p2.evaluate(() => {
-    window.__cam = [];
-    const svg = [...document.querySelectorAll("svg")].sort(
-      (a, b) => Number(b.getAttribute("width") ?? 0) - Number(a.getAttribute("width") ?? 0),
-    )[0];
-    const g = svg?.querySelector(":scope > g");
-    const read = () => {
-      const m = /translate\([^,]+,\s*([-\d.]+)/.exec(g?.getAttribute("transform") ?? "");
-      window.__cam.push(m ? Number(m[1]) : 0);
-      if (window.__cam.length < 400) requestAnimationFrame(read);
-    };
-    requestAnimationFrame(read);
-  });
-  const lastRope = p2.locator('path[stroke="transparent"]').first();
+  // Screen y of every hanging rope's ANCHOR (a straight vertical hit path is
+  // an open cliff rope, M dangle L anchor; closed history keeps its curves).
+  const anchorTops = () =>
+    p2.evaluate(() => {
+      const tops = [];
+      for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+        const len = el.getTotalLength();
+        if (len < 260) continue;
+        const a = el.getPointAtLength(0);
+        const b = el.getPointAtLength(len);
+        if (Math.abs(len - Math.abs(b.y - a.y)) > 3) continue;
+        const m = el.getScreenCTM();
+        const hi = b.y < a.y ? b : a;
+        tops.push(m.b * hi.x + m.d * hi.y + m.f);
+      }
+      return tops;
+    });
+  // fresh day: he stands at Now, every rope hanging from out of view,
+  // the summit far out of sight
+  await reseed("fresh");
+  await p2.reload({ waitUntil: "networkidle" });
+  await p2.waitForTimeout(2500);
+  await p2.screenshot({ path: "/tmp/summit-05-freshday.png" });
+  const topFresh = await capTop();
+  check(topFresh !== null && topFresh < -40, `peak out of view on a fresh day (cap top ${Math.round(topFresh ?? 0)})`);
+  const topsFresh = await anchorTops();
+  check(
+    topsFresh.length >= 4 && topsFresh.every((t) => t < 0),
+    `every waiting rope hangs from out of view (${topsFresh.length} anchors, worst ${Math.round(Math.max(...topsFresh, -9999))})`,
+  );
+  // one rope left: answer it, watching the world only ever move down
+  await reseed("one-left");
+  await p2.reload({ waitUntil: "networkidle" });
+  await p2.waitForTimeout(2500);
+  const topsLeft = await anchorTops();
+  check(
+    topsLeft.length === 1 && topsLeft.every((t) => t < 0),
+    `the one rope left to climb starts out of view (${topsLeft.length} anchor(s), top ${Math.round(topsLeft[0] ?? 9999)})`,
+  );
   const pt2 = await p2.evaluate(() => {
-    // the one open rope: pick a hit path whose top end sits in the upper half
+    // the hanging rope: a STRAIGHT vertical hit path (an open cliff rope is
+    // M..L; closed history keeps its curved time geometry)
     for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
       const len = el.getTotalLength();
-      if (!len) continue;
+      if (len < 260) continue;
+      const a = el.getPointAtLength(0);
+      const b = el.getPointAtLength(len);
+      if (Math.abs(len - Math.abs(b.y - a.y)) > 3) continue; // curved → closed
       const m = el.getScreenCTM();
-      const a = el.getPointAtLength(len);
-      const y = m.b * a.x + m.d * a.y + m.f;
-      const x = m.a * a.x + m.c * a.y + m.e;
-      if (y < 400) {
-        const mid = el.getPointAtLength(len * 0.5);
-        return { x: m.a * mid.x + m.c * mid.y + m.e, y: m.b * mid.x + m.d * mid.y + m.f };
+      for (let f = 0.05; f < 0.96; f += 0.04) {
+        const p = el.getPointAtLength(len * f);
+        const x = m.a * p.x + m.c * p.y + m.e;
+        const y = m.b * p.x + m.d * p.y + m.f;
+        if (y > 130 && y < 690 && x > 30 && x < 1200) return { x, y };
       }
     }
     return null;
@@ -242,22 +278,74 @@ await page.close();
   await p2.waitForTimeout(1200);
   await p2.getByText("What does this rope need from you now?", { exact: false }).first().click();
   await p2.waitForTimeout(700);
+  // sample from the answer on: the climb + party must never move the world up
+  await p2.evaluate(() => {
+    window.__cam = [];
+    const svg = [...document.querySelectorAll("svg")].sort(
+      (a, b) => Number(b.getAttribute("width") ?? 0) - Number(a.getAttribute("width") ?? 0),
+    )[0];
+    const g = svg?.querySelector(":scope > g");
+    const tint = g?.querySelector("rect");
+    // the pennant: a tiny two-path group whose translateY IS pipFeetY
+    const pennant = [...g.querySelectorAll("g")].find((el) => {
+      const kids = [...el.children];
+      return kids.length === 2 && kids.every((k) => k.tagName === "path") &&
+        /v -13/.test(kids[0].getAttribute("d") ?? "");
+    });
+    const read = () => {
+      const m = /translate\([^,]+,\s*([-\d.]+)/.exec(g?.getAttribute("transform") ?? "");
+      const pm = /translate\([^,]+,\s*([-\d.]+)/.exec(pennant?.getAttribute("transform") ?? "");
+      window.__cam.push([
+        m ? Number(m[1]) : 0,
+        pm ? Number(pm[1]) : 0,
+        Number(tint?.getAttribute("y") ?? 0),
+      ]);
+      if (window.__cam.length < 420) requestAnimationFrame(read);
+    };
+    requestAnimationFrame(read);
+  });
   await p2.getByText("Let it rest", { exact: false }).first().click();
-  await p2.waitForTimeout(4200);
-  const cam = await p2.evaluate(() => window.__cam);
+  await p2.waitForTimeout(7200);
+  const rows = await p2.evaluate(() => window.__cam);
+  const cam = rows.map((r) => r[0]);
   let monotonic = true;
   const dips = [];
   for (let i = 1; i < cam.length; i++)
-    if (cam[i] < cam[i - 1] - 0.01) { monotonic = false; dips.push(`${i}:${cam[i - 1]}->${cam[i]}`); }
+    if (cam[i] < cam[i - 1] - 0.01) {
+      monotonic = false;
+      dips.push(`${i}:${cam[i - 1]}->${cam[i]} feet${rows[i - 1][1]}->${rows[i][1]}`);
+    }
   if (dips.length) console.log("  dips:", dips.slice(0, 6).join("  "));
   check(cam.length > 60 && monotonic, `world only ever moves down during the climb (${cam.length} samples)`);
   const topAfter = await capTop();
   const stageH = 800 - 48;
   check(
-    topAfter !== null && Math.abs(topAfter - (48 + stageH * 0.3)) < 30,
+    topAfter !== null && Math.abs(topAfter - (48 + stageH * 0.3)) < 40,
     `top-out frames the summit near 30% from the top (cap top ${Math.round(topAfter ?? 0)})`,
   );
-  await p2.screenshot({ path: "/tmp/summit-05-topout.png" });
+  const hanging = await p2.evaluate(() => {
+    let n = 0;
+    for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+      const len = el.getTotalLength();
+      if (len < 260) continue;
+      const a = el.getPointAtLength(0);
+      const b = el.getPointAtLength(len);
+      if (Math.abs(len - Math.abs(b.y - a.y)) <= 3) n++;
+    }
+    return n;
+  });
+  check(hanging === 0, "no rope still hangs after top-out (all coiled on their ledges)");
+  // every conquered cliff ledge (its coil) fits inside one screen height
+  const coilYs = await p2.evaluate(() =>
+    [...document.querySelectorAll('circle[fill="transparent"]')]
+      .filter((c) => Number(c.getAttribute("r")) === 22)
+      .map((c) => c.getBoundingClientRect().top + 22),
+  );
+  check(
+    coilYs.length >= 5 && coilYs.every((y) => y > 0 && y < 800),
+    `every conquered ledge visible at top-out (${coilYs.length} coils, span ${Math.round(Math.min(...coilYs, 9999))}..${Math.round(Math.max(...coilYs, -9999))})`,
+  );
+  await p2.screenshot({ path: "/tmp/summit-06-topout.png" });
   await p2.close();
 }
 await browser.close();

@@ -351,15 +351,22 @@ export function useMascot(
     setArrivedVia(via);
   };
 
-  // Where Pip stands to visit a rope. On the summit he NEVER leaves the
-  // route: every "visit" happens from his ledge — the focus (highlight,
-  // bubble, offer pills, bonk target) travels between ropes instead of him.
-  // His altitude IS the day: one ledge-step below the top for every rope
-  // still unattended, one level higher with each one attended (nowY carries
-  // that, fed by the stage). Horizontal themes keep the endpoint perch.
+  // Where Pip goes to visit a rope. On the summit each rope hangs from its
+  // own cliff ledge (g.endX/endY = the anchor; g.forkY = the dangling end):
+  // an open rope he GRABS — hanging on it at his own altitude where the
+  // rope allows — and a coiled (answered) one he stands on, up on its
+  // ledge. Horizontal themes keep the endpoint perch.
   const ropeSpot = (g: BranchGeometry): { x: number; y: number } => {
     if (verticalRef.current) {
-      return { x: nowXRef.current - PX * 12 - 10, y: nowYRef.current - PX * 10 };
+      const ax = g.endX;
+      const ay = g.endY;
+      if (g.coiled) {
+        // feet on the ledge lip
+        return { x: ax - PX * 6, y: ay - PX * 16 + 3 };
+      }
+      const low = (g.forkY ?? ay + 360) - 26; // just above the dangling end
+      const gripY = Math.max(ay + 48, Math.min(low, posRef.current.y + PX * 10));
+      return { x: ax - PX * 6, y: gripY - PX * 10 };
     }
     return { x: g.endX + 10, y: g.endY - PX * 10 };
   };
@@ -651,6 +658,19 @@ export function useMascot(
       const s = scoreBranch(b, g, nX, lastVisited.current, verticalRef.current);
       if (s > bestScore) { bestScore = s; best = b; }
     }
+
+    if (verticalRef.current) {
+      // Summit: the patrol only moves the FOCUS — a "grab on" prompt pops
+      // on the highlighted rope; the climber stays hanging or perched.
+      if (best && bestScore !== -Infinity) {
+        setPendingIdState(best.id);
+        lastVisited.current.set(best.id, Date.now());
+      } else {
+        setPendingIdState(null);
+      }
+      scheduleJump(6500 + Math.random() * 3500);
+      return;
+    }
     if (!best || bestScore === -Infinity) {
       // Every open thread has its answer for today: Pip retires to the Now
       // point and, every so often, says how well it all went — until a new
@@ -745,8 +765,13 @@ export function useMascot(
       timerRef.current = setTimeout(() => {
         fadeBubble(0, 250);
         timerRef.current = setTimeout(() => {
-          phase.current = 'idle';
-          setFrame('IDLE_A');
+          // Hanging on a rope? Keep the grip after the reaction.
+          const hangingOpen =
+            verticalRef.current &&
+            inspectedId.current !== null &&
+            !geometriesRef.current.find((g) => g.branchId === inspectedId.current)?.coiled;
+          phase.current = hangingOpen ? 'inspecting' : 'idle';
+          setFrame(hangingOpen ? 'CLIMB_A' : 'IDLE_A');
           scheduleJump(1500);
         }, 350);
       }, 2800);
@@ -862,6 +887,17 @@ export function useMascot(
       const fy = live ? live.y : (jumpDestRef.current?.y ?? toY);
       placeRef.current(fx, fy, true);
       jumpDestRef.current = null;
+      if (verticalRef.current) {
+        // He grabs the rope and HANGS — gripping until the answer sends him
+        // up it, or another rope calls him away. The focus-cycling patrol
+        // keeps running underneath.
+        setFrame('CLIMB_A');
+        phase.current = 'inspecting';
+        markArrival('user');
+        setArrivedIdState(branchId);
+        scheduleJump(6500 + Math.random() * 3500);
+        return;
+      }
       setFrame('INSPECT_A');
       phase.current = 'inspecting';
       markArrival('user');
@@ -951,12 +987,18 @@ export function useMascot(
     if (!geo) return;
 
     initialised.current = true;
-    const startPos = ropeSpotRef.current(geo);
-    placeRef.current(startPos.x, startPos.y, true);
-    inspectedId.current = best.id;
-    setInspectedIdState(best.id);
-    markArrival('patrol');
-    setArrivedIdState(best.id); // he starts the session standing at it
+    if (verticalRef.current) {
+      // Summit: he boots at his rest spot (base camp, his highest conquered
+      // ledge, or the peak) — the stage feeds it via nowX/nowY.
+      placeRef.current(nowXRef.current - PX * 12 - 10, nowYRef.current - PX * 10, true);
+    } else {
+      const startPos = ropeSpotRef.current(geo);
+      placeRef.current(startPos.x, startPos.y, true);
+      inspectedId.current = best.id;
+      setInspectedIdState(best.id);
+      markArrival('patrol');
+      setArrivedIdState(best.id); // he starts the session standing at it
+    }
 
     // Greet on first appearance
     if (!greetedThisSession) {

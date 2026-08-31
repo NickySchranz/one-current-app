@@ -30,7 +30,7 @@ import { AnglerHead } from "./AnglerHead";
 import { Ghost } from "./Ghost";
 import { Pomeranian } from "./Pomeranian";
 import { calmWaveOffset, useBranchStrokes, type WaveHandles } from "./useSquiggle";
-import { AnchorKnot, CoiledRope } from "./SummitScene";
+import { CliffLedge, CoiledRope } from "./SummitScene";
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -341,16 +341,9 @@ export const BranchLine = memo(function BranchLine({
         accessible
         accessibilityLabel={describeBranch(branch, t)}
       >
-        {/* the sling still hangs over the top edge — the coil rests on it */}
-        <Path
-          d={`M ${g.endX} 0 L ${g.endX} ${g.endY - 8}`}
-          stroke={color}
-          strokeWidth={1.6}
-          fill="none"
-          opacity={0.3}
-          pointerEvents="none"
-        />
-        <CoiledRope x={g.endX} y={g.endY} color={color} bg={tk.bg} onPress={select} />
+        {/* the conquered rope rests coiled on its own cliff ledge */}
+        <CliffLedge x={g.endX} y={g.endY} tk={tk} />
+        <CoiledRope x={g.endX} y={g.endY - 9} color={color} bg={tk.bg} onPress={select} />
       </AnimatedG>
     );
   }
@@ -492,21 +485,14 @@ export const BranchLine = memo(function BranchLine({
       {!g.endsOnMain &&
         (vertical ? (
           <>
-            {/* the rope hangs from above the screen: its sling runs over the
-                top edge down to the anchor knot */}
-            <Path
-              d={`M ${g.endX} 0 L ${g.endX} ${g.endY - 7}`}
-              stroke={color}
-              strokeWidth={1.6}
-              fill="none"
-              opacity={0.35}
-              pointerEvents="none"
-            />
-            <AnchorKnot
-              x={g.endX}
-              y={g.endY}
-              color={color}
-              bg={tk.bg}
+            {/* the anchor: a little cliff ledge on the face, the rope tied
+                over its lip */}
+            <CliffLedge x={g.endX} y={g.endY} tk={tk} />
+            <Circle
+              cx={g.endX}
+              cy={g.endY - 4}
+              r={3.4}
+              fill={color}
               opacity={endpointStaticOpacity}
               onPress={select}
             />

@@ -27,32 +27,12 @@ import { samplePath } from "@/visualization/path-sample";
 import { AnimatedPath, Fleck } from "./timeline-fx";
 import { alpha, mix } from "@/ui/color";
 import type { ThemeTokens } from "@/ui/theme";
+import { mountainHalfWidth } from "@/visualization/vertical/transpose";
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const AnimatedG = Animated.createAnimatedComponent(G);
 
-/**
- * One ledge per rope still unattended, one fixed step apart. The climber
- * always stands exactly `unattended × LEDGE_STEP` below the summit ledge —
- * far enough that the top starts out of view — and each answer climbs him
- * one step while the camera slides the world down to keep him centered.
- */
-export const LEDGE_STEP = 64;
 
-/** The peak never rises less than this above the day's ledge. */
-export const PEAK_GAP_MIN = 380;
-
-/**
- * How far the summit tip rises above the day's ledge: wide enough that the
- * peak clears the VIEWPORT top (stage offset included) by a comfortable
- * margin even with only one rope remaining, for any stage height (peak
- * stage y at one ledge = 0.5L - gap - LEDGE_STEP; the +40 absorbs the app
- * header above the stage). The last answer earns the climb onto it, framed
- * at 30% from the top by the camera's anchor glide.
- */
-export function peakGapFor(timeLen: number): number {
-  return Math.max(PEAK_GAP_MIN, Math.ceil(timeLen / 2) + 40);
-}
 
 /** Deterministic jitter — stable across re-renders (same as timeline-fx's). */
 function seeded(i: number, salt: number): number {
@@ -61,23 +41,33 @@ function seeded(i: number, salt: number): number {
 }
 
 /**
- * One cliff slope from (x0,y0) to (x1,y1): stepped strata — a horizontal
- * shelf, then a sheer face — with seeded variation so no two ledges match.
- * Reads as climbable cliff ledges rather than random scree.
+ * One flank of the massif, top to bottom: the mountainHalfWidth profile
+ * (shared with the rope-anchor placement, so every cliff ledge lands on
+ * rock) sampled every ~60px with rocky jitter — diagonal and irregular,
+ * never square.
  */
-function jaggedEdge(x0: number, y0: number, x1: number, y1: number, salt: number): string {
-  const steps = Math.max(3, Math.round(Math.abs(y1 - y0) / 76));
-  let d = "";
-  let prevY = Math.round(y0);
-  for (let i = 1; i < steps; i++) {
-    const t = i / steps;
-    const xN = Math.round(x0 + (x1 - x0) * t + (seeded(i, salt) - 0.5) * 26);
-    const yN = Math.round(y0 + (y1 - y0) * t + (seeded(i, salt + 1) - 0.5) * 20);
-    d += ` L ${xN} ${prevY} L ${xN} ${yN}`;
-    prevY = yN;
+function flank(
+  routeX: number,
+  peakY: number,
+  bottomY: number,
+  width: number,
+  side: 1 | -1,
+  salt: number,
+): { x: number; y: number }[] {
+  const pts: { x: number; y: number }[] = [];
+  const span = bottomY - peakY;
+  const steps = Math.max(4, Math.round(span / 60));
+  for (let i = 1; i <= steps; i++) {
+    const depth = (span * i) / steps;
+    const hw = mountainHalfWidth(depth, width);
+    const jx = (seeded(i, salt) - 0.5) * Math.min(26, hw * 0.4);
+    const jy = (seeded(i, salt + 1) - 0.5) * 22;
+    pts.push({
+      x: Math.round(routeX + side * (hw + jx)),
+      y: Math.round(peakY + depth + (i === steps ? 0 : jy)),
+    });
   }
-  d += ` L ${Math.round(x1)} ${prevY} L ${Math.round(x1)} ${Math.round(y1)}`;
-  return d;
+  return pts;
 }
 
 /**
@@ -94,44 +84,42 @@ export function MountainFace({
   tk,
 }: {
   routeX: number;
-  /** The summit's tip — a bit above wherever the ledge currently hangs. */
+  /** The summit's tip. */
   peakY: number;
   width: number;
   timeLen: number;
-  /** How far below the dated canvas the rock keeps going — the camera looks
-   * one ledge-step per unattended rope below it (see the stage's math). */
+  /** How far below the dated canvas the rock keeps going. */
   depth: number;
   tk: ThemeTokens;
 }) {
   const bottom = timeLen + depth;
-  const leftX = -24;
-  const rightX = width + 24;
-  const body = useMemo(
-    () =>
-      `M ${leftX} ${bottom}` +
-      jaggedEdge(leftX, bottom, routeX, peakY, 31) +
-      jaggedEdge(routeX, peakY, rightX, bottom, 33) +
-      ` Z`,
-    [leftX, bottom, routeX, peakY, rightX],
-  );
-  // the snow cap: the top stretch of both slopes, closed with a ragged hem
+  const body = useMemo(() => {
+    const left = flank(routeX, peakY, bottom, width, -1, 31);
+    const right = flank(routeX, peakY, bottom, width, 1, 33);
+    let d = `M ${left[left.length - 1].x} ${bottom}`;
+    for (let i = left.length - 1; i >= 0; i--) d += ` L ${left[i].x} ${left[i].y}`;
+    d += ` L ${routeX} ${Math.round(peakY)}`;
+    for (const p of right) d += ` L ${p.x} ${p.y}`;
+    return d + ` L ${right[right.length - 1].x} ${bottom} Z`;
+  }, [routeX, peakY, bottom, width]);
+  // the snow cap: the top ~110px of both flanks, closed with a ragged hem
   const cap = useMemo(() => {
-    const drop = 88;
-    const lx = routeX + (leftX - routeX) * (drop / Math.max(1, bottom - peakY));
-    const rx = routeX + (rightX - routeX) * (drop / Math.max(1, bottom - peakY));
-    let d = `M ${Math.round(lx)} ${peakY + drop}`;
-    d += jaggedEdge(lx, peakY + drop, routeX, peakY, 31);
-    d += jaggedEdge(routeX, peakY, rx, peakY + drop, 33);
-    // ragged hem back to the start
-    const hemSteps = 5;
-    for (let i = 1; i <= hemSteps; i++) {
-      const t = i / hemSteps;
-      const px = rx + (lx - rx) * t;
-      const py = peakY + drop + (seeded(i, 35) - 0.2) * 26;
-      d += ` L ${Math.round(px)} ${Math.round(py)}`;
+    const drop = 110;
+    const capBottom = peakY + drop;
+    const left = flank(routeX, peakY, capBottom, width, -1, 31);
+    const right = flank(routeX, peakY, capBottom, width, 1, 33);
+    let d = `M ${left[left.length - 1].x} ${capBottom}`;
+    for (let i = left.length - 1; i >= 0; i--) d += ` L ${left[i].x} ${left[i].y}`;
+    d += ` L ${routeX} ${Math.round(peakY)}`;
+    for (const p of right) d += ` L ${p.x} ${p.y}`;
+    const lx = left[left.length - 1].x;
+    const rx = right[right.length - 1].x;
+    for (let i = 1; i <= 5; i++) {
+      const t = i / 5;
+      d += ` L ${Math.round(rx + (lx - rx) * t)} ${Math.round(capBottom + (seeded(i, 35) - 0.2) * 24)}`;
     }
     return d + " Z";
-  }, [leftX, rightX, routeX, peakY, bottom]);
+  }, [routeX, peakY, width]);
   const rock = mix(tk.inkFaint, tk.bg, 48);
   return (
     <G pointerEvents="none">
@@ -143,69 +131,37 @@ export function MountainFace({
 }
 
 /**
- * The rock face's ledges: one notch per unattended rope, a fixed step apart
- * below the summit ledge. The climber stands on the lowest; each answer
- * removes one and he climbs to the next.
+ * A little cliff ledge: the shelf a rope is anchored to. The climber ends
+ * an answered rope standing here; the coil rests on it until tomorrow.
  */
-export function LedgeSteps({
-  routeX,
-  nowScreenY,
-  steps,
-  fading = null,
-  tk,
-}: {
-  routeX: number;
-  nowScreenY: number;
-  /** Ropes still unattended — the climbs left between him and the summit. */
-  steps: number;
-  /** The previous count while an answer's marks fade out (else null). */
-  fading?: number | null;
-  tk: ThemeTokens;
-}) {
-  const upTo = Math.max(steps, fading ?? 0);
-  if (upTo <= 0) return null;
-  const marks: React.JSX.Element[] = [];
-  for (let k = 1; k <= upTo; k++) {
-    const y = nowScreenY + k * LEDGE_STEP;
-    const side = k % 2 === 0 ? -1 : 1;
-    const d = `M ${routeX + (side === -1 ? -14 : 2)} ${y} h 12`;
-    marks.push(
-      k <= steps ? (
-        <Path
-          key={k}
-          d={d}
-          stroke={tk.inkSoft}
-          strokeWidth={2.5}
-          strokeLinecap="round"
-          fill="none"
-          opacity={0.5}
-        />
-      ) : (
-        // a just-earned step: its mark fades out instead of popping away
-        <FadingLedgeMark key={`f${k}`} d={d} tk={tk} />
-      ),
-    );
-  }
-  return <G pointerEvents="none">{marks}</G>;
-}
-
-function FadingLedgeMark({ d, tk }: { d: string; tk: ThemeTokens }) {
-  const o = useSharedValue(0.5);
-  useEffect(() => {
-    o.value = 0.5;
-    o.value = withTiming(0, { duration: 1200, easing: Easing.out(Easing.quad) });
-    return () => cancelAnimation(o);
-  }, [o]);
-  const props = useAnimatedProps<PathProps>(() => ({ opacity: o.value }), [o]);
+export function CliffLedge({ x, y, tk }: { x: number; y: number; tk: ThemeTokens }) {
   return (
-    <AnimatedPath
-      animatedProps={props}
-      d={d}
-      stroke={tk.inkSoft}
-      strokeWidth={2.5}
-      strokeLinecap="round"
-      fill="none"
-    />
+    <G pointerEvents="none">
+      {/* the rock underside */}
+      <Path
+        d={`M ${x - 15} ${y} l 5 10 l 21 0 l 4 -10 Z`}
+        fill="#141b22"
+        opacity={0.16}
+      />
+      {/* the shelf */}
+      <Path
+        d={`M ${x - 17} ${y} h 34`}
+        stroke={tk.lineMain}
+        strokeWidth={3.2}
+        strokeLinecap="round"
+        fill="none"
+        opacity={0.8}
+      />
+      {/* snow dust on the lip */}
+      <Path
+        d={`M ${x - 13} ${y - 2} h 26`}
+        stroke="#ffffff"
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        fill="none"
+        opacity={0.6}
+      />
+    </G>
   );
 }
 
@@ -439,39 +395,6 @@ export function CoiledRope({
         strokeWidth={2.4}
         strokeLinecap="round"
         strokeLinejoin="round"
-        pointerEvents="none"
-      />
-    </G>
-  );
-}
-
-/** The knot at an open rope's anchor — the rope's presence at the ledge. */
-export function AnchorKnot({
-  x,
-  y,
-  color,
-  bg,
-  opacity = 1,
-  onPress,
-}: {
-  x: number;
-  y: number;
-  color: string;
-  bg: string;
-  opacity?: number;
-  onPress?: () => void;
-}) {
-  return (
-    <G opacity={opacity}>
-      <Circle cx={x} cy={y} r={6} fill={bg} stroke={color} strokeWidth={2.4} onPress={onPress} />
-      <Circle cx={x} cy={y} r={2.2} fill={color} pointerEvents="none" />
-      {/* the sling over the anchor point */}
-      <Path
-        d={`M ${x - 4.2} ${y - 4} Q ${x} ${y - 9} ${x + 4.2} ${y - 4}`}
-        stroke={color}
-        strokeWidth={2}
-        strokeLinecap="round"
-        fill="none"
         pointerEvents="none"
       />
     </G>
