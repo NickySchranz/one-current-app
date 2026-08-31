@@ -395,19 +395,55 @@ export const BranchLine = memo(function BranchLine({
         />
       )}
 
-      {/* the visible line; a newborn line draws itself from the fork toward Now */}
+      {/* the visible line; a newborn line draws itself from the fork toward
+          Now. On the summit it is an actual rope: a dark round under-stroke
+          for the cylinder, the colored core, and dashed twist ridges — all
+          riding the same swaying path. */}
+      {/* branchColor speaks hsl(), which mix() can't parse — the rope's dark
+          layers are translucent black over/under the core instead, so they
+          shade whatever color the thread wears. */}
+      {vertical && !born && (
+        <AnimatedPath
+          animatedProps={strokes.underlay}
+          stroke="#141b22"
+          strokeWidth={g.thickness + 2.8}
+          opacity={g.style.opacity * 0.5}
+          fill="none"
+          strokeLinecap="round"
+          pointerEvents="none"
+        />
+      )}
       <AnimatedPath
         animatedProps={strokes.line}
         stroke={color}
-        strokeWidth={focused || highlighted ? g.thickness + 1.25 : g.thickness}
+        strokeWidth={
+          vertical
+            ? g.thickness + (focused || highlighted ? 2.2 : 1.2)
+            : focused || highlighted
+              ? g.thickness + 1.25
+              : g.thickness
+        }
         opacity={g.style.opacity}
         fill="none"
         strokeLinecap="round"
         pointerEvents="none"
       />
+      {vertical && !born && (
+        <AnimatedPath
+          animatedProps={strokes.bands}
+          stroke="#141b22"
+          strokeWidth={g.thickness + 2.2}
+          strokeDasharray={[2.8, 5]}
+          opacity={g.style.opacity * 0.38}
+          fill="none"
+          strokeLinecap="butt"
+          pointerEvents="none"
+        />
+      )}
 
-      {/* subtle directional movement toward the present */}
-      {!born && g.style.animated && (
+      {/* subtle directional movement toward the present (the rope's twist
+          ridges replace it on the summit) */}
+      {!vertical && !born && g.style.animated && (
         <AnimatedPath
           animatedProps={strokes.flow}
           stroke={color}

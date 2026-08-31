@@ -52,6 +52,10 @@ export type BranchStrokeProps = {
   halo: Partial<PathProps>;
   /** For the directional flow dashes: squiggle `d` + travelling dashoffset. */
   flow: Partial<PathProps>;
+  /** Summit's rope texture: the dark round under-stroke (`d` only). */
+  underlay: Partial<PathProps>;
+  /** Summit's rope texture: the dashed twist ridges (`d` only). */
+  bands: Partial<PathProps>;
 };
 
 /**
@@ -265,6 +269,10 @@ export function useBranchStrokes(opts: {
   }, [drawing, bornLen, d]);
 
   const halo = useAnimatedProps<PathProps>(() => ({ d: d.value }), [d]);
+  // Summit's rope layers ride the same derived `d` — one string per frame,
+  // three strokes. Each component needs its own animatedProps instance.
+  const underlay = useAnimatedProps<PathProps>(() => ({ d: d.value }), [d]);
+  const bands = useAnimatedProps<PathProps>(() => ({ d: d.value }), [d]);
 
   // Sub-pixel dash motion doesn't need per-frame writes: quantize to 0.25px
   // steps via a derived value, so the DOM only updates when a step lands.
@@ -274,7 +282,7 @@ export function useBranchStrokes(opts: {
     [d, flowQ],
   );
 
-  return { line, halo, flow };
+  return { line, halo, flow, underlay, bands };
 }
 
 // ─── The calm current ─────────────────────────────────────────────────────────

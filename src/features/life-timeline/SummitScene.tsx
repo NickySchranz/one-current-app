@@ -376,6 +376,16 @@ export function CoiledRope({
   return (
     <G opacity={0.9}>
       <Circle cx={x} cy={y} r={22} fill="transparent" onPress={onPress} />
+      {/* branchColor is hsl() — shade with translucent black, not mix() */}
+      <Path
+        d={spiral}
+        stroke="#141b22"
+        strokeWidth={4}
+        strokeLinecap="round"
+        fill="none"
+        opacity={0.45}
+        pointerEvents="none"
+      />
       <Path
         d={spiral}
         stroke={color}
