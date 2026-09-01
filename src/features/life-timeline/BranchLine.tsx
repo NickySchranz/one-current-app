@@ -169,6 +169,15 @@ export const BranchLine = memo(function BranchLine({
     () => ({ translateY: climbOffset ? climbOffset.value : 0 }),
     [climbOffset],
   );
+  // Which frame a rope's MARKS live in depends on where the geometry put
+  // them. A rope answered today has its label, moments and check at its cliff
+  // ledge — on the rock, so they travel with it. A rope still hanging has them
+  // in the fixed band beside the climber, who does not move.
+  const marksOnRock = !!g.coiled;
+  const marksRide = useAnimatedProps(
+    () => ({ translateY: climbOffset && marksOnRock ? climbOffset.value : 0 }),
+    [climbOffset, marksOnRock],
+  );
 
   // Local closures over the id-keyed stable handlers (recreated only when
   // THIS branch renders — the parent's identity stays stable).
@@ -492,6 +501,7 @@ export const BranchLine = memo(function BranchLine({
       )}
 
       {/* moments along the branch */}
+      <AnimatedG animatedProps={marksRide}>
       {g.momentPoints.map((p) => (
         <Circle
           key={p.moment.id}
@@ -504,6 +514,7 @@ export const BranchLine = memo(function BranchLine({
           onPress={() => onSelectMoment(branch.id, p.moment.id)}
         />
       ))}
+      </AnimatedG>
 
       {/* endpoint: the line's presence at Now (merged lines get theirs below).
           In a creature theme an undecided open thread is a small creature
@@ -548,6 +559,7 @@ export const BranchLine = memo(function BranchLine({
 
       {/* a decision was taken here today: a quiet check at the line's end */}
       {acted && !g.endsOnMain && (
+        <AnimatedG animatedProps={marksRide}>
         <Path
           d={`M ${g.endX - 6} ${g.endY + 0.2} l 2.2 2.3 l 4 -4.8`}
           fill="none"
@@ -557,6 +569,7 @@ export const BranchLine = memo(function BranchLine({
           strokeLinejoin="round"
           pointerEvents="none"
         />
+        </AnimatedG>
       )}
 
       {/* fork point on the main line — rides the calm wave with it */}
@@ -591,7 +604,7 @@ export const BranchLine = memo(function BranchLine({
           paint-order: stroke isn't supported here, so a stroked twin sits
           behind the filled text to keep it readable over other lines. */}
       {g.labelVisible && !resting && !isClosed(branch) && (
-        <>
+        <AnimatedG animatedProps={marksRide}>
           <SvgText
             x={labelX}
             y={g.labelY}
@@ -618,8 +631,52 @@ export const BranchLine = memo(function BranchLine({
           >
             {labelText}
           </SvgText>
-        </>
+        </AnimatedG>
       )}
     </AnimatedG>
   );
+},
+/**
+ * Geometry objects are rebuilt wholesale on every layout pass, so the default
+ * shallow compare re-renders every line whenever anything at all changes —
+ * which, mid-climb, re-commits every animated path and can drop a frame back
+ * to its declarative value. Compare the geometry by VALUE instead.
+ */
+function sameLine(a: Props, b: Props) {
+  const g = a.geometry;
+  const h = b.geometry;
+  if (
+    g !== h &&
+    (g.path !== h.path ||
+      g.forkX !== h.forkX ||
+      g.forkY !== h.forkY ||
+      g.endX !== h.endX ||
+      g.endY !== h.endY ||
+      g.laneY !== h.laneY ||
+      g.labelX !== h.labelX ||
+      g.labelY !== h.labelY ||
+      g.thickness !== h.thickness ||
+      g.loudness !== h.loudness ||
+      g.inWindow !== h.inWindow ||
+      g.labelVisible !== h.labelVisible ||
+      g.forkVisible !== h.forkVisible ||
+      g.endsOnMain !== h.endsOnMain ||
+      g.reachesNow !== h.reachesNow ||
+      g.coiled !== h.coiled ||
+      g.ropeGone !== h.ropeGone ||
+      g.labelAnchor !== h.labelAnchor ||
+      g.style !== h.style ||
+      g.momentPoints.length !== h.momentPoints.length ||
+      g.momentPoints.some((p, i) => {
+        const q = h.momentPoints[i];
+        return p.x !== q.x || p.y !== q.y || p.moment.id !== q.moment.id;
+      }))
+  ) {
+    return false;
+  }
+  for (const k of Object.keys(a) as (keyof Props)[]) {
+    if (k === "geometry") continue;
+    if (a[k] !== b[k]) return false;
+  }
+  return Object.keys(a).length === Object.keys(b).length;
 });

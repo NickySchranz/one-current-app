@@ -22,7 +22,7 @@ import {
   Easing,
 } from "react-native-reanimated";
 import type { PathProps } from "react-native-svg";
-import { calmWaveOffset, type CalmCurrentProps, type WaveHandles } from "./useSquiggle";
+import { type CalmCurrentProps, type WaveHandles } from "./useSquiggle";
 
 const MAIN_STROKE = 3.25; // must match useCalmCurrent's resting width
 
@@ -65,12 +65,6 @@ export function useSummitCurrent(opts: {
   const breathing = progress > 0.001 && !reducedMotion && routeLen > 0;
 
   // A straight vertical line needs no samplePath: y every 8px, normal (-1,0).
-  const ys = useMemo(() => {
-    const out: number[] = [];
-    for (let y = nowScreenY; y <= timeLen; y += 8) out.push(y);
-    if (out.length === 0 || out[out.length - 1] !== timeLen) out.push(timeLen);
-    return out;
-  }, [nowScreenY, timeLen]);
 
   const clock = useSharedValue(0);
   useEffect(() => {
@@ -117,19 +111,15 @@ export function useSummitCurrent(opts: {
 
   // The path runs bottom → ledge, matching the horizontal past → Now
   // direction, so the flow dashes and the shimmer streak both travel UP.
+  //
+  // On the summit it does NOT wave. The mountain is what moves here; the
+  // timeline holds still, and a line that swings sideways pulls away from the
+  // integration points sitting on it (their dots ride the same wave, the
+  // integrated threads' own curves do not). The current still gathers — in
+  // thickness, colour and shimmer — it just doesn't travel.
   const d = useDerivedValue(() => {
-    const ampP = Math.min(1.35, progressSV.value + surgeSV.value);
-    if (ampP <= 0.01 || ys.length < 2) return `M ${routeX} ${timeLen} L ${routeX} ${nowScreenY}`;
-    const freqP = progressSV.value;
-    const t = waveTick.value;
-    let out = "";
-    for (let i = ys.length - 1; i >= 0; i--) {
-      const y = ys[i];
-      const off = calmWaveOffset(timeLen - y, t, ampP, freqP, routeLen, periodMs);
-      out += `${out ? "L" : "M"}${Math.round((routeX - off) * 10) / 10} ${y}`;
-    }
-    return out;
-  }, [ys, routeX, nowScreenY, timeLen, routeLen, periodMs, waveTick]);
+    return `M ${routeX} ${timeLen} L ${routeX} ${nowScreenY}`;
+  }, [routeX, nowScreenY, timeLen]);
 
   // The flourish: each answer sends a bright streak climbing the route into
   // the ledge — same dash trick as the horizontal sweep.

@@ -230,6 +230,49 @@ await page.close();
       }
       return tops;
     });
+  const nowLabelY = () =>
+    p2.evaluate(() => {
+      const el = [...document.querySelectorAll("text")].find((t) => t.textContent === "Now");
+      return el ? Math.round(el.getBoundingClientRect().top) : null;
+    });
+  /** The snow cap's box, and where the Now marker is. The face may pan
+   * sideways to keep the climber in view (that is the summit's horizontal
+   * scroll), but the mountain must never move RELATIVE to the timeline — that
+   * would be the route leaning and dragging the rock with it. */
+  const capBox = () =>
+    p2.evaluate(() => {
+      const cap = [...document.querySelectorAll('path[fill="#ffffff"]')].find(
+        (el) => el.getAttribute("opacity") === "0.65",
+      );
+      const nowEl = [...document.querySelectorAll("text")].find((t) => t.textContent === "Now");
+      if (!cap || !nowEl) return null;
+      const b = cap.getBoundingClientRect();
+      const n = nowEl.getBoundingClientRect();
+      return {
+        left: Math.round(b.left),
+        top: Math.round(b.top),
+        w: Math.round(b.width),
+        h: Math.round(b.height),
+        offset: Math.round(b.left - n.left),
+      };
+    });
+  /** Screen y of a point on an INTEGRATED thread's curve (a curved hit path). */
+  const closedCurveY = () =>
+    p2.evaluate(() => {
+      for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+        const len = el.getTotalLength();
+        if (len < 40) continue;
+        const a = el.getPointAtLength(0);
+        const b = el.getPointAtLength(len);
+        if (Math.abs(len - Math.abs(b.y - a.y)) <= 3) continue; // straight = open rope
+        const m = el.getScreenCTM();
+        const q = el.getPointAtLength(len * 0.5);
+        return Math.round(m.b * q.x + m.d * q.y + m.f);
+      }
+      return null;
+    });
+  const nowBeforeSheet = await nowLabelY();
+  const capBeforeFocus = await capBox();
   /** Screen y of every answered rope's cliff edge (its coil). */
   const coilYs = () =>
     p2.evaluate(() =>
@@ -301,6 +344,21 @@ await page.close();
   await p2.waitForTimeout(500);
   await p2.mouse.click(pt2.x, pt2.y);
   await p2.waitForTimeout(1200);
+  // the sheet is up now: its inset must not have moved the time frame, and
+  // focusing the rope must not have slid the mountain sideways
+  const nowWithSheet = await nowLabelY();
+  const capWithFocus = await capBox();
+  check(
+    nowBeforeSheet !== null && nowWithSheet === nowBeforeSheet,
+    `the tray moves nothing (Now ${nowBeforeSheet} → ${nowWithSheet})`,
+  );
+  check(
+    capBeforeFocus !== null &&
+      capWithFocus !== null &&
+      Math.abs(capWithFocus.offset - capBeforeFocus.offset) <= 2,
+    `the mountain never moves sideways against the timeline (offset ${capBeforeFocus?.offset} → ${capWithFocus?.offset})`,
+  );
+  const closedBefore = await closedCurveY();
   await p2.getByText("What does this rope need from you now?", { exact: false }).first().click();
   await p2.waitForTimeout(700);
   // sample from the answer on: the climb + party must never move the world up
@@ -346,18 +404,33 @@ await page.close();
   const stillHanging = await ropeCount();
   check(stillHanging === 1, `the answered rope stays on the face while he climbs it (${stillHanging} hanging)`);
 
-  await p2.waitForTimeout(6800);
+  await p2.waitForTimeout(500);
+  const closedMid = await closedCurveY();
+  check(
+    closedBefore !== null && closedMid !== null && Math.abs(closedMid - closedBefore) <= 2,
+    `an integrated thread holds still through the climb (${closedBefore} → ${closedMid})`,
+  );
+  await p2.waitForTimeout(6300);
   const rows = await p2.evaluate(() => window.__cam);
   const cam = rows.map((r) => r[0]);
   let monotonic = true;
   const dips = [];
   for (let i = 1; i < cam.length; i++)
-    if (cam[i] < cam[i - 1] - 0.01) {
+    // a pixel of tolerance: the measurement is a rasterized bounding box, and
+    // a 1px wobble is the renderer, not the mountain moving up
+    if (cam[i] < cam[i - 1] - 1.01) {
       monotonic = false;
       dips.push(`${i}:${cam[i - 1]}->${cam[i]} feet${rows[i - 1][1]}->${rows[i][1]}`);
     }
-  if (dips.length) console.log("  dips:", dips.slice(0, 6).join("  "));
+  if (dips.length) console.log("  dips:", dips.slice(0, 8).join("  "));
   check(cam.length > 60 && monotonic, `the mountain only ever moves down (${cam.length} samples)`);
+  // A rung-sized single-frame delta is the geometry rebuild racing the
+  // transform: the rock paints at its destination for one frame, then snaps
+  // back and eases forward again.
+  let worstJump = 0;
+  for (let i = 1; i < cam.length; i++)
+    worstJump = Math.max(worstJump, Math.abs(cam[i] - cam[i - 1]));
+  check(worstJump < 46, `the climb never jumps a frame (worst frame ${Math.round(worstJump)}px)`);
   // THE PIN: the time frame — Now, its dates, the climber standing there —
   // does not move at all. Only the mountain does.
   const nowYs = rows.map((r) => r[1]).filter((v) => v > 0);
@@ -385,6 +458,26 @@ await page.close();
   check(hanging === 0, "no rope still hangs after top-out (all coiled on their ledges)");
   // a rung is a screen-jump, so the conquered ledges trail off below the
   // frame — what must hold is that they exist, on the rock, in climb order
+  const body = await p2.evaluate(() => {
+    let best = 0, box = null;
+    for (const el of document.querySelectorAll("path")) {
+      if (el.getAttribute("stroke")) continue;
+      const f = el.getAttribute("fill");
+      if (!f || f === "none" || f === "#ffffff") continue;
+      const b = el.getBoundingClientRect();
+      if (b.width * b.height > best) { best = b.width * b.height; box = { bottom: Math.round(b.bottom), w: Math.round(b.width) }; }
+    }
+    return box;
+  });
+  check(
+    !!body && body.bottom >= 790 && body.w >= 640,
+    `the rock fills the frame at top-out (bottom ${body?.bottom}, width ${body?.w})`,
+  );
+  const cap = await capBox();
+  check(
+    !!cap && cap.h >= 0.12 * 800 && cap.w >= 400,
+    `the summit is a real snowy cap (${cap?.w}×${cap?.h})`,
+  );
   const allLedges = await coilYs();
   check(
     allLedges.length >= 6,

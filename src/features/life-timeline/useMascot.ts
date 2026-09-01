@@ -1034,7 +1034,20 @@ export function useMascot(
   /** The climbing gait, in place, for as long as the mountain is moving. */
   const climbInPlace = useCallback((ms: number) => {
     if (superBonkActiveRef.current || viewingIntegratedRef.current) return;
-    if (phase.current === 'jumping') return; // a travel already owns him
+    // A travel in flight does NOT get to swallow the climb: tapping a rope
+    // starts a sideways scramble, and answering it quickly lands mid-scramble.
+    // Put him down at its destination and climb — the mountain is already
+    // moving, and he must be climbing while it does.
+    if (phase.current === 'jumping') {
+      const dest = jumpDestRef.current;
+      cancelRaf();
+      if (dest) {
+        const s = panShiftRef.current;
+        placeRef.current(dest.x + s.x, dest.y + s.y, true);
+      }
+      jumpDestRef.current = null;
+      phase.current = 'idle';
+    }
     clearTimer();
     fadeBubble(0, 120);
     setFrame('CLIMB_A');

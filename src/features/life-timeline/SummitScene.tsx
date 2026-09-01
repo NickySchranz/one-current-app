@@ -58,21 +58,27 @@ function flank(
   scale: number,
 ): { x: number; y: number }[] {
   const pts: { x: number; y: number }[] = [];
-  const span = Math.max(1, toY - fromY);
-  const steps = Math.max(4, Math.round(span / 60));
-  for (let i = 1; i <= steps; i++) {
-    const y = fromY + (span * i) / steps;
+  // Sampled on an ABSOLUTE altitude grid (not `span / steps`): when the drawn
+  // band changes, the vertices must land on the same altitudes as before or
+  // the whole silhouette re-shapes itself in one frame.
+  const GRID = 46;
+  const first = Math.ceil(fromY / GRID) * GRID;
+  for (let y = first; y < toY; y += GRID) {
     const hw = mountainHalfWidth(y - peakY, width, scale);
-    // seeded by ALTITUDE, not by index: the drawn band shifts as the camera
-    // climbs, and index seeds would re-jitter the whole silhouette each time.
-    const k = Math.round(y / 60);
-    const jx = (seeded(k, salt) - 0.5) * Math.min(26, hw * 0.4);
-    const jy = (seeded(k, salt + 1) - 0.5) * 22;
+    // seeded by ALTITUDE, so the same rock keeps the same edge for ever
+    const k = Math.round(y / GRID);
+    const jx = (seeded(k, salt) - 0.5) * Math.min(14, hw * 0.12);
+    const jy = (seeded(k, salt + 1) - 0.5) * 16;
     pts.push({
       x: Math.round(routeX + side * (hw + jx)),
-      y: Math.round(y + (i === steps ? 0 : jy)),
+      y: Math.round(y + jy),
     });
   }
+  // the band always closes exactly on its lower edge
+  pts.push({
+    x: Math.round(routeX + side * mountainHalfWidth(toY - peakY, width, scale)),
+    y: Math.round(toY),
+  });
   return pts;
 }
 
@@ -95,7 +101,7 @@ export function FaceTexture({
   bandTop,
   bandBottom,
   width,
-  faceScale,
+  timeLen,
   tk,
 }: {
   routeX: number;
@@ -107,11 +113,15 @@ export function FaceTexture({
   bandTop?: number;
   bandBottom?: number;
   width: number;
-  faceScale: number;
+  /** The stage height — the profile's yardstick (see mountainHalfWidth). */
+  timeLen: number;
   tk: ThemeTokens;
 }) {
   const step = 46;
-  const first = peakY + 130;
+  // Marks start just under the snow cap, so the rock is textured all the way
+  // to the summit — this texture is the only thing that shows the climb
+  // moving, and it used to be blanked out over the whole top of the mountain.
+  const first = peakY + Math.round(0.2 * timeLen);
   const lo = Math.max(first, bandTop ?? first);
   const start = first + Math.floor((lo - first) / step) * step;
   const end = Math.min(bottomY, bandBottom ?? bottomY);
@@ -120,8 +130,8 @@ export function FaceTexture({
     let grit = "";
     for (let y = start; y < end; y += step) {
       const i = Math.round(y / step) * 7;
-      const hw = mountainHalfWidth(y - peakY, width, faceScale) - 26;
-      if (hw < 30) continue;
+      const hw = mountainHalfWidth(y - peakY, width, timeLen) * 0.82 - 12;
+      if (hw < 14) continue;
       for (let k = 0; k < 2; k++) {
         const j = i + k;
         const cx = routeX + (seeded(j, 71) - 0.5) * 2 * hw;
@@ -138,7 +148,7 @@ export function FaceTexture({
       }
     }
     return { seams, grit };
-  }, [routeX, peakY, start, end, width, faceScale]);
+  }, [routeX, peakY, start, end, width, timeLen]);
   return (
     <G pointerEvents="none">
       <Path d={seams} stroke={tk.inkSoft} strokeWidth={1.2} opacity={0.3} fill="none" />
@@ -218,8 +228,7 @@ export function MountainFace({
   width,
   timeLen,
   depth,
-  faceScale,
-  viewTop,
+  bandAnchor,
   tk,
 }: {
   routeX: number;
@@ -229,43 +238,45 @@ export function MountainFace({
   timeLen: number;
   /** How far below the dated canvas the rock keeps going. */
   depth: number;
-  /** Silhouette stretch for this day's mountain height (see faceScale). */
-  faceScale: number;
-  /** World y the camera is resting at (its top edge). The mountain of a
-   * many-rope day is thousands of px tall and the browser re-rasterizes the
-   * whole silhouette on every camera frame — so only the band the camera can
-   * actually reach is built, with a screen of slack either side for the climb
-   * in flight. */
-  viewTop?: number;
+  /** The layer coordinate that the top of the viewport currently sits at —
+   * i.e. minus how far this layer has been translated down (the climb). */
+  bandAnchor?: number;
   tk: ThemeTokens;
 }) {
+  // A day's mountain is thousands of px tall and the browser re-rasterizes the
+  // silhouette on every frame of a climb, so only the band the viewport can
+  // reach is built — measured from the viewport's place in THIS layer's
+  // coordinates, with a screen and a half of slack above (for a climb in
+  // flight) and a screen past the bottom edge below.
   const bottom = timeLen + depth;
-  const drawTop = Math.max(peakY, (viewTop ?? peakY) - timeLen);
-  const drawBottom = Math.min(bottom, (viewTop ?? peakY) + 2 * timeLen);
+  const anchor = bandAnchor ?? 0;
+  const drawTop = Math.max(peakY, anchor - 1.6 * timeLen);
+  const drawBottom = Math.min(bottom, anchor + 2.6 * timeLen);
   const body = useMemo(() => {
     // the apex only belongs to the path when the peak is in the band
     const apex = drawTop <= peakY + 1;
     const top = apex ? peakY : drawTop;
-    const left = flank(routeX, peakY, top, drawBottom, width, -1, 31, faceScale);
-    const right = flank(routeX, peakY, top, drawBottom, width, 1, 33, faceScale);
+    const left = flank(routeX, peakY, top, drawBottom, width, -1, 31, timeLen);
+    const right = flank(routeX, peakY, top, drawBottom, width, 1, 33, timeLen);
     let d = `M ${left[left.length - 1].x} ${drawBottom}`;
     for (let i = left.length - 1; i >= 0; i--) d += ` L ${left[i].x} ${left[i].y}`;
     if (apex) {
       d += ` L ${routeX} ${Math.round(peakY)}`;
     } else {
       // a straight seam across the band's top, off-screen either way
-      d += ` L ${Math.round(routeX - mountainHalfWidth(top - peakY, width, faceScale))} ${Math.round(top)}`;
-      d += ` L ${Math.round(routeX + mountainHalfWidth(top - peakY, width, faceScale))} ${Math.round(top)}`;
+      d += ` L ${Math.round(routeX - mountainHalfWidth(top - peakY, width, timeLen))} ${Math.round(top)}`;
+      d += ` L ${Math.round(routeX + mountainHalfWidth(top - peakY, width, timeLen))} ${Math.round(top)}`;
     }
     for (const p of right) d += ` L ${p.x} ${p.y}`;
     return d + ` L ${right[right.length - 1].x} ${drawBottom} Z`;
-  }, [routeX, peakY, drawTop, drawBottom, width, faceScale]);
+  }, [routeX, peakY, drawTop, drawBottom, width, timeLen]);
   // the snow cap: the top ~110px of both flanks, closed with a ragged hem
   const cap = useMemo(() => {
-    const drop = 110;
+    // a fifth of the stage: a cap you can see, at any stage size
+    const drop = Math.round(0.22 * timeLen);
     const capBottom = peakY + drop;
-    const left = flank(routeX, peakY, peakY, capBottom, width, -1, 31, faceScale);
-    const right = flank(routeX, peakY, peakY, capBottom, width, 1, 33, faceScale);
+    const left = flank(routeX, peakY, peakY, capBottom, width, -1, 31, timeLen);
+    const right = flank(routeX, peakY, peakY, capBottom, width, 1, 33, timeLen);
     let d = `M ${left[left.length - 1].x} ${capBottom}`;
     for (let i = left.length - 1; i >= 0; i--) d += ` L ${left[i].x} ${left[i].y}`;
     d += ` L ${routeX} ${Math.round(peakY)}`;
@@ -274,10 +285,10 @@ export function MountainFace({
     const rx = right[right.length - 1].x;
     for (let i = 1; i <= 5; i++) {
       const t = i / 5;
-      d += ` L ${Math.round(rx + (lx - rx) * t)} ${Math.round(capBottom + (seeded(i, 35) - 0.2) * 24)}`;
+      d += ` L ${Math.round(rx + (lx - rx) * t)} ${Math.round(capBottom + (seeded(i, 35) - 0.2) * (drop * 0.22))}`;
     }
     return d + " Z";
-  }, [routeX, peakY, width, faceScale]);
+  }, [routeX, peakY, width, timeLen]);
   const rock = mix(tk.inkFaint, tk.bg, 48);
   return (
     <G pointerEvents="none">

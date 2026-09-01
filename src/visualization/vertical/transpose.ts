@@ -75,35 +75,44 @@ export function daySeedOrder(ids: readonly string[], now: Date): string[] {
 
 /**
  * The mountain's half-width at a given depth below the peak — one profile
- * shared by the drawn face and the anchor placement, so every cliff ledge
- * lands ON the rock: a narrow cap, quickly broadening shoulders, then the
- * massif running near-vertical to the valley.
+ * shared by the drawn face and the anchor placement, so every rope and every
+ * cliff ledge lands ON the rock.
+ *
+ * Measured in SCREENS below the peak, and in fractions of the stage width, so
+ * the mountain looks the same whatever the day's rope count (an earlier
+ * version scaled by the mountain's total height and only along the depth
+ * axis, which made a tall day's mountain a needle):
+ *
+ *   at the peak ...... a tip
+ *   0.10 screens ..... 0.16·W — the snow cap's shoulders
+ *   0.25 screens ..... 0.34·W — a broad summit
+ *   0.55 screens ..... 0.55·W — the flanks reach the stage edges
+ *   0.85 screens ..... 0.66·W — and past them: a full-width wall
+ *
+ * So the summit frame (peak at mid-screen, half a screen visible below him)
+ * shows a broad snowy peak whose flanks run to both edges, while the climb
+ * itself — always at least a `headroom` below the peak — is a wall.
  */
 export function mountainHalfWidth(
   depth: number,
   width: number,
-  /** How tall the mountain is compared with the profile's reference height
-   * (PROFILE_REF). A day with many ropes builds a much taller mountain, and
-   * the silhouette has to stretch with it — otherwise the flanks are miles
-   * off either side of the screen for the whole climb and the shape can
-   * never be seen. */
-  scale = 1,
+  /** The stage's own height: the yardstick the profile is measured in. */
+  screen: number,
 ): number {
-  const d = depth / Math.max(0.35, scale);
-  const capW = 60;
-  const shW = 0.22 * width;
-  const brW = 0.34 * width;
-  // The flanks stay inside the stage: a day's mountain is many screens tall,
-  // and a face that runs past both edges reads as a wall, not a mountain.
-  if (d <= 0) return 8;
-  if (d <= 90) return 8 + (capW - 8) * (d / 90);
-  if (d <= 260) return capW + (shW - capW) * ((d - 90) / 170);
-  if (d <= 480) return shW + (brW - shW) * ((d - 260) / 220);
-  return Math.min(0.4 * width, brW + (d - 480) * 0.06);
+  const d = depth / Math.max(240, screen);
+  const w0 = 10;
+  const w1 = 0.16 * width;
+  const w2 = 0.34 * width;
+  const w3 = 0.55 * width;
+  const w4 = 0.66 * width;
+  if (d <= 0) return w0;
+  if (d <= 0.1) return w0 + (w1 - w0) * (d / 0.1);
+  if (d <= 0.25) return w1 + (w2 - w1) * ((d - 0.1) / 0.15);
+  if (d <= 0.55) return w2 + (w3 - w2) * ((d - 0.25) / 0.3);
+  if (d <= 0.85) return w3 + (w4 - w3) * ((d - 0.55) / 0.3);
+  return w4;
 }
 
-/** Mountain height the half-width profile above is drawn for. */
-export const PROFILE_REF = 560;
 
 /**
  * The highest the day's ledge (Now) ever hangs below the top edge. The
@@ -146,8 +155,6 @@ export type SummitLayout = TimelineLayout & {
   ladderTop: number;
   /** World px the mountain rises above the top rung to reach the summit. */
   ladderHeadroom: number;
-  /** Stretch factor for the half-width profile (peakAbove / PROFILE_REF). */
-  faceScale: number;
 };
 
 export function tp(x: number, y: number, timeLen: number): { x: number; y: number } {
@@ -216,19 +223,19 @@ export type SummitLayoutOptions = {
    */
   climbRanks?: Record<string, number>;
   /**
+   * The height the LADDER is measured in — the window, normally. It is
+   * deliberately not the canvas: the canvas height is a measurement that
+   * settles in after the first render (and eases with an opening sheet), and
+   * the ladder decides where the mountain rests, so anything that drifts would
+   * move the mountain in front of the climber.
+   */
+  ladderHeight?: number;
+  /**
    * Ropes the climber has already topped out on: theirs are off the face,
    * coiled on their ledge. An answered rope missing from this set is still
    * hanging — he is on his way up it.
    */
   retiredIds?: readonly string[];
-  /**
-   * How far the mountain has already travelled down today (world px). It is
-   * BAKED into the rock's geometry, not applied as a transform, so arriving
-   * on a half-climbed day draws the mountain where it already is — nothing
-   * animates on load. Only the change from one answer to the next is
-   * animated, by the stage.
-   */
-  climbDist?: number;
 };
 
 /** How many chars of a rope's title fit its ladder slot. */
@@ -311,9 +318,7 @@ export function buildSummitLayout(
     .filter((g) => g.reachesNow && g.inWindow)
     .map((g) => g.branchId);
   const seedOrder = daySeedOrder(openOrder, now);
-  const ladder = summitLadder(timeLen, openOrder.length);
-  // The silhouette stretches with the day's mountain (see mountainHalfWidth).
-  const faceScale = ladder.peakAbove / PROFILE_REF;
+  const ladder = summitLadder(opts.ladderHeight ?? timeLen, openOrder.length);
   // Fallback rung order for climbed ropes the caller has no record of
   // (mid-day reload): the day-seeded order, offset past the known ranks.
   const known = Object.values(opts.climbRanks ?? {});
@@ -326,7 +331,6 @@ export function buildSummitLayout(
     rungOf.set(id, r ?? nextRank++);
   }
   const retired = new Set(opts.retiredIds ?? []);
-  const climbDist = Math.round(opts.climbDist ?? 0);
   // He stands at Now, always — so the band where a waiting rope is named and
   // its moments show is a fixed strip just below it. The stage does NOT
   // translate that strip; only the mountain and the ropes themselves move.
@@ -336,10 +340,10 @@ export function buildSummitLayout(
   // The lane spread is squeezed to the mountain's half-width at the height he
   // works them (Now), which keeps the columns distinct instead of clamping
   // several of them onto the same line.
-  const peakYBaked = nowScreenY - ladder.peakAbove + climbDist;
+  const peakYRest = nowScreenY - ladder.peakAbove;
   const hwNow = Math.max(
     46,
-    mountainHalfWidth(nowScreenY - peakYBaked, opts.stageWidth, faceScale) - 34,
+    mountainHalfWidth(nowScreenY - peakYRest, opts.stageWidth, timeLen) - 34,
   );
   const widestLane = Math.max(
     1,
@@ -355,23 +359,21 @@ export function buildSummitLayout(
       const seedBase = idHash(g.branchId) + dayNo;
       const coiled = !!b && handledToday(b, now);
       const rung = rungOf.get(g.branchId) ?? 0;
+      // Geometry is the mountain AT REST: the stage's one transform carries
+      // how far it has travelled today, so nothing here changes as he climbs
+      // (a baked offset made the rebuild and the transform race each other).
       const ay = coiled
         ? nowScreenY -
           ladder.step * (rung + 1) +
-          climbDist +
           Math.round((seeded(seedBase, 61) - 0.5) * 26)
         : // still waiting: hung from far above the summit, so its anchor is
           // never in frame and the rope crosses his level at any climb offset
-          nowScreenY -
-          ladder.peakAbove -
-          120 -
-          Math.round(seeded(seedBase, 61) * 90) +
-          climbDist;
+          nowScreenY - ladder.peakAbove - 120 - Math.round(seeded(seedBase, 61) * 90);
       const laneOffset = (g.laneY - base.bandY) * squeeze;
       // A conquered ledge sits higher, where the face is narrower — hold it
       // inside the rock there too.
       const hw = coiled
-        ? mountainHalfWidth(ay - peakYBaked, opts.stageWidth, faceScale) - 30
+        ? mountainHalfWidth(ay - peakYRest, opts.stageWidth, timeLen) - 30
         : hwNow;
       const ax = Math.round(
         base.mainY + Math.sign(laneOffset || 1) * Math.min(Math.abs(laneOffset), Math.max(24, hw)),
@@ -451,6 +453,5 @@ export function buildSummitLayout(
     ladderStep: ladder.step,
     ladderTop: ladder.topDist,
     ladderHeadroom: ladder.headroom,
-    faceScale,
   };
 }
