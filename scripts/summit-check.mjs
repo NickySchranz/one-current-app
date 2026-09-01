@@ -247,6 +247,11 @@ await page.close();
   await reseed("one-left");
   await p2.reload({ waitUntil: "networkidle" });
   await p2.waitForTimeout(2500);
+  const topOneLeft = await capTop();
+  check(
+    topOneLeft !== null && topOneLeft < -40,
+    `the summit is still out of view with one rope left (cap top ${Math.round(topOneLeft ?? 0)})`,
+  );
   const topsLeft = await anchorTops();
   check(
     topsLeft.length === 1 && topsLeft.every((t) => t < 0),
@@ -317,6 +322,11 @@ await page.close();
     }
   if (dips.length) console.log("  dips:", dips.slice(0, 6).join("  "));
   check(cam.length > 60 && monotonic, `world only ever moves down during the climb (${cam.length} samples)`);
+  const travel = cam[cam.length - 1] - cam[0];
+  check(
+    travel > 0.3 * (800 - 48),
+    `the climb is a real ascent — the world slid ${Math.round(travel)}px down`,
+  );
   const topAfter = await capTop();
   const stageH = 800 - 48;
   check(

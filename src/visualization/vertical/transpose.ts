@@ -19,30 +19,49 @@ import type { BranchGeometry } from "../branch-lines/paths";
 import { dateToX, dateToXRaw, defaultWindow, type TimeWindow } from "../zoom/time-scale";
 
 /**
- * The day's climb is a LADDER above the Now ledge: each answered rope's
- * cliff ledge sits one rung higher than the one before it, the peak one
- * headroom above the last rung. Rungs are compact enough that at top-out
- * every conquered ledge fits inside one screen height under the summit;
- * the headroom is tall enough that the peak stays ≥40px off-screen until
- * the LAST rope is climbed (the camera anchors his feet between 0.5·L and
- * 0.3·L of the stage). Ropes still waiting hang from ABOVE the peak — so
- * a rope left to climb always starts out of view — and only re-anchor at
- * their rung the moment they are answered.
+ * The day's climb is a LADDER of cliff edges above the Now ledge. Three
+ * things have to hold at once, and they set every number here:
+ *
+ *   • The FIRST rung starts out of view. He stands mid-screen on an
+ *     unclimbed day, so rung 0 sits half a screen (plus margin) above Now:
+ *     the first rope is climbed up out of the frame, and the camera pans
+ *     down after him to set him on his new ledge.
+ *   • The PEAK stays out of view until the last rope. The camera rides him
+ *     HIGHER on the screen the further he climbs (0.5·L of sky above him at
+ *     Now, 0.2·L on the top rung), so a headroom of ~0.24·L keeps the summit
+ *     past the top edge on every rung — the last climb brings it in, and he
+ *     lands on it back at 0.3·L with the whole day below him.
+ *   • Every conquered ledge fits ONE screen at top-out: headroom plus the
+ *     ladder span must clear the screen below him, so the rung step shrinks
+ *     as the day's rope count grows. Seven ropes cannot each be a
+ *     screen-height climb AND all be in frame at the end; the FIRST climb is
+ *     the long one (half a screen, straight up out of view), the rest are
+ *     rungs.
+ *
+ * Ropes still waiting hang from above the peak, so their anchors are never
+ * in frame; each re-anchors at its rung the moment it is answered.
  */
 export function summitLadder(
   timeLen: number,
   ropeCount: number,
-): { step: number; headroom: number; peakAbove: number } {
+): {
+  first: number;
+  step: number;
+  headroom: number;
+  /** World px from Now up to the TOP rung (where the camera rides highest). */
+  topDist: number;
+  peakAbove: number;
+} {
   const n = Math.max(1, ropeCount);
-  const step = Math.max(
-    34,
-    Math.min(60, Math.round((0.4 * timeLen - 96) / Math.max(1, n - 2))),
-  );
-  const headroom = Math.max(
-    Math.round(0.3 * timeLen) + 56 - step,
-    Math.round(0.5 * timeLen) + 96 - n * step,
-  );
-  return { step, headroom, peakAbove: n * step + headroom };
+  const first = Math.round(0.5 * timeLen) + 60;
+  const headroom = Math.round(0.24 * timeLen) + 45;
+  // Room left on screen below him at top-out (he stands on the peak at
+  // 0.3·L, and the lowest rung must clear the bottom edge by 30px).
+  const room = Math.max(0, 0.7 * timeLen - 30 - headroom);
+  const step =
+    n > 1 ? Math.round(Math.max(40, Math.min(0.22 * timeLen, room / (n - 1)))) : 0;
+  const topDist = first + (n - 1) * step;
+  return { first, step, headroom, topDist, peakAbove: topDist + headroom };
 }
 
 /** Deterministic jitter, stable within a day (same as timeline-fx's). */
@@ -121,6 +140,8 @@ export type SummitLayout = TimelineLayout & {
   peakAbove: number;
   /** World px between consecutive conquered cliff ledges. */
   ladderStep: number;
+  /** World px from Now up to the day's TOP rung (peak = this + headroom). */
+  ladderTop: number;
 };
 
 export function tp(x: number, y: number, timeLen: number): { x: number; y: number } {
@@ -283,6 +304,15 @@ export function buildSummitLayout(
     const r = opts.climbRanks?.[id];
     rungOf.set(id, r ?? nextRank++);
   }
+  // His altitude at rest: the highest rung he has earned (Now on a fresh
+  // day). A waiting rope's own span runs from above the peak to below Now,
+  // so it always crosses the screen wherever he is — but its LABEL has to
+  // follow him up, or the ropes he can still grab go nameless once the Now
+  // ledge has slid off the bottom of the screen.
+  const climbed = rungOf.size;
+  const perchY =
+    climbed > 0 ? nowScreenY - (ladder.first + ladder.step * (climbed - 1)) : nowScreenY;
+  const openLabelY = Math.round(perchY + 0.2 * timeLen);
 
   const geometries: BranchGeometry[] = base.geometries.map((g) => {
     if (g.reachesNow) {
@@ -292,8 +322,8 @@ export function buildSummitLayout(
       const rung = rungOf.get(g.branchId) ?? 0;
       const ay = coiled
         ? nowScreenY -
-          ladder.step * (rung + 1) +
-          Math.round((seeded(seedBase, 61) - 0.5) * Math.min(18, ladder.step * 0.3))
+          (ladder.first + ladder.step * rung) +
+          Math.round((seeded(seedBase, 61) - 0.5) * Math.min(20, ladder.step * 0.24))
         : nowScreenY - ladder.peakAbove - 70 - Math.round(seeded(seedBase, 61) * 90);
       const laneOffset = g.laneY - base.bandY;
       // A conquered ledge must sit on rock; a waiting rope's anchor is out
@@ -317,16 +347,22 @@ export function buildSummitLayout(
         forkVisible: false,
         laneX: ax,
         labelX: ax,
-        labelY: dangleY + LADDER_BASE + 8 + (Math.max(0, ordinal) % LADDER_ROWS) * LADDER_STEP,
+        // A conquered rope names itself under its own cliff edge; a waiting
+        // one names itself in the band just below the climber, laddered so
+        // neighbouring columns never collide.
+        labelY: coiled
+          ? Math.round(ay) + 24
+          : openLabelY + LADDER_BASE + (Math.max(0, ordinal) % LADDER_ROWS) * LADDER_STEP,
         labelAnchor: "middle",
         coiled,
-        // A waiting rope's anchor is out of view: its moments stay within
-        // reach of the dangling end. A coiled rope's short stub keeps them
-        // between ledge and coil.
+        // A waiting rope's anchor is out of view: its moments stay in the
+        // band he can actually reach. A coiled rope keeps them on the stub
+        // between its ledge and the coil.
         momentPoints: g.momentPoints.map((m) => {
           const t = Math.max(0, Math.min(1, (m.x - g.forkX) / runSpan));
-          const top = coiled ? ay : dangleY - 240;
-          return { ...m, x: ax, y: Math.round(dangleY + t * (top - dangleY)) };
+          const lo = coiled ? dangleY : openLabelY + 40;
+          const top = coiled ? ay : openLabelY - 200;
+          return { ...m, x: ax, y: Math.round(lo + t * (top - lo)) };
         }),
       };
     }
@@ -365,5 +401,6 @@ export function buildSummitLayout(
     panScale,
     peakAbove: ladder.peakAbove,
     ladderStep: ladder.step,
+    ladderTop: ladder.topDist,
   };
 }

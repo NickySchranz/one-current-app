@@ -685,17 +685,28 @@ export function LifeTimeline() {
   // (mountain, ledges, ropes, dates) flows together, letting the past fill
   // the screen to the very top when panning back beyond Now.
   const relPeak = LEDGE_Y - (sm?.peakAbove ?? 1);
+  const relTop = LEDGE_Y - Math.max(1, sm?.ladderTop ?? 1);
   const relBase = LEDGE_Y;
-  /** Screen anchor for the climber's feet: mid-screen at the Now spot,
-   * gliding to 30%-from-top by mid-climb (the doubled t front-loads the
-   * glide, so the peak clears the top edge on every rung but the last).
-   * A function of ALTITUDE, not time — composed with his climb the world's
-   * motion stays strictly downward (d(anchor−rel)/d(rel) = A′−1 with
-   * A′ = 2·0.2L/(0.5L+96) < 0.8 < 1). */
+  /** Where the camera rides him, by ALTITUDE (never by time — composed with
+   * his climb the world then moves strictly downward, since both segments
+   * have |dA/drel| < 1):
+   *
+   *   Now ............ 0.5·L — half a screen of sky, the summit far past it
+   *   top rung ....... 0.2·L — riding high, the day's ladder spread below
+   *   the summit ..... 0.3·L — he steps onto the peak and it settles into
+   *                            frame with every conquered ledge under him
+   *
+   * Climbing tightens the sky above him, which is what keeps the peak out of
+   * frame on every rung without burning the screen room the ladder needs. */
+  const highRide = sm ? Math.round(sm.timeLen * 0.2) : 0;
   const anchorAt = (rel: number): number => {
     "worklet";
-    const t = Math.min(1, Math.max(0, (2 * (relBase - rel)) / (relBase - relPeak)));
-    return half - (half - third) * t;
+    if (rel >= relTop) {
+      const t = Math.min(1, Math.max(0, (relBase - rel) / (relBase - relTop)));
+      return half - (half - highRide) * t;
+    }
+    const t = Math.min(1, Math.max(0, (relTop - rel) / (relTop - relPeak)));
+    return highRide + (third - highRide) * t;
   };
   const relRest = restPipY - ledgeWorldY + LEDGE_Y;
   /** The camera's analytic rest value: exact whenever no climb is in flight.
@@ -1419,8 +1430,21 @@ export function LifeTimeline() {
     const rel = Math.max(relRest, Math.min(camRelSV.value, relLive));
     camRelSV.value = rel;
     return Math.round((anchorAt(rel) - rel) * 2) / 2;
-  }, [vertical, pipFeetY, ledgeWorldY, restPipY, half, third, relBase, relPeak]);
+  }, [vertical, pipFeetY, ledgeWorldY, restPipY, half, third, highRide, relBase, relTop, relPeak]);
   const camProps = useAnimatedProps(() => ({ translateY: camTranslate.value }), [camTranslate]);
+  /** On the summit the ROPE does the asking, so the prompt is decided here:
+   * it also silences Pip's own bubble while it is up — two pills saying
+   * different things over one climber is noise. */
+  const grabPrompt = (() => {
+    if (!vertical || !sm || operation.kind !== "idle") return null;
+    const id = mascot.pendingBranchId ?? armedBranchId ?? mascot.inspectedBranchId;
+    if (!id) return null;
+    const b = branches.find((x) => x.id === id);
+    if (!b || isClosed(b) || handledToday(b, now)) return null;
+    const g = layout.geometries.find((x) => x.branchId === id);
+    if (!g || !g.inWindow) return null;
+    return { id, g };
+  })();
   // The pinned date rail rides the same value, staying in lockstep mid-climb.
   const railProps = useAnimatedProps(() => ({ translateY: camTranslate.value }), [camTranslate]);
 
@@ -2246,7 +2270,7 @@ export function LifeTimeline() {
                   frame={hit && !hit.calm ? "LAND_A" : mascot.frame}
                   flip={mascot.flip}
                   mascotType={mascot.mascotType}
-                  bubbleO={mascot.bubbleO}
+                  bubbleO={grabPrompt ? undefined : mascot.bubbleO}
                   bubbleText={mascot.bubbleText}
                   showTapHint={mascot.frame === 'IDLE_A' || mascot.frame === 'IDLE_B'}
                   theme={tk}
@@ -2261,36 +2285,32 @@ export function LifeTimeline() {
                   dial. They start under his head, so his real speech bubble
                   (which lives above him) never collides with them. */}
               {/* summit: the prompt pops on the focused rope itself */}
-              {vertical && sm && operation.kind === "idle" &&
-                (() => {
-                  const focusId =
-                    mascot.pendingBranchId ?? armedBranchId ?? mascot.inspectedBranchId;
-                  if (!focusId) return null;
-                  const b = branches.find((x) => x.id === focusId);
-                  if (!b || isClosed(b) || handledToday(b, now)) return null;
-                  const g = layout.geometries.find((x) => x.branchId === focusId);
-                  if (!g || !g.inWindow) return null;
-                  const text = t(
+              {grabPrompt && (
+                <GrabPrompt
+                  key={grabPrompt.id}
+                  x={grabPrompt.g.endX}
+                  // above the grab band — not the dangling end, which hangs
+                  // far below the screen once he has climbed, and high
+                  // enough to clear the climber hanging there
+                  y={grabPrompt.g.labelY - 104}
+                  text={t(
                     GRAB_PROMPTS[
-                      (promptHash(focusId) + Math.floor(nowTick / 86400000)) %
+                      (promptHash(grabPrompt.id) + Math.floor(nowTick / 86400000)) %
                         GRAB_PROMPTS.length
                     ],
-                  );
-                  return (
-                    <GrabPrompt
-                      key={focusId}
-                      x={g.endX}
-                      y={(g.forkY ?? g.endY + 300) - 92}
-                      text={text}
-                      onPress={guarded(() => {
-                        setArmedBranchId(null);
-                        setOperation({ kind: "quick-touch", branchId: focusId, expanded: true });
-                      })}
-                      tk={tk}
-                      reducedMotion={reducedMotion}
-                    />
-                  );
-                })()}
+                  )}
+                  onPress={guarded(() => {
+                    setArmedBranchId(null);
+                    setOperation({
+                      kind: "quick-touch",
+                      branchId: grabPrompt.id,
+                      expanded: true,
+                    });
+                  })}
+                  tk={tk}
+                  reducedMotion={reducedMotion}
+                />
+              )}
 
               {!vertical && showMascot && mascot.visible && operation.kind === "idle" &&
                 (() => {

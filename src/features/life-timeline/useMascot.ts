@@ -16,6 +16,11 @@ import { handledToday } from "@/domain/feelings/logic";
 import type { FrameName, MascotType } from "./mascot-frames";
 
 const PX = 2.2; // must match PX in mascot-frames.ts
+/** Summit: how far below his ledge he swings to take hold of a rope. The
+ * camera never follows him down, so this whole drop becomes climb — it is
+ * what makes answering a rope a real ascent even when the day's rungs sit
+ * close together (many ropes → compact ladder, see summitLadder). */
+const SUMMIT_GRAB_DROP = 150;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -353,9 +358,10 @@ export function useMascot(
 
   // Where Pip goes to visit a rope. On the summit each rope hangs from its
   // own cliff ledge (g.endX/endY = the anchor; g.forkY = the dangling end):
-  // an open rope he GRABS — hanging on it at his own altitude where the
-  // rope allows — and a coiled (answered) one he stands on, up on its
-  // ledge. Horizontal themes keep the endpoint perch.
+  // an open rope he GRABS — swinging DOWN onto it, a good stretch below his
+  // ledge, so that answering it means climbing the rope's whole visible span
+  // back up to its cliff edge — and a coiled (answered) one he stands on, up
+  // on its ledge. Horizontal themes keep the endpoint perch.
   const ropeSpot = (g: BranchGeometry): { x: number; y: number } => {
     if (verticalRef.current) {
       const ax = g.endX;
@@ -365,7 +371,10 @@ export function useMascot(
         return { x: ax - PX * 6, y: ay - PX * 16 + 3 };
       }
       const low = (g.forkY ?? ay + 360) - 26; // just above the dangling end
-      const gripY = Math.max(ay + 48, Math.min(low, posRef.current.y + PX * 10));
+      // Measured from his RESTING ledge (never his live position — that
+      // would creep downward every time the target is recomputed).
+      const grabFrom = nowYRef.current + PX * 10 + SUMMIT_GRAB_DROP;
+      const gripY = Math.max(ay + 48, Math.min(low, grabFrom));
       return { x: ax - PX * 6, y: gripY - PX * 10 };
     }
     return { x: g.endX + 10, y: g.endY - PX * 10 };
