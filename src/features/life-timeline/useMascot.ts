@@ -277,7 +277,19 @@ export function useMascot(
    * endpoint-past-Now cull that only makes sense on a horizontal map.
    * `onClimbEnd` fires when a climb to the rest point lands — the summit
    * retires the rope he just topped out on. */
-  opts?: { vertical?: boolean; reducedMotion?: boolean; onClimbEnd?: () => void },
+  opts?: {
+    vertical?: boolean;
+    reducedMotion?: boolean;
+    /** Summit: a rope's x with the mountain turned as it is (see ringX). */
+    ringX?: (g: BranchGeometry) => number;
+    /** Bumped whenever the mountain has been turned: his place at a rope
+     * moves with it, so the tracking effect has to look again. */
+    turnKey?: number;
+    /** Summit: whether a rope is on the visible side of the mountain. Patrol
+     * only ever visits ropes the user can see. */
+    ringVisible?: (g: BranchGeometry) => boolean;
+    onClimbEnd?: () => void;
+  },
 ): MascotState {
   const lang = getLang(language);
   const verticalRef = useRef(opts?.vertical ?? false);
@@ -289,6 +301,10 @@ export function useMascot(
    * a mountain with nobody on it and a scene that slid for no visible reason. */
   const stillRef = useRef(opts?.reducedMotion ?? false);
   stillRef.current = opts?.reducedMotion ?? false;
+  const ringXRef = useRef(opts?.ringX);
+  ringXRef.current = opts?.ringX;
+  const ringVisibleRef = useRef(opts?.ringVisible);
+  ringVisibleRef.current = opts?.ringVisible;
   const langRef = useRef(lang);
   langRef.current = lang;
   // Stable refs for latest values
@@ -376,7 +392,10 @@ export function useMascot(
   // — coiled or hanging, all that changes is which column he steps to.
   const ropeSpot = (g: BranchGeometry): { x: number; y: number } => {
     if (verticalRef.current) {
-      return { x: g.endX - PX * 6, y: nowYRef.current - PX * 10 };
+      // The ropes hang around a mountain that can be turned, so his place at
+      // one is wherever it currently faces — not its un-turned column.
+      const x = ringXRef.current ? ringXRef.current(g) : g.endX;
+      return { x: x - PX * 6, y: nowYRef.current - PX * 10 };
     }
     return { x: g.endX + 10, y: g.endY - PX * 10 };
   };
@@ -652,7 +671,7 @@ export function useMascot(
     if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
       placeRef.current(tx, ty, true);
     }
-  }, [geometries, branches]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [geometries, branches, opts?.turnKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Talking phase ──
   const startTalking = useCallback((branchId: string) => {
@@ -721,6 +740,7 @@ export function useMascot(
       if (b.id === avoidRef.current) continue; // burning line — never land on it
       const g = geoMap.get(b.id);
       if (!g) continue;
+      if (verticalRef.current && ringVisibleRef.current && !ringVisibleRef.current(g)) continue;
       const s = scoreBranch(b, g, nX, lastVisited.current, verticalRef.current);
       if (s > bestScore) { bestScore = s; best = b; }
     }

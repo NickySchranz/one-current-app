@@ -18,6 +18,7 @@ import Animated, {
   useAnimatedStyle,
   useDerivedValue,
   useFrameCallback,
+  type SharedValue,
   useSharedValue,
   withDelay,
   withRepeat,
@@ -255,6 +256,41 @@ function MascotOptionsBubble({
 
 /** The rope prompts: one pops on each rope as it takes focus — tapping it
  * opens the full reflect panel. Random per rope per day. */
+/**
+ * One rope's place on the turning mountain. The ropes hang AROUND the rock, so
+ * a rope's x is `sin(angle + turn) · radius` from the route and it fades as it
+ * goes round the back — which is what lets a busy day hold its threads without
+ * squashing them together. Horizontal maps pass `rot: null` and get a plain
+ * group with no per-frame work at all.
+ */
+function RingG({
+  opacity,
+  rot,
+  angle,
+  radius,
+  children,
+}: {
+  opacity: number;
+  rot: SharedValue<number> | null;
+  angle: number;
+  radius: number;
+  children: React.ReactNode;
+}) {
+  const props = useAnimatedProps(() => {
+    if (!rot) return { translateX: 0, opacity };
+    const a = angle + rot.value;
+    const facing = Math.cos(a);
+    // behind the mountain: gone, and not in the way of a tap
+    const seen = facing <= -0.12 ? 0 : Math.min(1, (facing + 0.12) / 0.45);
+    return {
+      translateX: Math.round((Math.sin(a) - Math.sin(angle)) * radius * 2) / 2,
+      opacity: opacity * seen,
+    };
+  }, [rot, angle, radius, opacity]);
+  if (!rot) return <G opacity={opacity}>{children}</G>;
+  return <AnimatedOptionG animatedProps={props}>{children}</AnimatedOptionG>;
+}
+
 /** Where the day's record starts below Now: clear of the five rows of rope
  * names that live between Now and it (see LADDER_* in transpose.ts). */
 const SUMMIT_RECORD_TOP = 140;
@@ -813,6 +849,102 @@ export function LifeTimeline() {
     () => ({ translateY: Math.round(climbSV.value * 0.42 * 2) / 2 }),
     [climbSV],
   );
+  /**
+   * How far the mountain has been TURNED (radians). The ropes hang around it
+   * rather than across a flat face, so turning is what brings the ones round
+   * the back into view — and it is why they never have to squash together.
+   * Lives on the UI thread; `rotRef` mirrors it for the JS side (which rope is
+   * where, where the climber walks to).
+   */
+  const rotSV = useSharedValue(0);
+  const rotRef = useRef(0);
+  const rotQRef = useRef(0);
+  /** The turn, quantized, for the parts of the ROCK that are rebuilt in React:
+   * its edge shape and the marks on its face. ~25 rebuilds per full turn keeps
+   * the silhouette turning with the ropes without rebuilding it per frame. */
+  const [rotQ, setRotQ] = useState(0);
+  const rockRot = rotQ * 0.25;
+  /** Which ropes are in front, for the indicator (JS side, coarse updates). */
+  const [rotTick, setRotTick] = useState(0);
+  const commitRot = useCallback(() => {
+    rotRef.current = rotSV.value;
+    setRotQ(Math.round(rotSV.value / 0.25));
+    setRotTick((k) => k + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shared value is stable
+  }, []);
+  /** Where a rope sits on screen with the face turned as it is — the JS-side
+   * twin of RingG's worklet, for anything that has to walk or point there. */
+  const ringX = useCallback(
+    (g: { endX: number; angle?: number; radius?: number }): number => {
+      if (!vertical || g.angle === undefined || !g.radius) return g.endX;
+      return g.endX + (Math.sin(g.angle + rotRef.current) - Math.sin(g.angle)) * g.radius;
+    },
+    [vertical],
+  );
+  const ringXRef = useRef(ringX);
+  ringXRef.current = ringX;
+
+  /** Angles of the ropes on the ring, so a turn can settle on one of them. */
+  const ropeAngles = useMemo(
+    () =>
+      vertical
+        ? layout.geometries
+            .filter((g) => g.reachesNow && g.inWindow && g.angle !== undefined)
+            .map((g) => ({ id: g.branchId, angle: g.angle as number }))
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- geometry identity is enough
+    [vertical, layout.geometries],
+  );
+  /**
+   * Where "facing the viewer" puts a rope: beside the route, not on it. Dead
+   * centre would lay the rope over the main line, the Now marker and the
+   * climber all at once.
+   */
+  const FRONT_ANGLE = 0.36;
+
+  /** Bring a rope round to the front (used when one takes focus). */
+  const turnToRef = useRef<(id: string, force?: boolean) => void>(() => {});
+  turnToRef.current = (id: string, force = false) => {
+    const r = ropeAngles.find((x) => x.id === id);
+    if (!r) return;
+    // A rope you can already see stays where it is: turning one out from under
+    // the finger that just tapped it would make the map fight the user. Only a
+    // rope round the side gets brought to the front.
+    if (!force && Math.cos(r.angle + rotSV.value) > 0.55) return;
+    const want = FRONT_ANGLE - r.angle;
+    const k = Math.round((rotSV.value - want) / (2 * Math.PI));
+    const target = want + k * 2 * Math.PI;
+    if (Math.abs(target - rotSV.value) < 0.03) return;
+    rotSV.value = reducedMotion
+      ? target
+      : withTiming(target, { duration: 420, easing: Easing.inOut(Easing.quad) });
+    setTimeout(commitRot, reducedMotion ? 0 : 440);
+  };
+
+  const turnSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settleTurnRef = useRef<() => void>(() => {});
+  settleTurnRef.current = () => {
+    if (ropeAngles.length === 0) {
+      commitRot();
+      return;
+    }
+    const rot = rotSV.value;
+    // the rope whose face is squarest to the viewer wins the settle
+    let best = rot;
+    let bestGap = Infinity;
+    for (const r of ropeAngles) {
+      const want = FRONT_ANGLE - r.angle;
+      const k = Math.round((rot - want) / (2 * Math.PI));
+      const target = want + k * 2 * Math.PI;
+      const gap = Math.abs(rot - target);
+      if (gap < bestGap) { bestGap = gap; best = target; }
+    }
+    rotSV.value = reducedMotion
+      ? best
+      : withTiming(best, { duration: 320, easing: Easing.out(Easing.quad) });
+    setTimeout(commitRot, reducedMotion ? 0 : 340);
+  };
+
   /** The mountains beyond this one: the further away, the slower they pass. */
   const farProps = useAnimatedProps(
     () => ({ translateY: Math.round(climbSV.value * 0.2 * 2) / 2 }),
@@ -1082,7 +1214,7 @@ export function LifeTimeline() {
         onPanResponderGrant: (_e, gs) => {
           lastXRef.current = gs.moveX || gs.x0;
           lastYRef.current = gs.moveY || gs.y0;
-          hscrollStartRef.current = scrollXRef.current;
+          hscrollStartRef.current = verticalRef.current ? rotSV.value : scrollXRef.current;
           measureNode(stageRef.current, (x, y) => {
             stagePosRef.current = { x, y };
           });
@@ -1116,11 +1248,19 @@ export function LifeTimeline() {
           }
           if (modeRef.current === "pan") {
             if (verticalRef.current) {
-              // sideways: slide the face, anchored to the drag's start
-              scrollRef.current?.scrollTo({
-                x: Math.max(0, hscrollStartRef.current - gs.dx),
-                animated: false,
-              });
+              // sideways: TURN the face. A drag across the stage is about a
+              // half-turn, so every rope can be brought round without lifting
+              // the finger.
+              rotSV.value =
+                hscrollStartRef.current +
+                (gs.dx / Math.max(1, sizeRef.current.width)) * Math.PI;
+              // step the rock's own shape along with the finger
+              const q = Math.round(rotSV.value / 0.25);
+              if (q !== rotQRef.current) {
+                rotQRef.current = q;
+                rotRef.current = rotSV.value;
+                setRotQ(q);
+              }
               const dy = gs.moveY - lastYRef.current;
               if (dy === 0) return;
               lastYRef.current = gs.moveY;
@@ -1145,6 +1285,11 @@ export function LifeTimeline() {
           }
         },
         onPanResponderRelease: () => {
+          if (verticalRef.current && modeRef.current === "pan") {
+            // Settle so a rope ends up facing the viewer, not half round the
+            // side — and let the JS side know which ropes are in front now.
+            settleTurnRef.current();
+          }
           if (modeRef.current === "dial" && candidateRef.current) {
             // The drag ends here — whatever happens, the tap must not follow.
             blockTapsUntilRef.current = Date.now() + 350;
@@ -1276,17 +1421,20 @@ export function LifeTimeline() {
     if (Platform.OS !== "web") return;
     const el = stageRef.current as unknown as HTMLElement | null;
     if (!el || typeof el.addEventListener !== "function") return;
+    const rect0 = () => el.getBoundingClientRect();
     const onWheel = (e: WheelEvent) => {
       if (verticalRef.current) {
-        // Summit: the vertical wheel climbs through time; sideways scrolling
-        // stays native (it pans the face's columns).
+        // Summit: the vertical wheel climbs through time; a sideways one TURNS
+        // the mountain, bringing the ropes round the back into view.
         if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) {
-          // sideways wheel slides the face (the ScrollView is gesture-dead)
           e.preventDefault();
-          scrollRef.current?.scrollTo({
-            x: Math.max(0, scrollXRef.current + e.deltaX),
-            animated: false,
-          });
+          rotSV.value =
+            rotSV.value - (e.deltaX / Math.max(1, rect0().width)) * Math.PI * 0.6;
+          if (turnSettleRef.current !== null) clearTimeout(turnSettleRef.current);
+          turnSettleRef.current = setTimeout(() => {
+            turnSettleRef.current = null;
+            settleTurnRef.current();
+          }, 160);
           return;
         }
         e.preventDefault();
@@ -1441,18 +1589,9 @@ export function LifeTimeline() {
   // visible band (a super bonk hop, a focus run, a patrol jump), the
   // vertical scroll pans along with his dash. Once per run, never per frame.
   const followPip = useCallback((destX: number, destY: number) => {
-    if (verticalRef.current) {
-      // Summit scrolls sideways: pan the face so the climber stays in view.
-      const vw = sizeRef.current.width;
-      if (vw <= 0) return;
-      const sx = scrollXRef.current;
-      if (destX > sx + 70 && destX < sx + vw - 90) return;
-      const summit = layoutRef.current as SummitLayout;
-      const maxScroll = Math.max(0, (summit.laneSpan ?? vw) + 84 - vw);
-      const x = Math.max(0, Math.min(maxScroll, destX - vw / 2));
-      scrollRef.current?.scrollTo({ x, animated: true });
-      return;
-    }
+    // The summit does not scroll sideways at all: the face turns, and a rope
+    // that takes focus is turned to the front before he walks to it.
+    if (verticalRef.current) return;
     const vh = scrollHRef.current;
     if (vh <= 0) return;
     const sy = scrollYRef.current;
@@ -1480,7 +1619,15 @@ export function LifeTimeline() {
     burn?.branchId ?? null,
     mascotNowY,
     followPip,
-    { vertical, reducedMotion, onClimbEnd: () => retireAllRef.current() },
+    {
+      vertical,
+      reducedMotion,
+      ringX: (g) => ringXRef.current(g),
+      turnKey: rotTick,
+      ringVisible: (g) =>
+        g.angle === undefined || Math.cos(g.angle + rotRef.current) > 0.25,
+      onClimbEnd: () => retireAllRef.current(),
+    },
   );
 
   // Keep reaction ref current so effects below can call it
@@ -1501,6 +1648,26 @@ export function LifeTimeline() {
     if (!g || !g.inWindow) return null;
     return { id, g };
   })();
+  // The mountain turns by itself at ONE moment only: when every rope facing
+  // the viewer has been handled, it brings the next one round — the day's work
+  // arriving rather than having to be hunted for. (It must never turn at any
+  // other time: a rope that moves under the finger makes every tap a miss,
+  // which is what the climber's own patrol used to cause.)
+  useEffect(() => {
+    if (!vertical || ropeAngles.length === 0) return;
+    const unhandled = ropeAngles.filter((r) => {
+      const b = byId.get(r.id);
+      return b && !isClosed(b) && !handledToday(b, now);
+    });
+    if (unhandled.length === 0) return;
+    const facing = (r: { angle: number }) => Math.cos(r.angle + rotRef.current);
+    if (unhandled.some((r) => facing(r) > 0.25)) return; // still work in view
+    // the nearest one round the side, so the turn is the short way
+    const next = unhandled.slice().sort((a, b) => facing(b) - facing(a))[0];
+    const t = setTimeout(() => turnToRef.current(next.id, true), 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handledSig covers the branches
+  }, [vertical, handledSig, rotTick, ropeAngles]);
 
   // ── Token drops: they pop off their threads, then fly into the meter ──
   // Each store coin becomes a waiting token (SVG, over its thread), then a
@@ -1721,7 +1888,9 @@ export function LifeTimeline() {
   // spacer view) so the day dividers run through it. Summit overflows
   // sideways instead: the canvas widens with the rope columns.
   const svgHeight = vertical ? size.height : layout.height + Math.round(bottomInset) + 84;
-  const svgWidth = vertical && sm ? Math.max(size.width, sm.laneSpan + 84) : size.width;
+  // The summit turns instead of scrolling sideways, so its canvas is exactly
+  // the stage: the old `laneSpan + 84` left 84px of phantom horizontal travel.
+  const svgWidth = size.width;
   const previewBranch = preview ? byId.get(preview.branchId) : undefined;
 
   return (
@@ -1939,6 +2108,7 @@ export function LifeTimeline() {
                     // this layer is translated DOWN by the climb, so the
                     // viewport's top edge sits at −climbDist in its coords
                     bandAnchor={-climbDist}
+                    rot={rockRot}
                     tk={tk}
                   />
                   {/* marks on the rock: without them the world can slide all
@@ -1952,6 +2122,7 @@ export function LifeTimeline() {
                     bandBottom={-climbDist + 2.6 * sm.timeLen}
                     bottomY={sm.timeLen + 900 + climbDist}
                     timeLen={sm.timeLen}
+                    rot={rockRot}
                     tk={tk}
                   />
                   {/* the way still to go, drawn on the rock. It stops where he
@@ -2196,7 +2367,13 @@ export function LifeTimeline() {
                     : 1;
                 const mascotHighlight = mascotActive && branch.id === mascot.pendingBranchId;
                 return (
-                  <G key={g.branchId} opacity={lineOpacity}>
+                  <RingG
+                    key={g.branchId}
+                    opacity={lineOpacity}
+                    rot={vertical && g.reachesNow ? rotSV : null}
+                    angle={g.angle ?? 0}
+                    radius={g.radius ?? 0}
+                  >
                   <BranchLine
                     burning={burn?.branchId === g.branchId && !reducedMotion}
                     key={undefined}
@@ -2209,6 +2386,12 @@ export function LifeTimeline() {
                     // thread's merge point sits on the main line, which does
                     // not move — so neither may its curve.
                     climbOffset={vertical && g.reachesNow ? climbSV : null}
+                    // round the back of the mountain: not there to be tapped
+                    interactive={
+                      !vertical ||
+                      g.angle === undefined ||
+                      Math.cos(g.angle + rotRef.current) > -0.05
+                    }
                     timeLen={sm?.timeLen ?? 0}
                     wave={vertical ? null : calmCurrent.wave}
                     // No wave on the summit: the route is straight and still,
@@ -2240,7 +2423,7 @@ export function LifeTimeline() {
                     onSelectMoment={selectBranchMoment}
                     onSelectMergePoint={selectMergePoint}
                   />
-                  </G>
+                  </RingG>
                 );
               })}
 
@@ -2444,6 +2627,12 @@ export function LifeTimeline() {
                   (which lives above him) never collides with them. */}
               {/* summit: the prompt pops on the focused rope itself */}
               {grabPrompt && (
+                <RingG
+                  opacity={1}
+                  rot={vertical ? rotSV : null}
+                  angle={grabPrompt.g.angle ?? 0}
+                  radius={grabPrompt.g.radius ?? 0}
+                >
                 <GrabPrompt
                   key={grabPrompt.id}
                   x={grabPrompt.g.endX}
@@ -2468,6 +2657,7 @@ export function LifeTimeline() {
                   tk={tk}
                   reducedMotion={reducedMotion}
                 />
+                </RingG>
               )}
 
               {!vertical && showMascot && mascot.visible && operation.kind === "idle" &&
@@ -2800,6 +2990,61 @@ export function LifeTimeline() {
             </G>
           </Svg>
         </View>
+        )}
+
+        {/* The ring of threads: one mark per rope around the mountain, the ones
+            facing you filled. It is always there, so it is always visible that
+            there are more threads than the face is showing — and tapping a
+            mark turns that one to the front. */}
+        {vertical && ropeAngles.length > 0 && (
+          <View
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 10,
+              alignItems: "center",
+              zIndex: 6,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 7,
+                paddingVertical: 7,
+                paddingHorizontal: 11,
+                borderRadius: 999,
+                backgroundColor: alpha(tk.bg, 0.82),
+              }}
+            >
+              {ropeAngles.map((r) => {
+                const facing = Math.cos(r.angle + rotRef.current);
+                const front = facing > 0.55;
+                const b = byId.get(r.id);
+                const colour = b ? branchColor(b, theme) : tk.inkFaint;
+                return (
+                  <Pressable
+                    key={r.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={t("Turn the mountain to this rope")}
+                    onPress={guarded(() => turnToRef.current(r.id))}
+                    hitSlop={8}
+                  >
+                    <View
+                      style={{
+                        width: front ? 9 : 6,
+                        height: front ? 9 : 6,
+                        borderRadius: 999,
+                        backgroundColor: colour,
+                        opacity: front ? 1 : facing > -0.2 ? 0.5 : 0.28,
+                      }}
+                    />
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
         )}
 
         {/* One round +, unmistakable and wordless, floating on the water. */}

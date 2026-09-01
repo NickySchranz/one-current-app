@@ -143,6 +143,14 @@ const pt = await page.evaluate(() => {
   for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
     const len = el.getTotalLength();
     if (!len) continue;
+    // only a rope facing the viewer: the ones round the back of the mountain
+    // are drawn away to nothing and take no taps. The opacity that matters is
+    // the product up the whole ancestor chain (the ring group is not the hit
+    // path's immediate parent).
+    let o = 1;
+    for (let n = el; n && n.tagName !== "svg"; n = n.parentElement)
+      o *= Number(getComputedStyle(n).opacity);
+    if (o < 0.6) continue;
     const m = el.getScreenCTM();
     for (let f = 0.05; f < 0.96; f += 0.06) {
       const p = el.getPointAtLength(len * f);
@@ -320,6 +328,24 @@ await page.close();
     topsLeft.length === 1 && topsLeft.every((t) => t < 0),
     `the one rope left to climb starts out of view (${topsLeft.length} anchor(s), top ${Math.round(topsLeft[0] ?? 9999)})`,
   );
+  const ropePoint = () =>
+    p2.evaluate(() => {
+      for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+        const len = el.getTotalLength();
+        if (len < 80) continue;
+        const a = el.getPointAtLength(0);
+        const b = el.getPointAtLength(len);
+        if (Math.abs(len - Math.abs(b.y - a.y)) > 3) continue;
+        const m = el.getScreenCTM();
+        for (let f = 0.05; f < 0.96; f += 0.04) {
+          const q = el.getPointAtLength(len * f);
+          const x = m.a * q.x + m.c * q.y + m.e;
+          const y = m.b * q.x + m.d * q.y + m.f;
+          if (y > 130 && y < 690 && x > 30 && x < 1200) return { x, y };
+        }
+      }
+      return null;
+    });
   const pt2 = await p2.evaluate(() => {
     // the hanging rope: a STRAIGHT vertical hit path (an open cliff rope is
     // M..L; closed history keeps its curved time geometry)
@@ -341,8 +367,11 @@ await page.close();
   });
   check(!!pt2, "found the last hanging rope");
   await p2.mouse.click(pt2.x, pt2.y);
-  await p2.waitForTimeout(500);
-  await p2.mouse.click(pt2.x, pt2.y);
+  // tapping a rope that was round the side turns it to face you, so it has
+  // moved: the second tap goes where it is now, as a hand would
+  await p2.waitForTimeout(900);
+  const pt2b = await ropePoint();
+  await p2.mouse.click((pt2b ?? pt2).x, (pt2b ?? pt2).y);
   await p2.waitForTimeout(1200);
   // the sheet is up now: its inset must not have moved the time frame, and
   // focusing the rope must not have slid the mountain sideways
@@ -370,13 +399,17 @@ await page.close();
     // the mountain's own motion, measured on the snow cap itself (the layer
     // transform lives on an animated group whose attribute the renderer may
     // write in different shapes — the rendered box cannot lie)
-    const cap = [...(svg?.querySelectorAll('path[fill="#ffffff"]') ?? [])].find(
-      (el) => el.getAttribute("opacity") === "0.65",
-    );
+    // resolved per frame: React can replace the node, and a detached one
+    // reports a zero-sized box (which reads as "nothing moved")
+    const findCap = () =>
+      [...document.querySelectorAll('path[fill="#ffffff"]')].find(
+        (el) => el.getAttribute("opacity") === "0.65",
+      );
     const nowLabel = [...document.querySelectorAll("text")].find(
       (el) => el.textContent === "Now",
     );
     const read = () => {
+      const cap = findCap();
       window.__cam.push([
         cap ? Math.round(cap.getBoundingClientRect().top) : 0,
         nowLabel ? Math.round(nowLabel.getBoundingClientRect().top) : 0,
@@ -514,6 +547,90 @@ await page.close();
   await p2.screenshot({ path: "/tmp/summit-06-topout.png" });
   await p2.close();
 }
+
+// ── 7. the ring: the mountain turns, and every thread is accounted for ──
+{
+  const p2 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  p2.on("pageerror", (e) => errors.push(e.message));
+  await p2.addInitScript(() => {
+    localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+    localStorage.setItem("one-current-tutorial-v1", "done");
+    localStorage.setItem("one-current-pro", "1");
+    localStorage.setItem("one-current-theme", "summit");
+  });
+  await p2.goto("http://localhost:4179/", { waitUntil: "networkidle" });
+  await p2.waitForTimeout(1500);
+  await p2.getByRole("button", { name: "More" }).first().click();
+  await p2.waitForTimeout(500);
+  await p2.getByRole("button", { name: "Load example threads" }).click();
+  await p2.waitForTimeout(900);
+  await p2.reload({ waitUntil: "networkidle" });
+  await p2.waitForTimeout(2600);
+  // the ring of threads: an indicator with one mark per rope, always there
+  const marks = await p2.evaluate(
+    () => document.querySelectorAll('[aria-label="Turn the mountain to this rope"]').length,
+  );
+  const openRopes = await p2.evaluate(() => {
+    const key = "one-current/table/branches";
+    const rows = JSON.parse(localStorage.getItem(key) ?? "[]");
+    return rows.filter(
+      (b) => b.status !== "merged" && b.status !== "converted-to-project" && !b.mergeDate,
+    ).length;
+  });
+  check(
+    marks === openRopes && marks > 0,
+    `the ring shows every thread, in view or not (${marks} marks for ${openRopes} ropes)`,
+  );
+  // turning the mountain brings different ropes to the front
+  /** Where each visible rope sits, and how visible it is. */
+  const facing = () =>
+    p2.evaluate(() => {
+      const out = [];
+      for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+        const len = el.getTotalLength();
+        if (len < 80) continue;
+        const a = el.getPointAtLength(0);
+        const b = el.getPointAtLength(len);
+        if (Math.abs(len - Math.abs(b.y - a.y)) > 3) continue;
+        const m = el.getScreenCTM();
+        const o = Number(getComputedStyle(el.parentElement ?? el).opacity);
+        out.push({ x: Math.round(m.a * a.x + m.c * a.y + m.e), o: Math.round(o * 100) / 100 });
+      }
+      return out.sort((p, q) => p.x - q.x);
+    });
+  const before = await facing();
+  const turnFrom = await p2.evaluate(() => {
+    const xs = [];
+    for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+      const len = el.getTotalLength();
+      if (len < 80) continue;
+      const a = el.getPointAtLength(0), b = el.getPointAtLength(len);
+      if (Math.abs(len - Math.abs(b.y - a.y)) > 3) continue;
+      const m = el.getScreenCTM();
+      xs.push(m.a * a.x + m.c * a.y + m.e);
+    }
+    for (let x = 40; x < window.innerWidth - 80; x += 6)
+      if (xs.every((r) => Math.abs(r - x) > 28)) return x;
+    return 40;
+  });
+  await p2.mouse.move(turnFrom, 560);
+  await p2.mouse.down();
+  for (let i = 1; i <= 22; i++) await p2.mouse.move(turnFrom + i * 24, 560);
+  await p2.mouse.up();
+  await p2.waitForTimeout(1000);
+  const after = await facing();
+  // at least a couple of ropes have swung a good way round
+  let moved = 0;
+  const bx = before.map((r) => r.x);
+  for (const r of after) if (!bx.some((x) => Math.abs(x - r.x) < 24)) moved++;
+  check(
+    moved >= 2,
+    `turning the mountain brings other ropes round (${moved} of ${after.length} in new places)`,
+  );
+  await p2.screenshot({ path: "/tmp/summit-07-turned.png" });
+  await p2.close();
+}
+
 await browser.close();
 server.close();
 

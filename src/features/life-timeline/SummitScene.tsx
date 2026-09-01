@@ -46,6 +46,19 @@ function seeded(i: number, salt: number): number {
  * rock) sampled every ~60px with rocky jitter — diagonal and irregular,
  * never square.
  */
+/**
+ * The rock's surface, poking in or out at a given angle around it and depth
+ * down it. The silhouette's edge is this function sampled at the angle facing
+ * the edge — so when the mountain is turned, the edge changes shape: that is
+ * what makes it read as a solid being turned rather than a flat cut-out.
+ */
+function surfaceBulge(theta: number, y: number): number {
+  return (
+    0.6 * Math.sin(3 * theta + y / 230) +
+    0.4 * Math.sin(5 * theta - y / 370 + 1.7)
+  );
+}
+
 function flank(
   routeX: number,
   /** The summit tip — the profile's origin, wherever the band starts. */
@@ -57,6 +70,8 @@ function flank(
   side: 1 | -1,
   salt: number,
   scale: number,
+  /** How far the mountain is turned (radians). */
+  rot: number,
 ): { x: number; y: number }[] {
   const pts: { x: number; y: number }[] = [];
   // Sampled on an ABSOLUTE altitude grid (not `span / steps`): when the drawn
@@ -66,10 +81,15 @@ function flank(
   const first = Math.ceil(fromY / GRID) * GRID;
   for (let y = first; y < toY; y += GRID) {
     const hw = mountainHalfWidth(y - peakY, faceHalf, scale);
-    // seeded by ALTITUDE, so the same rock keeps the same edge for ever
+    // seeded by ALTITUDE, so the same rock keeps the same edge for ever…
     const k = Math.round(y / GRID);
-    const jx = (seeded(k, salt) - 0.5) * Math.min(14, hw * 0.12);
     const jy = (seeded(k, salt + 1) - 0.5) * 16;
+    // …and shaped by the rock's surface at the angle now facing this edge, so
+    // turning the mountain turns its outline with it
+    const edgeAngle = rot + (side === 1 ? Math.PI / 2 : -Math.PI / 2);
+    const jx =
+      (seeded(k, salt) - 0.5) * Math.min(10, hw * 0.08) +
+      surfaceBulge(edgeAngle + k * 0.21, y) * Math.min(26, hw * 0.09);
     pts.push({
       x: Math.round(routeX + side * (hw + jx)),
       y: Math.round(y + jy),
@@ -104,6 +124,7 @@ export function FaceTexture({
   faceHalf,
   faceLeft,
   timeLen,
+  rot,
   tk,
 }: {
   routeX: number;
@@ -117,6 +138,8 @@ export function FaceTexture({
   /** How far the rock reaches right / left (see faceHalfFor). */
   faceHalf: number;
   faceLeft: number;
+  /** How far the mountain is turned (radians, quantized by the stage). */
+  rot: number;
   /** The stage height — the profile's yardstick (see mountainHalfWidth). */
   timeLen: number;
   tk: ThemeTokens;
@@ -138,8 +161,14 @@ export function FaceTexture({
       const hwL = mountainHalfWidth(y - peakY, faceLeft, timeLen) * 0.82 - 12;
       const hw = hwR;
       if (hwR < 14) continue;
-      // marks live across the whole rock, which is wider on the left
-      const span = (t: number) => routeX - hwL + t * (hwL + hwR);
+      // Marks sit at an ANGLE around the rock, so turning slides them across
+      // the face and bunches them toward the edge — the same mapping the ropes
+      // use, which is what makes the face itself read as turning.
+      const span = (t: number) => {
+        const theta = (t - 0.5) * 2.4 + rot;
+        const reach = Math.sin(theta) >= 0 ? hwR : hwL;
+        return routeX + Math.sin(theta) * reach;
+      };
       for (let k = 0; k < 2; k++) {
         const j = i + k;
         const cx = span(seeded(j, 71));
@@ -147,7 +176,7 @@ export function FaceTexture({
         // A seam runs rightward from where it starts, so it has to be cut to
         // the rock remaining at that altitude — otherwise strata stick out
         // into the sky, which is invisible only while the rock is a wall.
-        const room = routeX + hw - cx;
+        const room = routeX + hwR - cx;
         const len = Math.round(Math.min(34 + seeded(j, 73) * 96, Math.max(0, room)));
         if (len < 12) continue;
         const tilt = Math.round((seeded(j, 74) - 0.5) * 14);
@@ -161,7 +190,7 @@ export function FaceTexture({
       }
     }
     return { seams, grit };
-  }, [routeX, peakY, start, end, faceHalf, faceLeft, timeLen]);
+  }, [routeX, peakY, start, end, faceHalf, faceLeft, timeLen, rot]);
   return (
     <G pointerEvents="none">
       <Path d={seams} stroke={tk.inkSoft} strokeWidth={1.2} opacity={0.3} fill="none" />
@@ -325,6 +354,7 @@ export function MountainFace({
   timeLen,
   depth,
   bandAnchor,
+  rot,
   tk,
 }: {
   routeX: number;
@@ -340,6 +370,8 @@ export function MountainFace({
   /** The layer coordinate that the top of the viewport currently sits at —
    * i.e. minus how far this layer has been translated down (the climb). */
   bandAnchor?: number;
+  /** How far the mountain is turned (radians, quantized by the stage). */
+  rot: number;
   tk: ThemeTokens;
 }) {
   // A day's mountain is thousands of px tall and the browser re-rasterizes the
@@ -355,8 +387,8 @@ export function MountainFace({
     // the apex only belongs to the path when the peak is in the band
     const apex = drawTop <= peakY + 1;
     const top = apex ? peakY : drawTop;
-    const left = flank(routeX, peakY, top, drawBottom, faceLeft, -1, 31, timeLen);
-    const right = flank(routeX, peakY, top, drawBottom, faceHalf, 1, 33, timeLen);
+    const left = flank(routeX, peakY, top, drawBottom, faceLeft, -1, 31, timeLen, rot);
+    const right = flank(routeX, peakY, top, drawBottom, faceHalf, 1, 33, timeLen, rot);
     let d = `M ${left[left.length - 1].x} ${drawBottom}`;
     for (let i = left.length - 1; i >= 0; i--) d += ` L ${left[i].x} ${left[i].y}`;
     if (apex) {
@@ -368,14 +400,14 @@ export function MountainFace({
     }
     for (const p of right) d += ` L ${p.x} ${p.y}`;
     return d + ` L ${right[right.length - 1].x} ${drawBottom} Z`;
-  }, [routeX, peakY, drawTop, drawBottom, faceHalf, faceLeft, timeLen]);
+  }, [routeX, peakY, drawTop, drawBottom, faceHalf, faceLeft, timeLen, rot]);
   // the snow cap: the top ~110px of both flanks, closed with a ragged hem
   const cap = useMemo(() => {
     // a fifth of the stage: a cap you can see, at any stage size
     const drop = Math.round(0.22 * timeLen);
     const capBottom = peakY + drop;
-    const left = flank(routeX, peakY, peakY, capBottom, faceLeft, -1, 31, timeLen);
-    const right = flank(routeX, peakY, peakY, capBottom, faceHalf, 1, 33, timeLen);
+    const left = flank(routeX, peakY, peakY, capBottom, faceLeft, -1, 31, timeLen, rot);
+    const right = flank(routeX, peakY, peakY, capBottom, faceHalf, 1, 33, timeLen, rot);
     let d = `M ${left[left.length - 1].x} ${capBottom}`;
     for (let i = left.length - 1; i >= 0; i--) d += ` L ${left[i].x} ${left[i].y}`;
     d += ` L ${routeX} ${Math.round(peakY)}`;
@@ -387,7 +419,7 @@ export function MountainFace({
       d += ` L ${Math.round(rx + (lx - rx) * t)} ${Math.round(capBottom + (seeded(i, 35) - 0.2) * (drop * 0.22))}`;
     }
     return d + " Z";
-  }, [routeX, peakY, faceHalf, faceLeft, timeLen]);
+  }, [routeX, peakY, faceHalf, faceLeft, timeLen, rot]);
   // The rock has to read AGAINST the sky now that its flanks are in frame: a
   // near-background fill made the silhouette invisible except as a hairline.
   const rock = mix(tk.inkFaint, tk.bg, 34);

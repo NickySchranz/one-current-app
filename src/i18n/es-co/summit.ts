@@ -21,6 +21,9 @@ export const summit: Record<string, string> = {
   "Have Pip steady this rope": "Que Pip asegure esta cuerda",
   "Full send: Pip steadies every rope": "De una: Pip asegura todas las cuerdas",
 
+  // the ring of threads
+  "Turn the mountain to this rope": "Gira la montaña hasta esta cuerda",
+
   // the map + help
   "New rope": "Nueva cuerda",
   "This rope": "Esta cuerda",

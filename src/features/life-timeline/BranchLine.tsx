@@ -107,6 +107,9 @@ type Props = {
    * he holds still, the mountain travels.
    */
   climbOffset?: SharedValue<number> | null;
+  /** False when this line is round the back of the summit's mountain: it is
+   * drawn away to nothing, so it must not answer taps either. */
+  interactive?: boolean;
 };
 
 /** Cheap stable hash → [0, 2π): every rope sways on its own phase. */
@@ -144,6 +147,7 @@ export const BranchLine = memo(function BranchLine({
   timeLen = 0,
   routeWave = null,
   climbOffset = null,
+  interactive = true,
 }: Props) {
   const vertical = orientation === "vertical";
   const t = useT();
@@ -397,7 +401,8 @@ export const BranchLine = memo(function BranchLine({
         stroke="transparent"
         strokeWidth={22}
         fill="none"
-        onPress={select}
+        pointerEvents={interactive ? "auto" : "none"}
+        onPress={interactive ? select : undefined}
         {...(Platform.OS === "web" && dialTouch
           ? ({ onPointerDown: dialTouch } as object)
           : null)}

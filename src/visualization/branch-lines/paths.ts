@@ -48,6 +48,11 @@ export type BranchGeometry = {
    * itself is off the face — only the coil remains. Lags `coiled` by the
    * length of his climb. */
   ropeGone?: boolean;
+  /** Summit only: where this rope hangs AROUND the mountain (radians, 0 =
+   * square-on to the viewer). Turning the face adds to it. */
+  angle?: number;
+  /** Summit only: how far out from the route that angle sits. */
+  radius?: number;
 };
 
 export type TimelineMetrics = {

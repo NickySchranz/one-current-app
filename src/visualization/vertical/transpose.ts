@@ -383,19 +383,24 @@ export function buildSummitLayout(
   // translate that strip; only the mountain and the ropes themselves move.
   const openLabelY = Math.round(nowScreenY + 44);
 
-  // Every rope must hang ON the rock — at any stage width, phone included.
-  // The lane spread is squeezed to the mountain's half-width at the height he
-  // works them (Now), which keeps the columns distinct instead of clamping
-  // several of them onto the same line.
+  // The ropes hang AROUND the mountain, not across a flat face: each takes an
+  // angle on it, and the face can be turned (see `rotate` on the stage) to
+  // bring the ones round the back into view. A flat spread had to squash them
+  // together as soon as there were more than a handful; an angle never does —
+  // the turn is what makes room.
   const peakYRest = nowScreenY - ladder.peakAbove;
-  const hwNow = Math.max(46, mountainHalfWidth(nowScreenY - peakYRest, faceHalf, timeLen) - 34);
-  const widestLane = Math.max(
-    1,
-    ...base.geometries
-      .filter((g) => g.reachesNow)
-      .map((g) => Math.abs(g.laneY - base.bandY)),
-  );
-  const squeeze = Math.min(1, hwNow / widestLane);
+  const faceRadius = Math.max(46, mountainHalfWidth(nowScreenY - peakYRest, faceHalf, timeLen) - 34);
+  /** Degrees between neighbouring ropes, wrapped into one full turn. */
+  const spacing = openOrder.length > 0 ? Math.min(42, 360 / openOrder.length) : 42;
+  const angleOf = (id: string) => {
+    const i = columnOrder.indexOf(id);
+    if (i < 0) return 0;
+    // Centred on the front (a quiet day needs no turning at all) but offset by
+    // half a step, so no rope ever hangs exactly on the route — it would sit
+    // on the main line, the Now marker and the climber all at once.
+    const k = i - (columnOrder.length - 1) / 2 + 0.5;
+    return ((k * spacing) / 180) * Math.PI;
+  };
 
   const geometries: BranchGeometry[] = base.geometries.map((g) => {
     if (g.reachesNow) {
@@ -413,15 +418,14 @@ export function buildSummitLayout(
         : // still waiting: hung from far above the summit, so its anchor is
           // never in frame and the rope crosses his level at any climb offset
           nowScreenY - ladder.peakAbove - 120 - Math.round(seeded(seedBase, 61) * 90);
-      const laneOffset = (g.laneY - base.bandY) * squeeze;
-      // A conquered ledge sits higher, where the face is narrower — hold it
-      // inside the rock there too.
-      const hw = coiled
-        ? mountainHalfWidth(ay - peakYRest, faceHalf, timeLen) - 30
-        : hwNow;
-      const ax = Math.round(
-        base.mainY + Math.sign(laneOffset || 1) * Math.min(Math.abs(laneOffset), Math.max(24, hw)),
-      );
+      // Its place on the ring, un-turned. The stage adds the turn on the UI
+      // thread (x = routeX + sin(angle + rot) · radius), so this is where it
+      // sits when the face is square-on to the viewer.
+      const angle = angleOf(g.branchId);
+      const radius = coiled
+        ? Math.max(30, mountainHalfWidth(ay - peakYRest, faceHalf, timeLen) - 30)
+        : faceRadius;
+      const ax = Math.round(base.mainY + Math.sin(angle) * radius);
       // the free end runs off below the screen: a rope passes right by him at
       // the Now line (which is where he takes hold of it) and keeps going, so
       // no rope end is ever seen swinging about mid-climb
@@ -437,6 +441,8 @@ export function buildSummitLayout(
         endY: Math.round(ay), // the anchor: a cliff ledge on the face
         forkVisible: false,
         laneX: ax,
+        angle,
+        radius,
         // Names are centred on their column and ~140px wide, so a column near
         // an edge would push its name off the screen: hold it inside the stage.
         labelX: Math.max(74, Math.min(opts.stageWidth - 74, ax)),
