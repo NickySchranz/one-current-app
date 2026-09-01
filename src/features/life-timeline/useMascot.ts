@@ -48,12 +48,6 @@ export type MascotState = {
   showReaction: (text: string) => void;
   focusBranch: (branchId: string) => void;
   /**
-   * Summit: run/climb to the given rest point (the ledge just earned).
-   * Fired after each answered rope so the ascent is watched, not implied;
-   * patrol resumes on its own after a beat at the ledge.
-   */
-  climbTo: (x: number, y: number) => void;
-  /**
    * Summit: hold position and CLIMB for `ms` — hands over hand, no travel.
    * On the summit the climber never moves; the mountain slides down past him,
    * so the ascent he performs is a gait, not a journey.
@@ -283,13 +277,18 @@ export function useMascot(
    * endpoint-past-Now cull that only makes sense on a horizontal map.
    * `onClimbEnd` fires when a climb to the rest point lands — the summit
    * retires the rope he just topped out on. */
-  opts?: { vertical?: boolean; onClimbEnd?: () => void },
+  opts?: { vertical?: boolean; reducedMotion?: boolean; onClimbEnd?: () => void },
 ): MascotState {
   const lang = getLang(language);
   const verticalRef = useRef(opts?.vertical ?? false);
   verticalRef.current = opts?.vertical ?? false;
   const onClimbEndRef = useRef(opts?.onClimbEnd);
   onClimbEndRef.current = opts?.onClimbEnd;
+  /** Comfort setting: he keeps his place and his poses, but nothing travels or
+   * loops. On the summit he is the subject of the whole map — hiding him left
+   * a mountain with nobody on it and a scene that slid for no visible reason. */
+  const stillRef = useRef(opts?.reducedMotion ?? false);
+  stillRef.current = opts?.reducedMotion ?? false;
   const langRef = useRef(lang);
   langRef.current = lang;
   // Stable refs for latest values
@@ -401,7 +400,6 @@ export function useMascot(
 
   const jumpRef = useRef<() => void>(() => {});
   const focusBranchRef = useRef<(id: string) => void>(() => {});
-  const climbToRef = useRef<(x: number, y: number) => void>(() => {});
 
   // The only door back to patrol. While the user holds a thread (or a panel
   // is open, or they browse the past) the jump is parked, not scheduled —
@@ -494,6 +492,12 @@ export function useMascot(
    */
   const glideRun = useCallback(
     (toX: number, toY: number, onDone: () => void) => {
+      if (stillRef.current) {
+        panShiftRef.current = { x: 0, y: 0 };
+        placeRef.current(toX, toY, true);
+        onDone();
+        return;
+      }
       const from = posRef.current;
       const dx = toX - from.x;
       const dy = toY - from.y;
@@ -757,12 +761,14 @@ export function useMascot(
         // like any other jump — he keeps heading for Now, not for a stale x.
         jumpDestRef.current = { x: tx, y: ty, branchId: "__now__" };
         setFrame('RUN_A');
-        runWaypoints(makeZigWaypoints(cur.x, cur.y, tx, ty, 2, 24), () => {
+        const home = () => {
           jumpDestRef.current = null;
           phase.current = 'idle';
           setFrame('IDLE_A');
           say();
-        }, 0.18);
+        };
+        if (verticalRef.current) glideRun(tx, ty, home);
+        else runWaypoints(makeZigWaypoints(cur.x, cur.y, tx, ty, 2, 24), home, 0.18);
       } else {
         phase.current = 'idle';
         setFrame('IDLE_A');
@@ -840,6 +846,7 @@ export function useMascot(
   useEffect(() => {
     let s = false;
     const id = setInterval(() => {
+      if (stillRef.current) return;
       if (phase.current === 'idle') { setFrame(s ? 'IDLE_B' : 'IDLE_A'); s = !s; }
     }, 380);
     return () => clearInterval(id);
@@ -933,11 +940,9 @@ export function useMascot(
     jumpDestRef.current = { x: toX, y: toY, branchId };
 
     const cur = posRef.current;
-    // 2 waypoints for a snappier focus-run, slightly faster
-    const wps = makeZigWaypoints(cur.x, cur.y, toX, toY, 2, 30);
     phase.current = 'jumping';
     setFrame('RUN_A');
-    runWaypoints(wps, () => {
+    const land = () => {
       // Use live geometry in case timeline was panned
       const liveGeo = geometriesRef.current.find(g => g.branchId === branchId);
       const live = liveGeo ? ropeSpotRef.current(liveGeo) : null;
@@ -974,62 +979,14 @@ export function useMascot(
           scheduleJump(2000 + Math.random() * 1500);
         }, 350);
       }, 1800);
-    }, 0.20);
-  }, [fadeBubble, runWaypoints, lang, scheduleJump]); // eslint-disable-line react-hooks/exhaustive-deps
+    };
+    // The summit never zig-zags: the zig is perpendicular to travel, which on
+    // a vertical map means VERTICAL — and he holds one altitude all day.
+    if (verticalRef.current) glideRun(toX, toY, land);
+    else runWaypoints(makeZigWaypoints(cur.x, cur.y, toX, toY, 2, 30), land, 0.2);
+  }, [fadeBubble, runWaypoints, glideRun, lang, scheduleJump]); // eslint-disable-line react-hooks/exhaustive-deps
   focusBranchRef.current = focusBranch;
 
-  // ── Climb to the ledge just earned (summit) ──
-  // Marked as chilling with a "__now__" destination so the pan-tracking
-  // effect folds any mid-climb pan into the run, exactly like the walk to
-  // Now — because that is what this is: the rest point moved up a ledge.
-  const climbTo = useCallback((x: number, y: number) => {
-    if (superBonkActiveRef.current) return; // the sweep owns him until it ends
-    // No held-rope guard: this only ever fires after that rope was answered —
-    // the climb IS the answer's payoff, even while its sheet is still up.
-    if (viewingIntegratedRef.current) return;
-    // Already climbing to this very spot (e.g. a nowTick layout rebuild
-    // re-fired the tracker mid-run): let the run finish — a restart stutters.
-    const dest = jumpDestRef.current;
-    if (
-      phase.current === 'jumping' &&
-      dest?.branchId === "__now__" &&
-      Math.abs(dest.x - x) < 1 &&
-      Math.abs(dest.y - y) < 1
-    ) {
-      return;
-    }
-    clearTimer();
-    cancelRaf();
-    chillingRef.current = true;
-    inspectedId.current = null;
-    setInspectedIdState(null);
-    setPendingIdState(null);
-    setArrivedIdState(null);
-    fadeBubble(0, 120);
-    phase.current = 'jumping';
-    jumpDestRef.current = { x, y, branchId: "__now__" };
-    setFrame('RUN_A');
-    const cur = posRef.current;
-    const land = () => {
-      const dest = jumpDestRef.current;
-      placeRef.current(dest?.x ?? x, dest?.y ?? y, true);
-      jumpDestRef.current = null;
-      phase.current = 'idle';
-      setFrame('LAND_A');
-      // He is standing on the ledge: the rope he just topped out on can
-      // leave the face now.
-      onClimbEndRef.current?.();
-      timerRef.current = setTimeout(() => {
-        setFrame('IDLE_A');
-        scheduleJump(2200 + Math.random() * 1200);
-      }, 340);
-    };
-    // Summit: bound up the rope in hops (the world drops in bursts under
-    // him); horizontal themes keep the walking run.
-    if (verticalRef.current) glideRun(x, y, land);
-    else runWaypoints(makeZigWaypoints(cur.x, cur.y, x, y, 1, 10), land, 0.22);
-  }, [fadeBubble, runWaypoints, glideRun, scheduleJump]); // eslint-disable-line react-hooks/exhaustive-deps
-  climbToRef.current = climbTo;
 
   /** The climbing gait, in place, for as long as the mountain is moving. */
   const climbInPlace = useCallback((ms: number) => {
@@ -1051,6 +1008,13 @@ export function useMascot(
     clearTimer();
     fadeBubble(0, 120);
     setFrame('CLIMB_A');
+    if (stillRef.current) {
+      timerRef.current = setTimeout(() => {
+        setFrame('IDLE_A');
+        scheduleJump(2200);
+      }, Math.min(600, ms));
+      return;
+    }
     const t0 = performance.now();
     let gait = 0;
     const beat = () => {
@@ -1062,15 +1026,35 @@ export function useMascot(
       } else {
         setFrame('LAND_A');
         timerRef.current = setTimeout(() => {
-          setFrame('IDLE_A');
-          scheduleJump(2200 + Math.random() * 1200);
+          // Back to the route once the rock has arrived: he answered from the
+          // rope's column, and the summit — when it comes — is on the route.
+          const tx = nowXRef.current - PX * 12 - 10;
+          const ty = nowYRef.current - PX * 10;
+          const settle = () => {
+            jumpDestRef.current = null;
+            phase.current = 'idle';
+            setFrame('IDLE_A');
+            scheduleJump(2200 + Math.random() * 1200);
+          };
+          if (Math.abs(posRef.current.x - tx) > 24) {
+            inspectedId.current = null;
+            setInspectedIdState(null);
+            setArrivedIdState(null);
+            chillingRef.current = true;
+            phase.current = 'jumping';
+            jumpDestRef.current = { x: tx, y: ty, branchId: "__now__" };
+            setFrame('RUN_A');
+            glideRun(tx, ty, settle);
+          } else {
+            settle();
+          }
         }, 320);
       }
     };
     cancelRaf();
     rafRef.current = requestAnimationFrame(beat);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs only
-  }, [fadeBubble, scheduleJump]);
+  }, [fadeBubble, glideRun, scheduleJump]);
 
   // ── Bootstrap ──
   useEffect(() => {
@@ -1177,7 +1161,7 @@ export function useMascot(
     pendingBranchId: pendingIdState,
     arrivedBranchId: arrivedIdState,
     arrivedVia,
-    onPress, showReaction, focusBranch, climbTo, climbInPlace, superBonk,
+    onPress, showReaction, focusBranch, climbInPlace, superBonk,
     phrases: lang, visible, born,
   };
 }

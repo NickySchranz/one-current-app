@@ -108,9 +108,13 @@ export function useBranchStrokes(opts: {
   } = opts;
 
   const riding = wave != null && !reducedMotion && (attachStart || attachEnd);
+  // A summit rope is a straight vertical line thousands of px long: at the
+  // default 6px step that is ~740 points rebuilt every tick, per rope, and the
+  // sway looks identical at a third of the resolution. Squiggling threads on
+  // the horizontal maps are short and curved, so they keep the fine step.
   const pts = useMemo<SamplePoint[]>(
-    () => (trembling || riding ? samplePath(basePath) : []),
-    [trembling, riding, basePath],
+    () => (trembling || riding ? samplePath(basePath, mode === "sway" ? 20 : 6) : []),
+    [trembling, riding, basePath, mode],
   );
   const total = pts.length > 0 ? pts[pts.length - 1].s : 0;
 

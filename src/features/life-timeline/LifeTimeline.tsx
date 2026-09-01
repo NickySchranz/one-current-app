@@ -30,7 +30,7 @@ import { useLayoutStore } from "@/stores/layout-store";
 import { measureNode } from "@/ui/measure";
 import { setWalkthroughPoint, useWalkthroughTarget } from "@/features/tutorial/targets";
 import { buildTimelineLayout } from "@/visualization/main-line/layout";
-import { buildSummitLayout, dateToScreenY, daySeedOrder, LEDGE_Y, type SummitLayout } from "@/visualization/vertical/transpose";
+import { buildSummitLayout, dateToScreenY, daySeedOrder, SUMMIT_RAIL_W, type SummitLayout } from "@/visualization/vertical/transpose";
 import { themeOrientation } from "@/visualization/theme";
 import { generateTicks, dateToX, addDays } from "@/visualization/zoom/time-scale";
 import { describeTimeline } from "@/visualization/a11y/describe";
@@ -54,7 +54,7 @@ import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
 import { useCalmCurrent } from "./useSquiggle";
 import { useSummitCurrent } from "./useSummit";
-import { FaceTexture, Ledge, MountainFace, RopeCut, SkyParallax, SummitRoute } from "./SummitScene";
+import { DistantCliffs, FaceTexture, Ledge, MountainFace, RopeCut, SkyParallax, SummitRoute } from "./SummitScene";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -255,6 +255,10 @@ function MascotOptionsBubble({
 
 /** The rope prompts: one pops on each rope as it takes focus — tapping it
  * opens the full reflect panel. Random per rope per day. */
+/** Where the day's record starts below Now: clear of the five rows of rope
+ * names that live between Now and it (see LADDER_* in transpose.ts). */
+const SUMMIT_RECORD_TOP = 140;
+
 const GRAB_PROMPTS = [
   "Grab on!",
   "Take hold!",
@@ -341,9 +345,6 @@ function GrabPrompt({
 /** Movement below this is still a tap; beyond it the gesture picks an axis. */
 const DECIDE_PX = 8;
 
-/** Survives the remount around a reflect stage: the ledge count the climber
- * last stood on, so the returning summit map can replay the climb he earned. */
-let summitPrevUnattended: number | null = null;
 /** Vertical pixels per loudness step — up is louder, down is quieter. */
 const STEP_PX = 36;
 
@@ -717,6 +718,20 @@ export function LifeTimeline() {
    * the stage measuring itself, and must never animate. */
   const climbSig = vertical ? `${handledCount}/${activeLines.length}` : "";
 
+  /**
+   * Where a rope can actually be SEEN and handled. On the summit a rope's
+   * `endY` is its anchor — deliberately far above the viewport — so every
+   * effect that belongs to the act of handling it (the dial's pop, a token
+   * popping off, the tutorial's halo, the cut) has to happen down here at the
+   * climber's level instead, or it plays off-screen where nobody sees it.
+   */
+  const workedY = (g: { endY: number; forkY: number; labelY: number }): number =>
+    vertical && sm
+      ? Math.max(sm.nowScreenY - 60, Math.min(g.forkY - 10, g.labelY - 18))
+      : g.endY;
+  const workedYRef = useRef(workedY);
+  workedYRef.current = workedY;
+
   /** The summit in the mountain layer's own (resting) coordinates. The layer's
    * transform adds the climb, so on screen it sits at
    * `ledgeWorldY − peakAbove + climbDist` — at Now once the last rope is in. */
@@ -798,12 +813,15 @@ export function LifeTimeline() {
     () => ({ translateY: Math.round(climbSV.value * 0.42 * 2) / 2 }),
     [climbSV],
   );
-  /** Nothing in the TIME frame moves with the climb, so overlays that live
-   * beside him (coin flights, burn smoke, the walkthrough halo, the
-   * celebration) need no offset at all — these two are kept at zero so the
-   * shared overlay code can stay orientation-agnostic. */
-  const camYRest = 0;
-  const camYRef = useRef(0);
+  /** The mountains beyond this one: the further away, the slower they pass. */
+  const farProps = useAnimatedProps(
+    () => ({ translateY: Math.round(climbSV.value * 0.2 * 2) / 2 }),
+    [climbSV],
+  );
+  const midProps = useAnimatedProps(
+    () => ({ translateY: Math.round(climbSV.value * 0.36 * 2) / 2 }),
+    [climbSV],
+  );
   const anchorRestY = vertical && sm ? Math.round(restPipY) : 0;
 
   // The LAST rope earns the summit party: the mountain's final glide brings
@@ -847,8 +865,9 @@ export function LifeTimeline() {
       // scrolls sideways instead of down.
       if (verticalRef.current) {
         setWalkthroughPoint("thread", {
+          // the rope's visible stretch, not its off-screen anchor
           x: sx + g.endX - scrollXRef.current,
-          y: sy + g.endY + 24 + camYRef.current,
+          y: sy + workedYRef.current(g),
         });
       } else {
         setWalkthroughPoint("thread", { x: sx + g.endX - 24, y: sy + g.endY });
@@ -1107,7 +1126,7 @@ export function LifeTimeline() {
               lastYRef.current = gs.moveY;
               // Dragging beside the date rail scrubs faster than the face.
               const stageX = gs.moveX - stagePosRef.current.x;
-              const nearDates = stageX > sizeRef.current.width - 64;
+              const nearDates = stageX > sizeRef.current.width - SUMMIT_RAIL_W - 24;
               const summit = layoutRef.current as SummitLayout;
               const timeLen = summit.timeLen ?? 1;
               // panBy takes a fraction of the STORE window; scale so a px of
@@ -1272,7 +1291,7 @@ export function LifeTimeline() {
         }
         e.preventDefault();
         const rect = el.getBoundingClientRect();
-        const nearDates = e.clientX - rect.left > rect.width - 64;
+        const nearDates = e.clientX - rect.left > rect.width - SUMMIT_RAIL_W - 24;
         const summit = layoutRef.current as SummitLayout;
         const timeLen = summit.timeLen ?? rect.height;
         const scale = summit.panScale ?? 1;
@@ -1414,7 +1433,10 @@ export function LifeTimeline() {
   }, [branches, armedBranchId, focusedBranchId]);
 
   // Mascot: visible always unless reduced motion (hides when no open branches).
-  const showMascot = !reducedMotion;
+  // The summit's whole premise is a climber holding his place while the
+  // mountain moves past him, so hiding him under reduced motion left a scene
+  // that slid for no visible reason. He stays; he just does not animate.
+  const showMascot = !reducedMotion || vertical;
   // The camera follows Pip: whenever he sets off for a lane outside the
   // visible band (a super bonk hop, a focus run, a patrol jump), the
   // vertical scroll pans along with his dash. Once per run, never per frame.
@@ -1458,7 +1480,7 @@ export function LifeTimeline() {
     burn?.branchId ?? null,
     mascotNowY,
     followPip,
-    { vertical, onClimbEnd: () => retireAllRef.current() },
+    { vertical, reducedMotion, onClimbEnd: () => retireAllRef.current() },
   );
 
   // Keep reaction ref current so effects below can call it
@@ -1526,7 +1548,7 @@ export function LifeTimeline() {
           setFlights((f) => [
             ...f,
             verticalRef.current
-              ? { key: c.key, branchId: c.branchId, x0: g.endX + COIN_LEAD - scrollXRef.current, y0: g.endY - COIN_HOVER + camYRef.current }
+              ? { key: c.key, branchId: c.branchId, x0: g.endX + COIN_LEAD - scrollXRef.current, y0: workedYRef.current(g) - COIN_HOVER }
               : { key: c.key, branchId: c.branchId, x0: g.endX + COIN_LEAD, y0: g.endY - COIN_HOVER - scrollYRef.current },
           ]);
           coinTimersRef.current.set(c.key, setTimeout(() => finishCoin(c.key), COIN_FLY_MS));
@@ -1803,6 +1825,41 @@ export function LifeTimeline() {
                   drifting by low down, stars once the summit is near. The
                   parallax is what sells the height — the rock rushes past,
                   the sky only drifts. */}
+              {/* the range this mountain belongs to: two ranks of cliff edges
+                  standing in the sky either side of it, each on its own slower
+                  rail so the height reads as height */}
+              {vertical && sm && (
+                <>
+                  <AnimatedOptionG animatedProps={farProps}>
+                    <DistantCliffs
+                      routeX={sm.routeX}
+                      faceHalf={sm.faceHalf}
+                      width={svgWidth}
+                      timeLen={sm.timeLen}
+                      bandAnchor={-climbDist * 0.2}
+                      rate={0.2}
+                      salt={41}
+                      tone={mix(tk.inkFaint, tk.bg, 72)}
+                      opacity={0.5}
+                      tk={tk}
+                    />
+                  </AnimatedOptionG>
+                  <AnimatedOptionG animatedProps={midProps}>
+                    <DistantCliffs
+                      routeX={sm.routeX}
+                      faceHalf={sm.faceHalf}
+                      width={svgWidth}
+                      timeLen={sm.timeLen}
+                      bandAnchor={-climbDist * 0.36}
+                      rate={0.36}
+                      salt={53}
+                      tone={mix(tk.inkFaint, tk.bg, 52)}
+                      opacity={0.62}
+                      tk={tk}
+                    />
+                  </AnimatedOptionG>
+                </>
+              )}
               {vertical && sm && (
                 <AnimatedOptionG animatedProps={skyProps}>
                   <SkyParallax
@@ -1874,7 +1931,8 @@ export function LifeTimeline() {
                   <MountainFace
                     routeX={sm.routeX}
                     peakY={peakY}
-                    width={svgWidth}
+                    faceHalf={sm.faceHalf}
+                    faceLeft={sm.faceLeft}
                     timeLen={sm.timeLen}
                     // the rock has to reach below the viewport at every offset
                     depth={900 + climbDist}
@@ -1888,10 +1946,11 @@ export function LifeTimeline() {
                   <FaceTexture
                     routeX={sm.routeX}
                     peakY={peakY}
+                    faceHalf={sm.faceHalf}
+                    faceLeft={sm.faceLeft}
                     bandTop={-climbDist - 2.6 * sm.timeLen}
                     bandBottom={-climbDist + 2.6 * sm.timeLen}
                     bottomY={sm.timeLen + 900 + climbDist}
-                    width={svgWidth}
                     timeLen={sm.timeLen}
                     tk={tk}
                   />
@@ -2017,17 +2076,25 @@ export function LifeTimeline() {
 
               {/* summit's day record: the decisions carved into the face just
                   below the ledge. Tapping them opens the actions panel. */}
-              {vertical && sm && futureItems.length > 0 && sm.timeLen - sm.nowScreenY > 80 && (
+              {/* the day's record, carved into the face BELOW the rope-name
+                  ladder (five rows of names sit between Now and here) — and
+                  only where the rock is wide enough to hold it; on a phone the
+                  Actions tab carries the same list */}
+              {vertical &&
+                sm &&
+                futureItems.length > 0 &&
+                sm.faceHalf >= 200 &&
+                sm.timeLen - sm.nowScreenY > 260 && (
                 <G onPress={guarded(() => setOperation({ kind: "viewing-actions" }))}>
                   <Rect
                     x={sm.routeX + 4}
-                    y={sm.nowScreenY + 6}
-                    width={190}
+                    y={sm.nowScreenY + SUMMIT_RECORD_TOP - 18}
+                    width={Math.min(190, sm.faceHalf - 14)}
                     height={futureItems.length * 16 + 18}
                     fill="transparent"
                   />
                   {futureItems.map((it, i) => {
-                    const y = sm.nowScreenY + 24 + i * 16;
+                    const y = sm.nowScreenY + SUMMIT_RECORD_TOP + i * 16;
                     return (
                       <DayRow
                         key={it.id}
@@ -2184,7 +2251,11 @@ export function LifeTimeline() {
                   const g = layout.geometries.find((x) => x.branchId === burn.branchId);
                   if (!g || !g.inWindow) return null;
                   return vertical ? (
-                    <RopeCut key={burn.key} path={g.path} />
+                    // the rope being cut is ON the rock, so the cut travels
+                    // with it; and it is cut where he is holding it
+                    <AnimatedOptionG animatedProps={climbProps} key={burn.key}>
+                      <RopeCut path={g.path} cutY={workedY(g)} />
+                    </AnimatedOptionG>
                   ) : (
                     <BurnAway key={burn.key} path={g.path} />
                   );
@@ -2218,7 +2289,9 @@ export function LifeTimeline() {
                 (() => {
                   const g = layout.geometries.find((x) => x.branchId === holdPop.branchId);
                   if (!g || !g.inWindow) return null;
-                  return <PopBurst key={holdPop.key} x={g.endX - 3} y={g.endY} color={tk.accent} />;
+                  return (
+                    <PopBurst key={holdPop.key} x={g.endX - 3} y={workedY(g)} color={tk.accent} />
+                  );
                 })()}
 
               {/* dropped tokens, flipping over their threads until they fly */}
@@ -2237,7 +2310,7 @@ export function LifeTimeline() {
                   <CoinToken
                     key={c.key}
                     x={cx}
-                    y={g.endY}
+                    y={workedY(g)}
                     gold={tk.shimmer}
                     accent={tk.accent}
                     theme={theme}
@@ -2350,7 +2423,7 @@ export function LifeTimeline() {
                 <Mascot
                   posX={mascot.posX}
                   posY={mascot.posY}
-                  viewW={vertical ? svgWidth : layout.metrics.width}
+                  viewW={vertical ? size.width : layout.metrics.width}
                   runPhase={mascot.runPhase}
                   frame={hit && !hit.calm ? "LAND_A" : mascot.frame}
                   flip={mascot.flip}
@@ -2685,29 +2758,42 @@ export function LifeTimeline() {
             right: 0,
             top: 0,
             bottom: 0,
-            width: 64,
+            width: SUMMIT_RAIL_W,
             zIndex: 5,
-            backgroundColor: alpha(tk.bg, 0.88),
           }}
         >
-          {/* the dates belong to the TIME frame: they hold their place beside
-              the climber, exactly like the main line and Now (tick counts are
-              bounded, so no viewport cull is needed) */}
-          <Svg width={64} height={size.height}>
+          {/* The dates belong to the TIME frame: they hold their place beside
+              the climber, exactly like the main line and Now. Hair-fine and
+              unplated — the rock is sized to clear this strip (see faceHalfFor),
+              so the numbers sit against sky, not rock. */}
+          <Svg width={SUMMIT_RAIL_W} height={size.height}>
             <G>
               {ticks.map((tick) => {
                 const y = dateToScreenY(tick.date, layout.window, sm.timeLen, sm.axisLen);
+                if (y < -20 || y > size.height + 20) return null;
+                // The day's NUMBER, taken from the date itself — the localized
+                // label is "5 Sat" here but "Sat 5" or "Sa., 5." elsewhere, so
+                // the digits must not be parsed out of it. Wider zoom levels
+                // ("Sep", "2027") are already short enough to show as they are.
+                // Daily ticks (localized "5 Sat" / "Sat 5" / "Today") shrink to
+                // the day's number, taken from the date rather than parsed out
+                // of the label; today's is in accent so it still reads at a
+                // glance. Coarser zooms ("Sep", "2027") are short already.
+                const daily = tick.label === "Today" || tick.label.includes(" ");
+                const label = daily ? String(new Date(tick.date).getDate()) : tick.label;
                 return (
                   <SvgText
                     key={tick.date}
-                    x={6}
-                    y={y + 4}
-                    fontSize={11}
+                    x={SUMMIT_RAIL_W - 5}
+                    y={y + 3}
+                    textAnchor="end"
+                    fontSize={8.5}
                     fontFamily={tk.fontBody}
-                    fontWeight={tick.major ? "600" : "400"}
-                    fill={tick.major ? tk.inkSoft : tk.inkFaint}
+                    fontWeight={tick.major ? "700" : "400"}
+                    fill={tick.major ? tk.accent : tk.inkFaint}
+                    opacity={tick.major ? 0.9 : 0.65}
                   >
-                    {tick.label === "Today" ? t("Today") : tick.label}
+                    {label}
                   </SvgText>
                 );
               })}
@@ -2978,7 +3064,7 @@ export function LifeTimeline() {
 
         {awayFromNow && (
           // summit's date rail owns the right edge: the button steps left of it
-          <View style={{ position: "absolute", top: 12, right: vertical ? 78 : 14.4, zIndex: 5 }}>
+          <View style={{ position: "absolute", top: 12, right: vertical ? SUMMIT_RAIL_W + 14 : 14.4, zIndex: 5 }}>
             <Button
               label={`⇥ ${t("Return to Now")}`}
               onPress={returnToNow}
@@ -2996,7 +3082,7 @@ export function LifeTimeline() {
             const x0 = vertical
               ? Math.max(8, Math.min(g.labelX - scrollXRef.current, size.width - 80))
               : Math.min(g.labelX, layout.metrics.width - 80);
-            const y0 = g.labelY + (vertical ? camYRest : 0);
+            const y0 = g.labelY;
             return (
               <View
                 key={burn.key}
@@ -3055,7 +3141,7 @@ export function LifeTimeline() {
             const x0 = vertical
               ? Math.max(8, Math.min(g.labelX - scrollXRef.current, size.width - 60))
               : Math.min(g.labelX, layout.metrics.width - 60);
-            const y0 = g.labelY + (vertical ? camYRest : 0);
+            const y0 = g.labelY;
             return (
               <View
                 key={reclaim.key}

@@ -458,6 +458,34 @@ await page.close();
   check(hanging === 0, "no rope still hangs after top-out (all coiled on their ledges)");
   // a rung is a screen-jump, so the conquered ledges trail off below the
   // frame — what must hold is that they exist, on the rock, in climb order
+  // The mountain shows ONE edge, on the right, with sky (and the ranges
+  // beyond) between it and the date rail; the left runs off the screen.
+  const shape = await p2.evaluate(() => {
+    let best = 0, box = null;
+    for (const el of document.querySelectorAll("path")) {
+      if (el.getAttribute("stroke")) continue;
+      const f = el.getAttribute("fill");
+      if (!f || f === "none" || f === "#ffffff") continue;
+      const b = el.getBoundingClientRect();
+      if (b.width * b.height > best) { best = b.width * b.height; box = { l: Math.round(b.left), r: Math.round(b.right) }; }
+    }
+    const rails = [...document.querySelectorAll("svg")]
+      .map((s) => Number(s.getAttribute("width")))
+      .filter((n) => n > 10 && n < 60);
+    return { box, vw: window.innerWidth, rails };
+  });
+  check(
+    !!shape.box && shape.box.r < shape.vw - 40 && shape.box.r > shape.vw * 0.6,
+    `the right flank is in frame with sky beyond it (edge ${shape.box?.r} of ${shape.vw})`,
+  );
+  check(
+    !!shape.box && shape.box.l <= 0,
+    `the left side runs off the screen (left ${shape.box?.l})`,
+  );
+  check(
+    shape.rails.some((w) => w <= 32),
+    `the date rail is hair-thin (${shape.rails.join(",")})`,
+  );
   const body = await p2.evaluate(() => {
     let best = 0, box = null;
     for (const el of document.querySelectorAll("path")) {

@@ -52,7 +52,8 @@ function flank(
   peakY: number,
   fromY: number,
   toY: number,
-  width: number,
+  /** The rock's maximum half-width (faceHalf). */
+  faceHalf: number,
   side: 1 | -1,
   salt: number,
   scale: number,
@@ -64,7 +65,7 @@ function flank(
   const GRID = 46;
   const first = Math.ceil(fromY / GRID) * GRID;
   for (let y = first; y < toY; y += GRID) {
-    const hw = mountainHalfWidth(y - peakY, width, scale);
+    const hw = mountainHalfWidth(y - peakY, faceHalf, scale);
     // seeded by ALTITUDE, so the same rock keeps the same edge for ever
     const k = Math.round(y / GRID);
     const jx = (seeded(k, salt) - 0.5) * Math.min(14, hw * 0.12);
@@ -76,7 +77,7 @@ function flank(
   }
   // the band always closes exactly on its lower edge
   pts.push({
-    x: Math.round(routeX + side * mountainHalfWidth(toY - peakY, width, scale)),
+    x: Math.round(routeX + side * mountainHalfWidth(toY - peakY, faceHalf, scale)),
     y: Math.round(toY),
   });
   return pts;
@@ -100,7 +101,8 @@ export function FaceTexture({
   bottomY,
   bandTop,
   bandBottom,
-  width,
+  faceHalf,
+  faceLeft,
   timeLen,
   tk,
 }: {
@@ -112,7 +114,9 @@ export function FaceTexture({
    * seeded by altitude, so the band can shift without them dancing. */
   bandTop?: number;
   bandBottom?: number;
-  width: number;
+  /** How far the rock reaches right / left (see faceHalfFor). */
+  faceHalf: number;
+  faceLeft: number;
   /** The stage height — the profile's yardstick (see mountainHalfWidth). */
   timeLen: number;
   tk: ThemeTokens;
@@ -130,25 +134,34 @@ export function FaceTexture({
     let grit = "";
     for (let y = start; y < end; y += step) {
       const i = Math.round(y / step) * 7;
-      const hw = mountainHalfWidth(y - peakY, width, timeLen) * 0.82 - 12;
-      if (hw < 14) continue;
+      const hwR = mountainHalfWidth(y - peakY, faceHalf, timeLen) * 0.82 - 12;
+      const hwL = mountainHalfWidth(y - peakY, faceLeft, timeLen) * 0.82 - 12;
+      const hw = hwR;
+      if (hwR < 14) continue;
+      // marks live across the whole rock, which is wider on the left
+      const span = (t: number) => routeX - hwL + t * (hwL + hwR);
       for (let k = 0; k < 2; k++) {
         const j = i + k;
-        const cx = routeX + (seeded(j, 71) - 0.5) * 2 * hw;
+        const cx = span(seeded(j, 71));
         const yy = Math.round(y + (seeded(j, 72) - 0.5) * 26);
-        const len = Math.round(34 + seeded(j, 73) * 96);
+        // A seam runs rightward from where it starts, so it has to be cut to
+        // the rock remaining at that altitude — otherwise strata stick out
+        // into the sky, which is invisible only while the rock is a wall.
+        const room = routeX + hw - cx;
+        const len = Math.round(Math.min(34 + seeded(j, 73) * 96, Math.max(0, room)));
+        if (len < 12) continue;
         const tilt = Math.round((seeded(j, 74) - 0.5) * 14);
         seams += `M ${Math.round(cx)} ${yy} l ${len} ${tilt} `;
       }
       for (let k = 0; k < 3; k++) {
         const j = i + 3 + k;
-        const cx = Math.round(routeX + (seeded(j, 75) - 0.5) * 2 * hw);
+        const cx = Math.round(span(seeded(j, 75)));
         const yy = Math.round(y + seeded(j, 76) * step);
         grit += `M ${cx} ${yy} l ${1 + Math.round(seeded(j, 77) * 3)} 0 `;
       }
     }
     return { seams, grit };
-  }, [routeX, peakY, start, end, width, timeLen]);
+  }, [routeX, peakY, start, end, faceHalf, faceLeft, timeLen]);
   return (
     <G pointerEvents="none">
       <Path d={seams} stroke={tk.inkSoft} strokeWidth={1.2} opacity={0.3} fill="none" />
@@ -222,10 +235,93 @@ export function SkyParallax({
   );
 }
 
+/**
+ * The mountains BEYOND this one: jagged cliff edges standing in the sky on
+ * either side of the near rock. They are what make the face read as a mountain
+ * seen from the side rather than a wall with an edge, and — drifting at a
+ * fraction of the climb — they are also the depth cue that says he is gaining
+ * height. Deterministic and periodic in altitude, so every band of the climb
+ * has ridges in it.
+ */
+export function DistantCliffs({
+  routeX,
+  faceHalf,
+  width,
+  timeLen,
+  bandAnchor,
+  /** 0 = pinned, 1 = travels with the rock. Two layers, two rates. */
+  rate,
+  salt,
+  tone,
+  opacity,
+  tk,
+}: {
+  routeX: number;
+  faceHalf: number;
+  width: number;
+  timeLen: number;
+  bandAnchor: number;
+  rate: number;
+  salt: number;
+  tone: string;
+  opacity: number;
+  tk: ThemeTokens;
+}) {
+  const paths = useMemo(() => {
+    // The sky each side of the near rock is where these live.
+    const skyL = Math.max(0, routeX - faceHalf);
+    const skyR = Math.max(0, width - (routeX + faceHalf));
+    const STEP = 88;
+    const top = bandAnchor - 1.3 * timeLen;
+    const bottom = bandAnchor + 2.3 * timeLen;
+    const first = Math.ceil(top / STEP) * STEP;
+    const side = (edgeX: number, room: number, inward: 1 | -1, sSalt: number) => {
+      if (room < 18) return "";
+      // crest sits partway out into the sky, jagging as it descends
+      const base = edgeX + inward * room * 0.52;
+      let d = `M ${Math.round(edgeX)} ${Math.round(top)}`;
+      for (let y = first; y < bottom; y += STEP) {
+        const k = Math.round(y / STEP);
+        const j = seeded(k, sSalt);
+        const j2 = seeded(k, sSalt + 3);
+        const x = base + inward * room * (0.34 * j - 0.1);
+        // a notch every few steps reads as a cliff edge rather than a hill
+        const notch = j2 > 0.72 ? inward * room * 0.22 : 0;
+        d += ` L ${Math.round(x)} ${Math.round(y - STEP * 0.34)}`;
+        d += ` L ${Math.round(x + notch)} ${Math.round(y)}`;
+      }
+      d += ` L ${Math.round(edgeX)} ${Math.round(bottom)} Z`;
+      return d;
+    };
+    // Only the right: the rock runs off the left edge, so there is no sky
+    // there to stand a range in.
+    void skyL;
+    return [side(width, skyR, -1, salt + 7)].filter(Boolean);
+  }, [routeX, faceHalf, width, timeLen, bandAnchor, salt]);
+  return (
+    <G pointerEvents="none">
+      {paths.map((d, i) => (
+        <Path key={i} d={d} fill={tone} opacity={opacity} />
+      ))}
+      {paths.map((d, i) => (
+        <Path
+          key={`e${i}`}
+          d={d}
+          fill="none"
+          stroke={tk.inkSoft}
+          strokeWidth={1.2}
+          opacity={opacity * 0.5}
+        />
+      ))}
+    </G>
+  );
+}
+
 export function MountainFace({
   routeX,
   peakY,
-  width,
+  faceHalf,
+  faceLeft,
   timeLen,
   depth,
   bandAnchor,
@@ -234,7 +330,10 @@ export function MountainFace({
   routeX: number;
   /** The summit's tip. */
   peakY: number;
-  width: number;
+  /** How far the rock reaches right — the side whose edge is in frame. */
+  faceHalf: number;
+  /** How far it reaches left — off the screen. */
+  faceLeft: number;
   timeLen: number;
   /** How far below the dated canvas the rock keeps going. */
   depth: number;
@@ -256,27 +355,27 @@ export function MountainFace({
     // the apex only belongs to the path when the peak is in the band
     const apex = drawTop <= peakY + 1;
     const top = apex ? peakY : drawTop;
-    const left = flank(routeX, peakY, top, drawBottom, width, -1, 31, timeLen);
-    const right = flank(routeX, peakY, top, drawBottom, width, 1, 33, timeLen);
+    const left = flank(routeX, peakY, top, drawBottom, faceLeft, -1, 31, timeLen);
+    const right = flank(routeX, peakY, top, drawBottom, faceHalf, 1, 33, timeLen);
     let d = `M ${left[left.length - 1].x} ${drawBottom}`;
     for (let i = left.length - 1; i >= 0; i--) d += ` L ${left[i].x} ${left[i].y}`;
     if (apex) {
       d += ` L ${routeX} ${Math.round(peakY)}`;
     } else {
       // a straight seam across the band's top, off-screen either way
-      d += ` L ${Math.round(routeX - mountainHalfWidth(top - peakY, width, timeLen))} ${Math.round(top)}`;
-      d += ` L ${Math.round(routeX + mountainHalfWidth(top - peakY, width, timeLen))} ${Math.round(top)}`;
+      d += ` L ${Math.round(routeX - mountainHalfWidth(top - peakY, faceLeft, timeLen))} ${Math.round(top)}`;
+      d += ` L ${Math.round(routeX + mountainHalfWidth(top - peakY, faceHalf, timeLen))} ${Math.round(top)}`;
     }
     for (const p of right) d += ` L ${p.x} ${p.y}`;
     return d + ` L ${right[right.length - 1].x} ${drawBottom} Z`;
-  }, [routeX, peakY, drawTop, drawBottom, width, timeLen]);
+  }, [routeX, peakY, drawTop, drawBottom, faceHalf, faceLeft, timeLen]);
   // the snow cap: the top ~110px of both flanks, closed with a ragged hem
   const cap = useMemo(() => {
     // a fifth of the stage: a cap you can see, at any stage size
     const drop = Math.round(0.22 * timeLen);
     const capBottom = peakY + drop;
-    const left = flank(routeX, peakY, peakY, capBottom, width, -1, 31, timeLen);
-    const right = flank(routeX, peakY, peakY, capBottom, width, 1, 33, timeLen);
+    const left = flank(routeX, peakY, peakY, capBottom, faceLeft, -1, 31, timeLen);
+    const right = flank(routeX, peakY, peakY, capBottom, faceHalf, 1, 33, timeLen);
     let d = `M ${left[left.length - 1].x} ${capBottom}`;
     for (let i = left.length - 1; i >= 0; i--) d += ` L ${left[i].x} ${left[i].y}`;
     d += ` L ${routeX} ${Math.round(peakY)}`;
@@ -288,12 +387,14 @@ export function MountainFace({
       d += ` L ${Math.round(rx + (lx - rx) * t)} ${Math.round(capBottom + (seeded(i, 35) - 0.2) * (drop * 0.22))}`;
     }
     return d + " Z";
-  }, [routeX, peakY, width, timeLen]);
-  const rock = mix(tk.inkFaint, tk.bg, 48);
+  }, [routeX, peakY, faceHalf, faceLeft, timeLen]);
+  // The rock has to read AGAINST the sky now that its flanks are in frame: a
+  // near-background fill made the silhouette invisible except as a hairline.
+  const rock = mix(tk.inkFaint, tk.bg, 34);
   return (
     <G pointerEvents="none">
-      <Path d={body} fill={rock} opacity={0.42} />
-      <Path d={body} fill="none" stroke={tk.inkFaint} strokeWidth={2.5} opacity={0.55} />
+      <Path d={body} fill={rock} opacity={0.66} />
+      <Path d={body} fill="none" stroke={tk.inkSoft} strokeWidth={2} opacity={0.5} />
       <Path d={cap} fill="#ffffff" opacity={0.65} />
     </G>
   );
@@ -467,31 +568,6 @@ export function Ledge({
   );
 }
 
-/**
- * The altitude pennant: a little flag planted at the climber's feet — it
- * rides the same live shared value the camera tracks, so flag, climber and
- * mountain move as one (already quantized upstream). Under reduced motion
- * the value is static, so the flag is too.
- */
-export function ClimbPennant({
-  routeX,
-  liveY,
-  tk,
-}: {
-  routeX: number;
-  /** The climber's feet in world coords — the stage's pipFeetY. */
-  liveY: SharedValue<number>;
-  tk: ThemeTokens;
-}) {
-  const props = useAnimatedProps(() => ({ translateY: liveY.value }), [liveY]);
-  const x = routeX + 11;
-  return (
-    <AnimatedG animatedProps={props} pointerEvents="none">
-      <Path d={`M ${x} 0 v -13`} stroke={tk.inkSoft} strokeWidth={1.6} strokeLinecap="round" />
-      <Path d={`M ${x} -13 l 9 3.2 l -9 3.2 Z`} fill={tk.shimmer} stroke={tk.inkSoft} strokeWidth={0.8} />
-    </AnimatedG>
-  );
-}
 
 /**
  * An answered rope, off the face for the day: a small coil resting at its
@@ -573,10 +649,27 @@ const FRAY = "#f0e3c8";
  * visual — finalizeBurn does the removing; the caller gates reduced motion.
  * Same duration as BurnAway so the burn flow's timers need no change.
  */
-export function RopeCut({ path, durationMs = 2800 }: { path: string; durationMs?: number }) {
+export function RopeCut({
+  path,
+  /** Where along the rope the cut lands (world y). Defaults to just under the
+   * anchor, which is right for a short rope — but a summit rope's anchor is
+   * thousands of px above the viewport, so the caller passes the height the
+   * climber is actually working at, or the cut and its fray play off-screen. */
+  cutY,
+  durationMs = 2800,
+}: {
+  path: string;
+  cutY?: number;
+  durationMs?: number;
+}) {
   const pts = useMemo(() => samplePath(path, 8), [path]);
   const total = pts.length > 0 ? pts[pts.length - 1].s : 0;
-  const cutS = Math.max(0, total - 34);
+  const cutS = useMemo(() => {
+    if (cutY === undefined || pts.length === 0) return Math.max(0, total - 34);
+    let best = pts[0];
+    for (const pt of pts) if (Math.abs(pt.y - cutY) < Math.abs(best.y - cutY)) best = pt;
+    return Math.max(0, Math.min(total, best.s));
+  }, [cutY, pts, total]);
 
   const progress = useSharedValue(0);
   const fray = useSharedValue(0);

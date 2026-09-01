@@ -409,7 +409,11 @@ export const BranchLine = memo(function BranchLine({
           Facebook-emoji swell before the pop. */}
       <AnimatedG
         animatedProps={holdScaleProps}
-        origin={`${g.endX}, ${g.endY}`}
+        // The pivot must be a point that is actually on screen. On the summit
+        // a rope's `endY` is its anchor, thousands of px above the viewport, so
+        // scaling about it slid the whole rope ~200px down the screen; its
+        // label band sits in the visible stretch instead.
+        origin={vertical ? `${g.endX}, ${g.labelY}` : `${g.endX}, ${g.endY}`}
         pointerEvents="none"
       >
 
@@ -494,7 +498,9 @@ export const BranchLine = memo(function BranchLine({
         <AnimatedCircle
           animatedProps={holdGlowProps}
           cx={g.endX - 3}
-          cy={g.endY}
+          // same reason as the swell's pivot above: on the summit the anchor is
+          // off-screen, so the charge glow belongs in the visible band
+          cy={vertical ? g.labelY : g.endY}
           fill={color}
           pointerEvents="none"
         />

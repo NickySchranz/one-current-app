@@ -74,37 +74,43 @@ export function daySeedOrder(ids: readonly string[], now: Date): string[] {
 }
 
 /**
+ * Width of the summit's date rail. The rock is sized to clear it (see
+ * `faceHalf`), and the rail's own view, the fast-scrub hit zones beside it and
+ * the "Return to Now" chip all measure from this one number.
+ */
+export const SUMMIT_RAIL_W = 28;
+
+/**
  * The mountain's half-width at a given depth below the peak — one profile
- * shared by the drawn face and the anchor placement, so every rope and every
- * cliff ledge lands ON the rock.
+ * shared by the drawn face and the rope-anchor placement, so every rope and
+ * every cliff ledge lands ON the rock.
  *
- * Measured in SCREENS below the peak, and in fractions of the stage width, so
- * the mountain looks the same whatever the day's rope count (an earlier
- * version scaled by the mountain's total height and only along the depth
- * axis, which made a tall day's mountain a needle):
+ * Measured in SCREENS below the peak, and in fractions of `faceHalf` — the
+ * half-width the rock is allowed (see `faceHalf` on the layout). Sizing it
+ * against the room available rather than against the stage width is what keeps
+ * BOTH flanks inside the frame on any screen: the route does not sit at the
+ * centre of the canvas, and the date rail owns the right edge, so the two
+ * sides have different amounts of room.
  *
- *   at the peak ...... a tip
- *   0.10 screens ..... 0.16·W — the snow cap's shoulders
- *   0.25 screens ..... 0.34·W — a broad summit
- *   0.55 screens ..... 0.55·W — the flanks reach the stage edges
- *   0.85 screens ..... 0.66·W — and past them: a full-width wall
- *
- * So the summit frame (peak at mid-screen, half a screen visible below him)
- * shows a broad snowy peak whose flanks run to both edges, while the climb
- * itself — always at least a `headroom` below the peak — is a wall.
+ *   at the peak ...... a blunt summit block, wide enough for the ledge on it
+ *   0.10 screens ..... 0.24 — the snow cap's shoulders
+ *   0.25 screens ..... 0.52 — a broad summit
+ *   0.55 screens ..... 0.83
+ *   0.85 screens ..... 1.00 — the full face, its flanks just inside the frame
  */
 export function mountainHalfWidth(
   depth: number,
-  width: number,
-  /** The stage's own height: the yardstick the profile is measured in. */
+  /** The rock's maximum half-width — `faceHalf` from the layout. */
+  faceHalf: number,
+  /** The stage's own height: the yardstick depth is measured in. */
   screen: number,
 ): number {
   const d = depth / Math.max(240, screen);
-  const w0 = 10;
-  const w1 = 0.16 * width;
-  const w2 = 0.34 * width;
-  const w3 = 0.55 * width;
-  const w4 = 0.66 * width;
+  const w0 = Math.max(20, 0.06 * faceHalf);
+  const w1 = 0.24 * faceHalf;
+  const w2 = 0.52 * faceHalf;
+  const w3 = 0.83 * faceHalf;
+  const w4 = faceHalf;
   if (d <= 0) return w0;
   if (d <= 0.1) return w0 + (w1 - w0) * (d / 0.1);
   if (d <= 0.25) return w1 + (w2 - w1) * ((d - 0.1) / 0.15);
@@ -113,6 +119,31 @@ export function mountainHalfWidth(
   return w4;
 }
 
+/**
+ * How wide the rock may be, from the route to its flank. The route does not
+ * sit at the middle of the canvas and the date rail covers the right edge, so
+ * the rock takes the smaller of the two gaps and leaves a margin — which is
+ * what puts both flanks just inside the frame instead of off the screen.
+ */
+/**
+ * How wide the rock reaches on the RIGHT — the side whose edge is in frame.
+ * The margin it leaves is real sky, because the distant ranges live out there
+ * (see DistantCliffs) and they are what make the near rock read as one mountain
+ * among others rather than a wall with an edge.
+ */
+export function faceHalfFor(stageWidth: number, routeX: number): number {
+  const room = stageWidth - SUMMIT_RAIL_W - routeX;
+  return Math.max(60, Math.round(room - Math.max(30, 0.13 * stageWidth)));
+}
+
+/**
+ * How wide it reaches on the LEFT — off the edge of the screen. Only ONE side
+ * shows its edge: two edges plus two skies leaves nothing but a strip of rock
+ * on a phone, and reads as a pillar rather than a mountainside.
+ */
+export function faceLeftFor(routeX: number): number {
+  return Math.max(80, Math.round(routeX + 90));
+}
 
 /**
  * The highest the day's ledge (Now) ever hangs below the top edge. The
@@ -151,10 +182,14 @@ export type SummitLayout = TimelineLayout & {
   peakAbove: number;
   /** World px between consecutive conquered cliff ledges. */
   ladderStep: number;
-  /** World px from Now up to the day's TOP rung (peak = this + headroom). */
-  ladderTop: number;
+
   /** World px the mountain rises above the top rung to reach the summit. */
   ladderHeadroom: number;
+  /** How far the rock reaches to the RIGHT, where its edge is in frame — the
+   * yardstick for every drawn part of the mountain and every rope anchor. */
+  faceHalf: number;
+  /** How far it reaches to the LEFT, which is off the screen. */
+  faceLeft: number;
 };
 
 export function tp(x: number, y: number, timeLen: number): { x: number; y: number } {
@@ -238,12 +273,13 @@ export type SummitLayoutOptions = {
   retiredIds?: readonly string[];
 };
 
-/** How many chars of a rope's title fit its ladder slot. */
-export const SUMMIT_LABEL_CHARS = 22;
-/** Vertical rhythm of the label ladder above the anchors. */
+/** Vertical rhythm of the label ladder below the Now ledge. Five rows, so a
+ * busy day's names step past each other instead of printing on top of each
+ * other — and the row is chosen by COLUMN order (see `labelRow`), not by the
+ * order threads happen to be stored in, so neighbours never share a row. */
 const LADDER_BASE = 12;
-const LADDER_STEP = 14;
-const LADDER_ROWS = 3;
+const LADDER_STEP = 17;
+const LADDER_ROWS = 5;
 
 /**
  * Pure composition of the summit scene: the untouched horizontal builder runs
@@ -297,6 +333,10 @@ export function buildSummitLayout(
 
   const routeX = base.mainY;
   const bandX = base.bandY;
+  /** How far the rock reaches to the right (its edge is in frame) and to the
+   * left (off the screen — only one side shows an edge). */
+  const faceHalf = faceHalfFor(opts.stageWidth, routeX);
+  const faceLeft = faceLeftFor(routeX);
   // While the trim is active this equals ledgeY exactly; panned back it goes
   // negative (up to the headroom cap) and the scene rides up off-screen.
   const nowScreenY = Math.max(
@@ -316,6 +356,13 @@ export function buildSummitLayout(
   const dayNo = Math.floor(nowMs / 86400000);
   const openOrder = base.geometries
     .filter((g) => g.reachesNow && g.inWindow)
+    .map((g) => g.branchId);
+  /** Ropes left-to-right across the face: the order the label ladder uses, so
+   * that adjacent columns always land on different rows. */
+  const columnOrder = base.geometries
+    .filter((g) => g.reachesNow && g.inWindow)
+    .slice()
+    .sort((a, b) => a.laneY - b.laneY)
     .map((g) => g.branchId);
   const seedOrder = daySeedOrder(openOrder, now);
   const ladder = summitLadder(opts.ladderHeight ?? timeLen, openOrder.length);
@@ -341,10 +388,7 @@ export function buildSummitLayout(
   // works them (Now), which keeps the columns distinct instead of clamping
   // several of them onto the same line.
   const peakYRest = nowScreenY - ladder.peakAbove;
-  const hwNow = Math.max(
-    46,
-    mountainHalfWidth(nowScreenY - peakYRest, opts.stageWidth, timeLen) - 34,
-  );
+  const hwNow = Math.max(46, mountainHalfWidth(nowScreenY - peakYRest, faceHalf, timeLen) - 34);
   const widestLane = Math.max(
     1,
     ...base.geometries
@@ -373,7 +417,7 @@ export function buildSummitLayout(
       // A conquered ledge sits higher, where the face is narrower — hold it
       // inside the rock there too.
       const hw = coiled
-        ? mountainHalfWidth(ay - peakYRest, opts.stageWidth, timeLen) - 30
+        ? mountainHalfWidth(ay - peakYRest, faceHalf, timeLen) - 30
         : hwNow;
       const ax = Math.round(
         base.mainY + Math.sign(laneOffset || 1) * Math.min(Math.abs(laneOffset), Math.max(24, hw)),
@@ -382,7 +426,7 @@ export function buildSummitLayout(
       // the Now line (which is where he takes hold of it) and keeps going, so
       // no rope end is ever seen swinging about mid-climb
       const dangleY = Math.round(nowScreenY + 620 + seeded(seedBase, 62) * 120);
-      const ordinal = openOrder.indexOf(g.branchId);
+      const ordinal = columnOrder.indexOf(g.branchId);
       const runSpan = Math.max(1, base.nowX - g.forkX);
       return {
         ...g,
@@ -393,7 +437,9 @@ export function buildSummitLayout(
         endY: Math.round(ay), // the anchor: a cliff ledge on the face
         forkVisible: false,
         laneX: ax,
-        labelX: ax,
+        // Names are centred on their column and ~140px wide, so a column near
+        // an edge would push its name off the screen: hold it inside the stage.
+        labelX: Math.max(74, Math.min(opts.stageWidth - 74, ax)),
         // A conquered rope names itself under its own cliff edge; a waiting
         // one names itself in the band just below the climber, laddered so
         // neighbouring columns never collide.
@@ -451,7 +497,8 @@ export function buildSummitLayout(
     panScale,
     peakAbove: ladder.peakAbove,
     ladderStep: ladder.step,
-    ladderTop: ladder.topDist,
     ladderHeadroom: ladder.headroom,
+    faceHalf,
+    faceLeft,
   };
 }

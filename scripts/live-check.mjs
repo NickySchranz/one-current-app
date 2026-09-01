@@ -19,7 +19,7 @@ const check = (name, ok, detail = "") => {
 
 // ---- patient app: live login against the Workers API ----
 const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
-await page.goto("https://nickyschranz.github.io/one-current-app/");
+await page.goto("https://app.onecurrentapp.com/");
 await page.waitForTimeout(2500);
 check("app gate shown", await page.getByText("Welcome back").isVisible());
 await page.getByLabel("Email").fill("test@gmail.com");
