@@ -1648,6 +1648,20 @@ export function LifeTimeline() {
     if (!g || !g.inWindow) return null;
     return { id, g };
   })();
+  // A turn can carry the rope he is holding round the back of the mountain.
+  // Rather than being scrolled out of view on it, he lets go and walks back to
+  // Now — the one place on this map that is always where he belongs.
+  const heldRopeId = mascot.inspectedBranchId ?? mascot.arrivedBranchId ?? null;
+  useEffect(() => {
+    if (!vertical || !heldRopeId) return;
+    const r = ropeAngles.find((x) => x.id === heldRopeId);
+    if (!r) return;
+    if (Math.cos(r.angle + rotRef.current) > 0.4) return;
+    if (armedBranchId === heldRopeId) setArmedBranchId(null);
+    mascotRef.current?.goHome();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable
+  }, [vertical, rotTick, heldRopeId, ropeAngles, armedBranchId]);
+
   // The mountain turns by itself at ONE moment only: when every rope facing
   // the viewer has been handled, it brings the next one round — the day's work
   // arriving rather than having to be hunted for. (It must never turn at any

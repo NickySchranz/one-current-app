@@ -548,6 +548,45 @@ await page.close();
   await p2.close();
 }
 
+/** A rope facing the viewer (effective opacity up the whole chain). */
+const ropeIn = (pg) =>
+  pg.evaluate(() => {
+    for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+      const len = el.getTotalLength();
+      if (len < 80) continue;
+      const a = el.getPointAtLength(0), b = el.getPointAtLength(len);
+      if (Math.abs(len - Math.abs(b.y - a.y)) > 3) continue;
+      let o = 1;
+      for (let n = el; n && n.tagName !== "svg"; n = n.parentElement)
+        o *= Number(getComputedStyle(n).opacity);
+      if (o < 0.6) continue;
+      const m = el.getScreenCTM();
+      for (let f = 0.1; f < 0.9; f += 0.05) {
+        const q = el.getPointAtLength(len * f);
+        const y = m.b * q.x + m.d * q.y + m.f;
+        if (y > 220 && y < 620) return { x: m.a * q.x + m.c * q.y + m.e, y };
+      }
+    }
+    return null;
+  });
+
+/** A point on the rock clear of every rope, to start a turn from. */
+const emptyX = (pg) =>
+  pg.evaluate(() => {
+    const xs = [];
+    for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+      const len = el.getTotalLength();
+      if (len < 80) continue;
+      const a = el.getPointAtLength(0), b = el.getPointAtLength(len);
+      if (Math.abs(len - Math.abs(b.y - a.y)) > 3) continue;
+      const m = el.getScreenCTM();
+      xs.push(m.a * a.x + m.c * a.y + m.e);
+    }
+    for (let x = 40; x < window.innerWidth - 80; x += 6)
+      if (xs.every((r) => Math.abs(r - x) > 30)) return x;
+    return 40;
+  });
+
 // ── 7. the ring: the mountain turns, and every thread is accounted for ──
 {
   const p2 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -627,6 +666,43 @@ await page.close();
     moved >= 2,
     `turning the mountain brings other ropes round (${moved} of ${after.length} in new places)`,
   );
+  // he must not be carried out of view on a rope that turns away: he lets go
+  // and walks back to Now
+  const climberX = () =>
+    p2.evaluate(() => {
+      const sprite = [...document.querySelectorAll("svg g")].find(
+        (g) => g.querySelectorAll(":scope > rect").length > 12,
+      );
+      const nowEl = [...document.querySelectorAll("text")].find((t) => t.textContent === "Now");
+      return {
+        pip: sprite ? Math.round(sprite.getBoundingClientRect().left) : null,
+        now: nowEl ? Math.round(nowEl.getBoundingClientRect().left) : null,
+      };
+    });
+  const home = await climberX();
+  const ropeNow = await ropeIn(p2);
+  if (ropeNow) {
+    await p2.mouse.click(ropeNow.x, ropeNow.y);
+    await p2.waitForTimeout(2000);
+    const onRope = await climberX();
+    // turn that rope round the back, twice, and let him decide
+    for (let n = 0; n < 2; n++) {
+      const from = await emptyX(p2);
+      await p2.mouse.move(from, 620);
+      await p2.mouse.down();
+      for (let i = 1; i <= 20; i++) await p2.mouse.move(from - i * 24, 620);
+      await p2.mouse.up();
+      await p2.waitForTimeout(1600);
+    }
+    const back = await climberX();
+    check(
+      home.pip !== null &&
+        onRope.pip !== null &&
+        back.pip !== null &&
+        Math.abs(back.pip - home.pip) < 30,
+      `a rope turned away sends him back to Now (home ${home.pip} → rope ${onRope.pip} → ${back.pip})`,
+    );
+  }
   await p2.screenshot({ path: "/tmp/summit-07-turned.png" });
   await p2.close();
 }

@@ -54,6 +54,12 @@ export type MascotState = {
    */
   climbInPlace: (ms: number) => void;
   /**
+   * Summit: let go of whatever he is holding and walk back to Now. Used when a
+   * turn carries his rope round the back of the mountain — he must not be
+   * scrolled out of view standing on something nobody can see.
+   */
+  goHome: () => void;
+  /**
    * The full sweep: Pip sprints through every given thread's endpoint,
    * calling `onBonk` at each, then finishes at Now with a triumphant line.
    * Under reduced motion the bonks land staggered with no run.
@@ -1008,6 +1014,37 @@ export function useMascot(
   focusBranchRef.current = focusBranch;
 
 
+  /** Let go and walk back to the Now spot. */
+  const goHome = useCallback(() => {
+    if (superBonkActiveRef.current || viewingIntegratedRef.current) return;
+    if (heldRef.current) return; // the user is holding this thread open
+    clearTimer();
+    cancelRaf();
+    inspectedId.current = null;
+    setInspectedIdState(null);
+    setPendingIdState(null);
+    setArrivedIdState(null);
+    chillingRef.current = true;
+    fadeBubble(0, 120);
+    const tx = nowXRef.current - PX * 12 - 10;
+    const ty = nowYRef.current - PX * 10;
+    const settle = () => {
+      jumpDestRef.current = null;
+      phase.current = 'idle';
+      setFrame('IDLE_A');
+      scheduleJump(2600 + Math.random() * 1400);
+    };
+    if (Math.hypot(tx - posRef.current.x, ty - posRef.current.y) < 12) {
+      settle();
+      return;
+    }
+    phase.current = 'jumping';
+    jumpDestRef.current = { x: tx, y: ty, branchId: "__now__" };
+    setFrame('RUN_A');
+    glideRun(tx, ty, settle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable
+  }, [fadeBubble, glideRun, scheduleJump]);
+
   /** The climbing gait, in place, for as long as the mountain is moving. */
   const climbInPlace = useCallback((ms: number) => {
     if (superBonkActiveRef.current || viewingIntegratedRef.current) return;
@@ -1181,7 +1218,7 @@ export function useMascot(
     pendingBranchId: pendingIdState,
     arrivedBranchId: arrivedIdState,
     arrivedVia,
-    onPress, showReaction, focusBranch, climbInPlace, superBonk,
+    onPress, showReaction, focusBranch, climbInPlace, goHome, superBonk,
     phrases: lang, visible, born,
   };
 }
