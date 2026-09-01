@@ -221,6 +221,14 @@ export type SummitLayoutOptions = {
    * hanging — he is on his way up it.
    */
   retiredIds?: readonly string[];
+  /**
+   * How far the mountain has already travelled down today (world px). It is
+   * BAKED into the rock's geometry, not applied as a transform, so arriving
+   * on a half-climbed day draws the mountain where it already is — nothing
+   * animates on load. Only the change from one answer to the next is
+   * animated, by the stage.
+   */
+  climbDist?: number;
 };
 
 /** How many chars of a rope's title fit its ladder slot. */
@@ -304,7 +312,6 @@ export function buildSummitLayout(
     .map((g) => g.branchId);
   const seedOrder = daySeedOrder(openOrder, now);
   const ladder = summitLadder(timeLen, openOrder.length);
-  const peakY = nowScreenY - ladder.peakAbove;
   // The silhouette stretches with the day's mountain (see mountainHalfWidth).
   const faceScale = ladder.peakAbove / PROFILE_REF;
   // Fallback rung order for climbed ropes the caller has no record of
@@ -319,10 +326,28 @@ export function buildSummitLayout(
     rungOf.set(id, r ?? nextRank++);
   }
   const retired = new Set(opts.retiredIds ?? []);
+  const climbDist = Math.round(opts.climbDist ?? 0);
   // He stands at Now, always — so the band where a waiting rope is named and
   // its moments show is a fixed strip just below it. The stage does NOT
   // translate that strip; only the mountain and the ropes themselves move.
   const openLabelY = Math.round(nowScreenY + 44);
+
+  // Every rope must hang ON the rock — at any stage width, phone included.
+  // The lane spread is squeezed to the mountain's half-width at the height he
+  // works them (Now), which keeps the columns distinct instead of clamping
+  // several of them onto the same line.
+  const peakYBaked = nowScreenY - ladder.peakAbove + climbDist;
+  const hwNow = Math.max(
+    46,
+    mountainHalfWidth(nowScreenY - peakYBaked, opts.stageWidth, faceScale) - 34,
+  );
+  const widestLane = Math.max(
+    1,
+    ...base.geometries
+      .filter((g) => g.reachesNow)
+      .map((g) => Math.abs(g.laneY - base.bandY)),
+  );
+  const squeeze = Math.min(1, hwNow / widestLane);
 
   const geometries: BranchGeometry[] = base.geometries.map((g) => {
     if (g.reachesNow) {
@@ -333,22 +358,28 @@ export function buildSummitLayout(
       const ay = coiled
         ? nowScreenY -
           ladder.step * (rung + 1) +
+          climbDist +
           Math.round((seeded(seedBase, 61) - 0.5) * 26)
         : // still waiting: hung from far above the summit, so its anchor is
           // never in frame and the rope crosses his level at any climb offset
-          nowScreenY - ladder.peakAbove - 120 - Math.round(seeded(seedBase, 61) * 90);
-      const laneOffset = g.laneY - base.bandY;
-      // A conquered ledge must sit on rock; a waiting rope's anchor is out
-      // of view, so its column keeps the full lane spread for grabbing.
+          nowScreenY -
+          ladder.peakAbove -
+          120 -
+          Math.round(seeded(seedBase, 61) * 90) +
+          climbDist;
+      const laneOffset = (g.laneY - base.bandY) * squeeze;
+      // A conquered ledge sits higher, where the face is narrower — hold it
+      // inside the rock there too.
       const hw = coiled
-        ? mountainHalfWidth(ay - peakY, opts.stageWidth, faceScale) - 30
-        : Number.POSITIVE_INFINITY;
+        ? mountainHalfWidth(ay - peakYBaked, opts.stageWidth, faceScale) - 30
+        : hwNow;
       const ax = Math.round(
         base.mainY + Math.sign(laneOffset || 1) * Math.min(Math.abs(laneOffset), Math.max(24, hw)),
       );
-      // the free end hangs just below him — that is where a rope is taken
-      // hold of, and it is why his starting place IS the Now line
-      const dangleY = Math.round(nowScreenY + 54 + seeded(seedBase, 62) * 46);
+      // the free end runs off below the screen: a rope passes right by him at
+      // the Now line (which is where he takes hold of it) and keeps going, so
+      // no rope end is ever seen swinging about mid-climb
+      const dangleY = Math.round(nowScreenY + 620 + seeded(seedBase, 62) * 120);
       const ordinal = openOrder.indexOf(g.branchId);
       const runSpan = Math.max(1, base.nowX - g.forkX);
       return {

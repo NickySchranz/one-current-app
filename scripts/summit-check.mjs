@@ -220,7 +220,7 @@ await page.close();
       const tops = [];
       for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
         const len = el.getTotalLength();
-        if (len < 260) continue;
+        if (len < 80) continue;
         const a = el.getPointAtLength(0);
         const b = el.getPointAtLength(len);
         if (Math.abs(len - Math.abs(b.y - a.y)) > 3) continue;
@@ -243,7 +243,7 @@ await page.close();
       let n = 0;
       for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
         const len = el.getTotalLength();
-        if (len < 260) continue;
+        if (len < 80) continue;
         const a = el.getPointAtLength(0);
         const b = el.getPointAtLength(len);
         if (Math.abs(len - Math.abs(b.y - a.y)) <= 3) n++;
@@ -282,7 +282,7 @@ await page.close();
     // M..L; closed history keeps its curved time geometry)
     for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
       const len = el.getTotalLength();
-      if (len < 260) continue;
+      if (len < 80) continue;
       const a = el.getPointAtLength(0);
       const b = el.getPointAtLength(len);
       if (Math.abs(len - Math.abs(b.y - a.y)) > 3) continue; // curved → closed

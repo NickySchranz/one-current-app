@@ -29,7 +29,7 @@ import { useLayoutStore } from "@/stores/layout-store";
 import { measureNode } from "@/ui/measure";
 import { setWalkthroughPoint, useWalkthroughTarget } from "@/features/tutorial/targets";
 import { buildTimelineLayout } from "@/visualization/main-line/layout";
-import { buildSummitLayout, dateToScreenY, daySeedOrder, LEDGE_Y, type SummitLayout } from "@/visualization/vertical/transpose";
+import { buildSummitLayout, dateToScreenY, daySeedOrder, LEDGE_Y, summitLadder, type SummitLayout } from "@/visualization/vertical/transpose";
 import { themeOrientation } from "@/visualization/theme";
 import { generateTicks, dateToX, addDays } from "@/visualization/zoom/time-scale";
 import { describeTimeline } from "@/visualization/a11y/describe";
@@ -586,6 +586,18 @@ export function LifeTimeline() {
         .sort()
         .join("|")
     : "";
+  /** How far the mountain has already travelled today — baked into the rock's
+   * geometry (see the climbDist option), so a half-climbed day draws itself
+   * where it stands and nothing animates on arrival. */
+  const climbDist = vertical
+    ? (() => {
+        const handled = handledSig ? handledSig.split("|").length : 0;
+        const L = Math.max(240, size.height - Math.round(bottomInset));
+        const ladder = summitLadder(L, activeLines.length);
+        const all = handled > 0 && handled === activeLines.length;
+        return handled * ladder.step + (all ? ladder.headroom : 0);
+      })()
+    : 0;
   const climbOrderRef = useRef<string[]>([]);
   const climbRanks = useMemo(() => {
     const handled = new Set(handledSig ? handledSig.split("|") : []);
@@ -635,6 +647,7 @@ export function LifeTimeline() {
             pinnedBranchIds,
             climbRanks,
             retiredIds,
+            climbDist,
             // Now sits mid-canvas: the climber stands there all day, the
             // mountain rises above him and the past falls away below. (The
             // builder clamps this to half the canvas, which is the point.)
@@ -679,7 +692,7 @@ export function LifeTimeline() {
   const unattended = activeLines.filter((b) => !handledToday(b, now)).length;
   const allDone = unattended === 0 && activeLines.length > 0;
   const ledgeWorldY = sm ? sm.nowScreenY : 0;
-  const peakY = ledgeWorldY - (sm?.peakAbove ?? 0);
+  const peakY = ledgeWorldY - (sm?.peakAbove ?? 0) + climbDist;
   const geoById = useMemo(
     () => new Map(layout.geometries.map((g) => [g.branchId, g])),
     [layout.geometries],
@@ -688,27 +701,31 @@ export function LifeTimeline() {
   const restSpot = sm ? { x: sm.routeX, y: ledgeWorldY - 4 } : { x: 0, y: 0 };
   const restPipY = restSpot.y;
 
-  /** Rungs earned today; the summit adds its headroom on the last one. */
-  const rungsClimbed = sm ? activeLines.filter((b) => handledToday(b, now)).length : 0;
-  const climbRest = sm
-    ? rungsClimbed * sm.ladderStep + (allDone ? sm.ladderHeadroom : 0)
-    : 0;
-  /** How far the mountain has slid, on the UI thread. It GLIDES to each new
-   * rung: the cliff edge above comes down into frame, arrives under his feet,
-   * and everything on the rock — ropes, ledges, coils, texture, the sky at
-   * its own slower rate — travels with it. */
+  /** The in-flight part of the climb only. The mountain's resting position is
+   * baked into its geometry (climbDist), so this is ZERO at rest — nothing
+   * animates on load, ever. When an answer lands, the rock has already been
+   * rebuilt one rung lower, so this jumps back by that rung and glides to
+   * zero: the cliff edge above comes down into frame and settles under his
+   * feet, and the rock, its texture, the ropes and the sky come with it. */
   const climbSV = useSharedValue(0);
-  const climbRestRef = useRef(climbRest);
+  const climbDistRef = useRef(climbDist);
   useEffect(() => {
     if (!vertical) return;
-    const from = climbRestRef.current;
-    climbRestRef.current = climbRest;
-    if (climbRest === from) return;
-    const rise = Math.abs(climbRest - from);
-    const dur = reducedMotion ? 0 : Math.max(700, Math.min(2100, 380 + rise * 1.6));
-    // A rope leaves the face only once the rock it hangs from has arrived.
+    const from = climbDistRef.current;
+    climbDistRef.current = climbDist;
+    if (climbDist === from) return;
+    const rise = climbDist - from;
+    // A day rolling over, or a rope reopening, is not a climb: the mountain
+    // simply is where it is.
+    if (rise <= 0 || reducedMotion) {
+      climbSV.value = 0;
+      retireAllRef.current();
+      return;
+    }
+    const dur = Math.max(700, Math.min(2100, 380 + rise * 1.6));
+    climbSV.value = -rise;
     climbSV.value = withTiming(
-      climbRest,
+      0,
       { duration: dur, easing: Easing.inOut(Easing.quad) },
       (finished) => {
         "worklet";
@@ -716,9 +733,9 @@ export function LifeTimeline() {
       },
     );
     // He climbs in place for exactly as long as the mountain moves.
-    if (climbRest > from) mascotRef.current?.climbInPlace(dur);
+    mascotRef.current?.climbInPlace(dur);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable
-  }, [vertical, climbRest, reducedMotion]);
+  }, [vertical, climbDist, reducedMotion]);
   const climbProps = useAnimatedProps(() => ({ translateY: climbSV.value }), [climbSV]);
   /** The sky drifts at a fraction of the rock — parallax, so height reads. */
   const skyProps = useAnimatedProps(
@@ -1798,7 +1815,7 @@ export function LifeTimeline() {
                     x={0}
                     y={peakY - 300}
                     width={svgWidth}
-                    height={Math.max(0, sm.peakAbove + 300 - climbRest)}
+                    height={Math.max(0, ledgeWorldY - (peakY - 300))}
                     fill={tk.inkFaint}
                     opacity={0.05}
                   />
@@ -1807,9 +1824,12 @@ export function LifeTimeline() {
                     peakY={peakY}
                     width={svgWidth}
                     timeLen={sm.timeLen}
-                    depth={900}
+                    // the rock is drawn where it stands (climbDist is baked
+                    // into its geometry), so its base has to reach that much
+                    // deeper or the bottom edge of the mountain rises into view
+                    depth={900 + climbDist}
                     faceScale={sm.faceScale}
-                    viewTop={ledgeWorldY - climbRest}
+                    viewTop={ledgeWorldY - 1.6 * sm.timeLen}
                     tk={tk}
                   />
                   {/* marks on the rock: without them the world can slide all
@@ -1817,18 +1837,18 @@ export function LifeTimeline() {
                   <FaceTexture
                     routeX={sm.routeX}
                     peakY={peakY}
-                    bandTop={ledgeWorldY - climbRest - sm.timeLen}
-                    bandBottom={ledgeWorldY - climbRest + 2 * sm.timeLen}
-                    bottomY={sm.timeLen + 900}
+                    bandTop={ledgeWorldY - 2.4 * sm.timeLen}
+                    bandBottom={ledgeWorldY + 2 * sm.timeLen}
+                    bottomY={sm.timeLen + 900 + climbDist}
                     width={svgWidth}
                     faceScale={sm.faceScale}
                     tk={tk}
                   />
                   {/* the way still to go, drawn on the rock — it ends at Now
                       (its lower end pulled back by what he has climbed) */}
-                  {ledgeWorldY - climbRest - peakY > 4 && (
+                  {ledgeWorldY - peakY > 4 && (
                     <Path
-                      d={`M ${sm.routeX} ${ledgeWorldY - climbRest} L ${sm.routeX} ${peakY}`}
+                      d={`M ${sm.routeX} ${ledgeWorldY} L ${sm.routeX} ${peakY}`}
                       stroke={tk.lineMain}
                       strokeWidth={2}
                       fill="none"
