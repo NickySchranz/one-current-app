@@ -230,6 +230,13 @@ await page.close();
       }
       return tops;
     });
+  /** Screen y of every answered rope's cliff edge (its coil). */
+  const coilYs = () =>
+    p2.evaluate(() =>
+      [...document.querySelectorAll('circle[fill="transparent"]')]
+        .filter((c) => Number(c.getAttribute("r")) === 22)
+        .map((c) => c.getBoundingClientRect().top + 22),
+    );
   /** How many ropes still hang on the face (straight vertical hit paths). */
   const ropeCount = () =>
     p2.evaluate(() => {
@@ -302,32 +309,43 @@ await page.close();
     const svg = [...document.querySelectorAll("svg")].sort(
       (a, b) => Number(b.getAttribute("width") ?? 0) - Number(a.getAttribute("width") ?? 0),
     )[0];
-    const g = svg?.querySelector(":scope > g");
-    const tint = g?.querySelector("rect");
-    // the pennant: a tiny two-path group whose translateY IS pipFeetY
-    const pennant = [...g.querySelectorAll("g")].find((el) => {
-      const kids = [...el.children];
-      return kids.length === 2 && kids.every((k) => k.tagName === "path") &&
-        /v -13/.test(kids[0].getAttribute("d") ?? "");
-    });
+    // the mountain's own motion, measured on the snow cap itself (the layer
+    // transform lives on an animated group whose attribute the renderer may
+    // write in different shapes — the rendered box cannot lie)
+    const cap = [...(svg?.querySelectorAll('path[fill="#ffffff"]') ?? [])].find(
+      (el) => el.getAttribute("opacity") === "0.65",
+    );
+    const nowLabel = [...document.querySelectorAll("text")].find(
+      (el) => el.textContent === "Now",
+    );
     const read = () => {
-      const m = /translate\([^,]+,\s*([-\d.]+)/.exec(g?.getAttribute("transform") ?? "");
-      const pm = /translate\([^,]+,\s*([-\d.]+)/.exec(pennant?.getAttribute("transform") ?? "");
       window.__cam.push([
-        m ? Number(m[1]) : 0,
-        pm ? Number(pm[1]) : 0,
-        Number(tint?.getAttribute("y") ?? 0),
+        cap ? Math.round(cap.getBoundingClientRect().top) : 0,
+        nowLabel ? Math.round(nowLabel.getBoundingClientRect().top) : 0,
+        0,
       ]);
       if (window.__cam.length < 420) requestAnimationFrame(read);
     };
     requestAnimationFrame(read);
   });
+  // Race-free version of "a cliff edge never appears on screen": with him
+  // standing on the topmost ledge, one rung further up must already be above
+  // the stage's top edge (48px — under the header), so the ledge he earns
+  // next is out of view at the moment he earns it and can only come into
+  // frame as he climbs.
+  const ledgesBefore = (await coilYs()).sort((a, b) => a - b);
+  const rungStep = ledgesBefore.length > 1 ? ledgesBefore[1] - ledgesBefore[0] : 0;
+  check(
+    rungStep > 0 && ledgesBefore[0] - rungStep < 48,
+    `the next cliff edge is always out of view (his ledge ${Math.round(ledgesBefore[0])}, one rung up ${Math.round(ledgesBefore[0] - rungStep)}, stage top 48)`,
+  );
   await p2.getByText("Let it rest", { exact: false }).first().click();
   // The answered rope must NOT vanish on the answer — it stays on the face,
   // now fixed to its cliff edge, and he climbs it.
   await p2.waitForTimeout(400);
   const stillHanging = await ropeCount();
   check(stillHanging === 1, `the answered rope stays on the face while he climbs it (${stillHanging} hanging)`);
+
   await p2.waitForTimeout(6800);
   const rows = await p2.evaluate(() => window.__cam);
   const cam = rows.map((r) => r[0]);
@@ -339,29 +357,38 @@ await page.close();
       dips.push(`${i}:${cam[i - 1]}->${cam[i]} feet${rows[i - 1][1]}->${rows[i][1]}`);
     }
   if (dips.length) console.log("  dips:", dips.slice(0, 6).join("  "));
-  check(cam.length > 60 && monotonic, `world only ever moves down during the climb (${cam.length} samples)`);
+  check(cam.length > 60 && monotonic, `the mountain only ever moves down (${cam.length} samples)`);
+  // THE PIN: the time frame — Now, its dates, the climber standing there —
+  // does not move at all. Only the mountain does.
+  const nowYs = rows.map((r) => r[1]).filter((v) => v > 0);
+  const pinLo = Math.min(...nowYs);
+  const pinHi = Math.max(...nowYs);
+  check(
+    nowYs.length > 60 && pinHi - pinLo <= 2,
+    `Now (and the climber on it) never moves during the climb (${Math.round(pinLo)}..${Math.round(pinHi)})`,
+  );
   const travel = cam[cam.length - 1] - cam[0];
   check(
-    travel > 0.3 * (800 - 48),
-    `the climb is a real ascent — the world slid ${Math.round(travel)}px down`,
+    travel > 0.4 * (800 - 48),
+    `the climb is a real ascent — the mountain slid ${Math.round(travel)}px down`,
   );
+  const nowY = await p2.evaluate(() => {
+    const el = [...document.querySelectorAll("text")].find((t) => t.textContent === "Now");
+    return el ? Math.round(el.getBoundingClientRect().top) : null;
+  });
   const topAfter = await capTop();
-  const stageH = 800 - 48;
   check(
-    topAfter !== null && Math.abs(topAfter - (48 + stageH * 0.3)) < 40,
-    `top-out frames the summit near 30% from the top (cap top ${Math.round(topAfter ?? 0)})`,
+    topAfter !== null && nowY !== null && Math.abs(topAfter - nowY) < 90,
+    `the last climb brings the summit down to him (cap top ${Math.round(topAfter ?? 0)}, Now ${nowY})`,
   );
   const hanging = await ropeCount();
   check(hanging === 0, "no rope still hangs after top-out (all coiled on their ledges)");
-  // every conquered cliff ledge (its coil) fits inside one screen height
-  const coilYs = await p2.evaluate(() =>
-    [...document.querySelectorAll('circle[fill="transparent"]')]
-      .filter((c) => Number(c.getAttribute("r")) === 22)
-      .map((c) => c.getBoundingClientRect().top + 22),
-  );
+  // a rung is a screen-jump, so the conquered ledges trail off below the
+  // frame — what must hold is that they exist, on the rock, in climb order
+  const allLedges = await coilYs();
   check(
-    coilYs.length >= 5 && coilYs.every((y) => y > 0 && y < 800),
-    `every conquered ledge visible at top-out (${coilYs.length} coils, span ${Math.round(Math.min(...coilYs, 9999))}..${Math.round(Math.max(...coilYs, -9999))})`,
+    allLedges.length >= 6,
+    `every climbed rope left its cliff edge on the face (${allLedges.length} ledges)`,
   );
   await p2.screenshot({ path: "/tmp/summit-06-topout.png" });
   await p2.close();

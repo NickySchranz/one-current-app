@@ -19,49 +19,36 @@ import type { BranchGeometry } from "../branch-lines/paths";
 import { dateToX, dateToXRaw, defaultWindow, type TimeWindow } from "../zoom/time-scale";
 
 /**
- * The day's climb is a LADDER of cliff edges above the Now ledge. Three
- * things have to hold at once, and they set every number here:
+ * The day's climb, in mountain coordinates. NOTHING here moves with the
+ * climber, because the climber never moves: he and the Now point hold their
+ * place on screen and the whole mountain slides DOWN past them (the stage
+ * translates this geometry by `climbOffset`). So:
  *
- *   • The FIRST rung starts out of view. He stands mid-screen on an
- *     unclimbed day, so rung 0 sits half a screen (plus margin) above Now:
- *     the first rope is climbed up out of the frame, and the camera pans
- *     down after him to set him on his new ledge.
- *   • The PEAK stays out of view until the last rope. The camera rides him
- *     HIGHER on the screen the further he climbs (0.5·L of sky above him at
- *     Now, 0.2·L on the top rung), so a headroom of ~0.24·L keeps the summit
- *     past the top edge on every rung — the last climb brings it in, and he
- *     lands on it back at 0.3·L with the whole day below him.
- *   • Every conquered ledge fits ONE screen at top-out: headroom plus the
- *     ladder span must clear the screen below him, so the rung step shrinks
- *     as the day's rope count grows. Seven ropes cannot each be a
- *     screen-height climb AND all be in frame at the end; the FIRST climb is
- *     the long one (half a screen, straight up out of view), the rest are
- *     rungs.
+ *   • Rung k — the cliff edge earned by the (k+1)th rope answered today —
+ *     sits (k+1) steps above Now. Once k+1 ropes are climbed the offset is
+ *     (k+1) steps, which puts that ledge exactly at Now: under his feet.
+ *   • A step is a screen-jump (0.56·L), so the ledge he is about to earn is
+ *     always past the top edge — cliff edges are never seen appearing, they
+ *     slide down into frame as he climbs.
+ *   • The summit is one headroom (0.55·L) above the top rung, so it too
+ *     stays out of frame until the last rope, then arrives under his feet.
+ *   • A rope still waiting hangs from far above the peak down past Now, so
+ *     it crosses his level at every offset and can always be grabbed.
  *
- * Ropes still waiting hang from above the peak, so their anchors are never
- * in frame; each re-anchors at its rung the moment it is answered.
+ * The consequence, stated plainly: rungs a screen tall mean the day's climb
+ * is many screens long, so the summit frame holds the peak and the sky, not
+ * a view of every ledge conquered on the way. Short rungs would fit them all
+ * in frame, but then a cliff edge would appear out of nowhere on screen.
  */
 export function summitLadder(
   timeLen: number,
   ropeCount: number,
-): {
-  first: number;
-  step: number;
-  headroom: number;
-  /** World px from Now up to the TOP rung (where the camera rides highest). */
-  topDist: number;
-  peakAbove: number;
-} {
+): { step: number; headroom: number; topDist: number; peakAbove: number } {
   const n = Math.max(1, ropeCount);
-  const first = Math.round(0.5 * timeLen) + 60;
-  const headroom = Math.round(0.24 * timeLen) + 45;
-  // Room left on screen below him at top-out (he stands on the peak at
-  // 0.3·L, and the lowest rung must clear the bottom edge by 30px).
-  const room = Math.max(0, 0.7 * timeLen - 30 - headroom);
-  const step =
-    n > 1 ? Math.round(Math.max(40, Math.min(0.22 * timeLen, room / (n - 1)))) : 0;
-  const topDist = first + (n - 1) * step;
-  return { first, step, headroom, topDist, peakAbove: topDist + headroom };
+  const step = Math.round(Math.max(0.56 * timeLen, 380));
+  const headroom = Math.round(0.55 * timeLen);
+  const topDist = n * step;
+  return { step, headroom, topDist, peakAbove: topDist + headroom };
 }
 
 /** Deterministic jitter, stable within a day (same as timeline-fx's). */
@@ -92,16 +79,31 @@ export function daySeedOrder(ids: readonly string[], now: Date): string[] {
  * lands ON the rock: a narrow cap, quickly broadening shoulders, then the
  * massif running near-vertical to the valley.
  */
-export function mountainHalfWidth(depth: number, width: number): number {
-  const capW = 70;
-  const shW = 0.3 * width;
-  const brW = 0.47 * width;
-  if (depth <= 0) return 8;
-  if (depth <= 90) return 8 + (capW - 8) * (depth / 90);
-  if (depth <= 260) return capW + (shW - capW) * ((depth - 90) / 170);
-  if (depth <= 480) return shW + (brW - shW) * ((depth - 260) / 220);
-  return Math.min(0.54 * width, brW + (depth - 480) * 0.08);
+export function mountainHalfWidth(
+  depth: number,
+  width: number,
+  /** How tall the mountain is compared with the profile's reference height
+   * (PROFILE_REF). A day with many ropes builds a much taller mountain, and
+   * the silhouette has to stretch with it — otherwise the flanks are miles
+   * off either side of the screen for the whole climb and the shape can
+   * never be seen. */
+  scale = 1,
+): number {
+  const d = depth / Math.max(0.35, scale);
+  const capW = 60;
+  const shW = 0.22 * width;
+  const brW = 0.34 * width;
+  // The flanks stay inside the stage: a day's mountain is many screens tall,
+  // and a face that runs past both edges reads as a wall, not a mountain.
+  if (d <= 0) return 8;
+  if (d <= 90) return 8 + (capW - 8) * (d / 90);
+  if (d <= 260) return capW + (shW - capW) * ((d - 90) / 170);
+  if (d <= 480) return shW + (brW - shW) * ((d - 260) / 220);
+  return Math.min(0.4 * width, brW + (d - 480) * 0.06);
 }
+
+/** Mountain height the half-width profile above is drawn for. */
+export const PROFILE_REF = 560;
 
 /**
  * The highest the day's ledge (Now) ever hangs below the top edge. The
@@ -142,6 +144,10 @@ export type SummitLayout = TimelineLayout & {
   ladderStep: number;
   /** World px from Now up to the day's TOP rung (peak = this + headroom). */
   ladderTop: number;
+  /** World px the mountain rises above the top rung to reach the summit. */
+  ladderHeadroom: number;
+  /** Stretch factor for the half-width profile (peakAbove / PROFILE_REF). */
+  faceScale: number;
 };
 
 export function tp(x: number, y: number, timeLen: number): { x: number; y: number } {
@@ -299,6 +305,8 @@ export function buildSummitLayout(
   const seedOrder = daySeedOrder(openOrder, now);
   const ladder = summitLadder(timeLen, openOrder.length);
   const peakY = nowScreenY - ladder.peakAbove;
+  // The silhouette stretches with the day's mountain (see mountainHalfWidth).
+  const faceScale = ladder.peakAbove / PROFILE_REF;
   // Fallback rung order for climbed ropes the caller has no record of
   // (mid-day reload): the day-seeded order, offset past the known ranks.
   const known = Object.values(opts.climbRanks ?? {});
@@ -310,16 +318,11 @@ export function buildSummitLayout(
     const r = opts.climbRanks?.[id];
     rungOf.set(id, r ?? nextRank++);
   }
-  // His altitude at rest: the highest rung he has earned (Now on a fresh
-  // day). A waiting rope's own span runs from above the peak to below Now,
-  // so it always crosses the screen wherever he is — but its LABEL has to
-  // follow him up, or the ropes he can still grab go nameless once the Now
-  // ledge has slid off the bottom of the screen.
   const retired = new Set(opts.retiredIds ?? []);
-  const climbed = rungOf.size;
-  const perchY =
-    climbed > 0 ? nowScreenY - (ladder.first + ladder.step * (climbed - 1)) : nowScreenY;
-  const openLabelY = Math.round(perchY + 0.2 * timeLen);
+  // He stands at Now, always — so the band where a waiting rope is named and
+  // its moments show is a fixed strip just below it. The stage does NOT
+  // translate that strip; only the mountain and the ropes themselves move.
+  const openLabelY = Math.round(nowScreenY + 44);
 
   const geometries: BranchGeometry[] = base.geometries.map((g) => {
     if (g.reachesNow) {
@@ -329,19 +332,23 @@ export function buildSummitLayout(
       const rung = rungOf.get(g.branchId) ?? 0;
       const ay = coiled
         ? nowScreenY -
-          (ladder.first + ladder.step * rung) +
-          Math.round((seeded(seedBase, 61) - 0.5) * Math.min(20, ladder.step * 0.24))
-        : nowScreenY - ladder.peakAbove - 70 - Math.round(seeded(seedBase, 61) * 90);
+          ladder.step * (rung + 1) +
+          Math.round((seeded(seedBase, 61) - 0.5) * 26)
+        : // still waiting: hung from far above the summit, so its anchor is
+          // never in frame and the rope crosses his level at any climb offset
+          nowScreenY - ladder.peakAbove - 120 - Math.round(seeded(seedBase, 61) * 90);
       const laneOffset = g.laneY - base.bandY;
       // A conquered ledge must sit on rock; a waiting rope's anchor is out
       // of view, so its column keeps the full lane spread for grabbing.
       const hw = coiled
-        ? mountainHalfWidth(ay - peakY, opts.stageWidth) - 30
+        ? mountainHalfWidth(ay - peakY, opts.stageWidth, faceScale) - 30
         : Number.POSITIVE_INFINITY;
       const ax = Math.round(
         base.mainY + Math.sign(laneOffset || 1) * Math.min(Math.abs(laneOffset), Math.max(24, hw)),
       );
-      const dangleY = Math.round(nowScreenY + 26 + seeded(seedBase, 62) * 64);
+      // the free end hangs just below him — that is where a rope is taken
+      // hold of, and it is why his starting place IS the Now line
+      const dangleY = Math.round(nowScreenY + 54 + seeded(seedBase, 62) * 46);
       const ordinal = openOrder.indexOf(g.branchId);
       const runSpan = Math.max(1, base.nowX - g.forkX);
       return {
@@ -368,8 +375,10 @@ export function buildSummitLayout(
         // between its ledge and the coil.
         momentPoints: g.momentPoints.map((m) => {
           const t = Math.max(0, Math.min(1, (m.x - g.forkX) / runSpan));
-          const lo = coiled ? dangleY : openLabelY + 40;
-          const top = coiled ? ay : openLabelY - 200;
+          // coiled: on the stub under its own ledge (rides the mountain).
+          // waiting: in the fixed band around Now, where he works the rope.
+          const lo = coiled ? Math.round(ay) + 60 : nowScreenY + 40;
+          const top = coiled ? Math.round(ay) + 8 : nowScreenY - 170;
           return { ...m, x: ax, y: Math.round(lo + t * (top - lo)) };
         }),
       };
@@ -410,5 +419,7 @@ export function buildSummitLayout(
     peakAbove: ladder.peakAbove,
     ladderStep: ladder.step,
     ladderTop: ladder.topDist,
+    ladderHeadroom: ladder.headroom,
+    faceScale,
   };
 }

@@ -99,6 +99,14 @@ type Props = {
   timeLen?: number;
   /** Summit: the route's wave — only the fork/merge dots ride it. */
   routeWave?: WaveHandles | null;
+  /**
+   * Summit: how far the mountain has slid down under the climber (world px).
+   * The rope, its cliff edge and its coil live ON the mountain and ride this;
+   * the rope's NAME and its moment dots do not — they stay in the fixed band
+   * beside the climber, who never moves. That split is the whole illusion:
+   * he holds still, the mountain travels.
+   */
+  climbOffset?: SharedValue<number> | null;
 };
 
 /** Cheap stable hash → [0, 2π): every rope sways on its own phase. */
@@ -135,6 +143,7 @@ export const BranchLine = memo(function BranchLine({
   orientation = "horizontal",
   timeLen = 0,
   routeWave = null,
+  climbOffset = null,
 }: Props) {
   const vertical = orientation === "vertical";
   const t = useT();
@@ -154,6 +163,12 @@ export const BranchLine = memo(function BranchLine({
     const p = holding && holdP ? holdP.value : 0;
     return { r: Math.max(0.1, 4 + p * 16), opacity: 0.32 * p };
   }, [holding, holdP]);
+  // The mountain's own slide: the rope and its cliff edge ride it, the
+  // rope's name and moments do not (see the climbOffset prop).
+  const climbRide = useAnimatedProps(
+    () => ({ translateY: climbOffset ? climbOffset.value : 0 }),
+    [climbOffset],
+  );
 
   // Local closures over the id-keyed stable handlers (recreated only when
   // THIS branch renders — the parent's identity stays stable).
@@ -345,9 +360,12 @@ export const BranchLine = memo(function BranchLine({
         accessible
         accessibilityLabel={describeBranch(branch, t)}
       >
-        {/* the conquered rope rests coiled on its own cliff ledge */}
-        <CliffLedge x={g.endX} y={g.endY} tk={tk} />
-        <CoiledRope x={g.endX} y={g.endY - 9} color={color} bg={tk.bg} onPress={select} />
+        {/* the conquered rope rests coiled on its own cliff ledge — part of
+            the mountain now, so it travels down with it */}
+        <AnimatedG animatedProps={climbRide}>
+          <CliffLedge x={g.endX} y={g.endY} tk={tk} />
+          <CoiledRope x={g.endX} y={g.endY - 9} color={color} bg={tk.bg} onPress={select} />
+        </AnimatedG>
       </AnimatedG>
     );
   }
@@ -359,6 +377,9 @@ export const BranchLine = memo(function BranchLine({
       accessibilityLabel={describeBranch(branch, t)}
       onPressIn={dialTouch}
     >
+      {/* the rope itself hangs on the mountain: hit area and strokes ride
+          its slide, while the label and moments below stay with the climber */}
+      <AnimatedG animatedProps={climbRide}>
       {/* generous invisible hit area — the true geometry, never squiggled.
           react-native-svg on web only maps onPress→onClick, so the loudness
           dial's touch-start needs the DOM pointerdown directly. */}
@@ -457,6 +478,7 @@ export const BranchLine = memo(function BranchLine({
         />
       )}
       </AnimatedG>
+      </AnimatedG>
 
       {/* the charging bulge of a press-and-hold, right where it will pop */}
       {holding && (
@@ -488,7 +510,9 @@ export const BranchLine = memo(function BranchLine({
           facing you; a decision today calms it back into the plain circle. */}
       {!g.endsOnMain &&
         (vertical ? (
-          <>
+          // the anchor is a feature of the rock — it rides the mountain's
+          // slide, which is how a conquered ledge arrives under his feet
+          <AnimatedG animatedProps={climbRide}>
             {/* the anchor: a little cliff ledge on the face, the rope tied
                 over its lip */}
             <CliffLedge x={g.endX} y={g.endY} tk={tk} />
@@ -500,7 +524,7 @@ export const BranchLine = memo(function BranchLine({
               opacity={endpointStaticOpacity}
               onPress={select}
             />
-          </>
+          </AnimatedG>
         ) : Creature && !acted && !resting ? (
           <Creature
             x={g.endX}

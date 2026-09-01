@@ -48,23 +48,29 @@ function seeded(i: number, salt: number): number {
  */
 function flank(
   routeX: number,
+  /** The summit tip — the profile's origin, wherever the band starts. */
   peakY: number,
-  bottomY: number,
+  fromY: number,
+  toY: number,
   width: number,
   side: 1 | -1,
   salt: number,
+  scale: number,
 ): { x: number; y: number }[] {
   const pts: { x: number; y: number }[] = [];
-  const span = bottomY - peakY;
+  const span = Math.max(1, toY - fromY);
   const steps = Math.max(4, Math.round(span / 60));
   for (let i = 1; i <= steps; i++) {
-    const depth = (span * i) / steps;
-    const hw = mountainHalfWidth(depth, width);
-    const jx = (seeded(i, salt) - 0.5) * Math.min(26, hw * 0.4);
-    const jy = (seeded(i, salt + 1) - 0.5) * 22;
+    const y = fromY + (span * i) / steps;
+    const hw = mountainHalfWidth(y - peakY, width, scale);
+    // seeded by ALTITUDE, not by index: the drawn band shifts as the camera
+    // climbs, and index seeds would re-jitter the whole silhouette each time.
+    const k = Math.round(y / 60);
+    const jx = (seeded(k, salt) - 0.5) * Math.min(26, hw * 0.4);
+    const jy = (seeded(k, salt + 1) - 0.5) * 22;
     pts.push({
       x: Math.round(routeX + side * (hw + jx)),
-      y: Math.round(peakY + depth + (i === steps ? 0 : jy)),
+      y: Math.round(y + (i === steps ? 0 : jy)),
     });
   }
   return pts;
@@ -75,12 +81,145 @@ function flank(
  * snow-capped peak above the ledge, with jagged rocky edges. Lives inside
  * the canvas, so it pans with the world and slides down with the camera.
  */
+/**
+ * The rock itself, in texture: strata seams and grit scattered over the whole
+ * climbable height, inside the silhouette. This is what makes the ascent
+ * VISIBLE — the camera slides the world down as he gains height, and without
+ * marks on the rock there is nothing to see moving. Two batched paths, built
+ * once per mountain.
+ */
+export function FaceTexture({
+  routeX,
+  peakY,
+  bottomY,
+  bandTop,
+  bandBottom,
+  width,
+  faceScale,
+  tk,
+}: {
+  routeX: number;
+  peakY: number;
+  bottomY: number;
+  /** Only the band the camera can reach is drawn — the whole face is
+   * thousands of px tall and repaints on every camera frame. Marks are
+   * seeded by altitude, so the band can shift without them dancing. */
+  bandTop?: number;
+  bandBottom?: number;
+  width: number;
+  faceScale: number;
+  tk: ThemeTokens;
+}) {
+  const step = 46;
+  const first = peakY + 130;
+  const lo = Math.max(first, bandTop ?? first);
+  const start = first + Math.floor((lo - first) / step) * step;
+  const end = Math.min(bottomY, bandBottom ?? bottomY);
+  const { seams, grit } = useMemo(() => {
+    let seams = "";
+    let grit = "";
+    for (let y = start; y < end; y += step) {
+      const i = Math.round(y / step) * 7;
+      const hw = mountainHalfWidth(y - peakY, width, faceScale) - 26;
+      if (hw < 30) continue;
+      for (let k = 0; k < 2; k++) {
+        const j = i + k;
+        const cx = routeX + (seeded(j, 71) - 0.5) * 2 * hw;
+        const yy = Math.round(y + (seeded(j, 72) - 0.5) * 26);
+        const len = Math.round(34 + seeded(j, 73) * 96);
+        const tilt = Math.round((seeded(j, 74) - 0.5) * 14);
+        seams += `M ${Math.round(cx)} ${yy} l ${len} ${tilt} `;
+      }
+      for (let k = 0; k < 3; k++) {
+        const j = i + 3 + k;
+        const cx = Math.round(routeX + (seeded(j, 75) - 0.5) * 2 * hw);
+        const yy = Math.round(y + seeded(j, 76) * step);
+        grit += `M ${cx} ${yy} l ${1 + Math.round(seeded(j, 77) * 3)} 0 `;
+      }
+    }
+    return { seams, grit };
+  }, [routeX, peakY, start, end, width, faceScale]);
+  return (
+    <G pointerEvents="none">
+      <Path d={seams} stroke={tk.inkSoft} strokeWidth={1.2} opacity={0.3} fill="none" />
+      <Path
+        d={grit}
+        stroke={tk.inkSoft}
+        strokeWidth={2.4}
+        strokeLinecap="round"
+        opacity={0.34}
+        fill="none"
+      />
+    </G>
+  );
+}
+
+/**
+ * The sky behind the mountain, on its own slower rail (the stage moves this
+ * group at a fraction of the camera): clouds low down giving way to stars as
+ * the summit nears. Parallax is the other half of "he is going up" — the rock
+ * rushing past at full speed, the sky drifting behind it.
+ */
+export function SkyParallax({
+  peakY,
+  bottomY,
+  width,
+  tk,
+}: {
+  peakY: number;
+  bottomY: number;
+  width: number;
+  tk: ThemeTokens;
+}) {
+  const { clouds, stars } = useMemo(() => {
+    const clouds: { x: number; y: number; s: number }[] = [];
+    const span = Math.max(400, bottomY - peakY);
+    const cloudCount = Math.min(14, Math.round(span / 260));
+    for (let i = 0; i < cloudCount; i++) {
+      clouds.push({
+        // low and mid altitudes only — up top it is stars
+        y: Math.round(peakY + 300 + (span - 300) * (i / Math.max(1, cloudCount - 1))),
+        x: Math.round(seeded(i, 81) * width),
+        s: 0.7 + seeded(i, 82) * 0.8,
+      });
+    }
+    // one batched path — 30 circle nodes would repaint every frame
+    let stars = "";
+    for (let i = 0; i < 30; i++) {
+      const x = Math.round(seeded(i, 85) * width);
+      const y = Math.round(peakY - 260 + seeded(i, 86) * 900);
+      const r = Math.round((0.9 + seeded(i, 87) * 1.3) * 10) / 10;
+      stars += `M ${x - r} ${y} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 ${-r * 2} 0 `;
+    }
+    return { clouds, stars };
+  }, [peakY, bottomY, width]);
+  return (
+    <G pointerEvents="none">
+      <Path d={stars} fill={tk.inkSoft} opacity={0.5} />
+      {clouds.map((c, i) => {
+        const w = 70 * c.s;
+        const h = 16 * c.s;
+        return (
+          <Path
+            key={`c${i}`}
+            d={`M ${c.x} ${c.y} q ${w * 0.25} ${-h} ${w * 0.5} 0 q ${w * 0.3} ${-h * 0.8} ${w * 0.5} 0 Z`}
+            fill={tk.inkFaint}
+            opacity={0.09}
+          />
+        );
+      })}
+    </G>
+  );
+}
+
 export function MountainFace({
   routeX,
   peakY,
   width,
   timeLen,
   depth,
+  faceScale,
+  viewTop,
   tk,
 }: {
   routeX: number;
@@ -90,24 +229,43 @@ export function MountainFace({
   timeLen: number;
   /** How far below the dated canvas the rock keeps going. */
   depth: number;
+  /** Silhouette stretch for this day's mountain height (see faceScale). */
+  faceScale: number;
+  /** World y the camera is resting at (its top edge). The mountain of a
+   * many-rope day is thousands of px tall and the browser re-rasterizes the
+   * whole silhouette on every camera frame — so only the band the camera can
+   * actually reach is built, with a screen of slack either side for the climb
+   * in flight. */
+  viewTop?: number;
   tk: ThemeTokens;
 }) {
   const bottom = timeLen + depth;
+  const drawTop = Math.max(peakY, (viewTop ?? peakY) - timeLen);
+  const drawBottom = Math.min(bottom, (viewTop ?? peakY) + 2 * timeLen);
   const body = useMemo(() => {
-    const left = flank(routeX, peakY, bottom, width, -1, 31);
-    const right = flank(routeX, peakY, bottom, width, 1, 33);
-    let d = `M ${left[left.length - 1].x} ${bottom}`;
+    // the apex only belongs to the path when the peak is in the band
+    const apex = drawTop <= peakY + 1;
+    const top = apex ? peakY : drawTop;
+    const left = flank(routeX, peakY, top, drawBottom, width, -1, 31, faceScale);
+    const right = flank(routeX, peakY, top, drawBottom, width, 1, 33, faceScale);
+    let d = `M ${left[left.length - 1].x} ${drawBottom}`;
     for (let i = left.length - 1; i >= 0; i--) d += ` L ${left[i].x} ${left[i].y}`;
-    d += ` L ${routeX} ${Math.round(peakY)}`;
+    if (apex) {
+      d += ` L ${routeX} ${Math.round(peakY)}`;
+    } else {
+      // a straight seam across the band's top, off-screen either way
+      d += ` L ${Math.round(routeX - mountainHalfWidth(top - peakY, width, faceScale))} ${Math.round(top)}`;
+      d += ` L ${Math.round(routeX + mountainHalfWidth(top - peakY, width, faceScale))} ${Math.round(top)}`;
+    }
     for (const p of right) d += ` L ${p.x} ${p.y}`;
-    return d + ` L ${right[right.length - 1].x} ${bottom} Z`;
-  }, [routeX, peakY, bottom, width]);
+    return d + ` L ${right[right.length - 1].x} ${drawBottom} Z`;
+  }, [routeX, peakY, drawTop, drawBottom, width, faceScale]);
   // the snow cap: the top ~110px of both flanks, closed with a ragged hem
   const cap = useMemo(() => {
     const drop = 110;
     const capBottom = peakY + drop;
-    const left = flank(routeX, peakY, capBottom, width, -1, 31);
-    const right = flank(routeX, peakY, capBottom, width, 1, 33);
+    const left = flank(routeX, peakY, peakY, capBottom, width, -1, 31, faceScale);
+    const right = flank(routeX, peakY, peakY, capBottom, width, 1, 33, faceScale);
     let d = `M ${left[left.length - 1].x} ${capBottom}`;
     for (let i = left.length - 1; i >= 0; i--) d += ` L ${left[i].x} ${left[i].y}`;
     d += ` L ${routeX} ${Math.round(peakY)}`;
@@ -119,7 +277,7 @@ export function MountainFace({
       d += ` L ${Math.round(rx + (lx - rx) * t)} ${Math.round(capBottom + (seeded(i, 35) - 0.2) * 24)}`;
     }
     return d + " Z";
-  }, [routeX, peakY, width]);
+  }, [routeX, peakY, width, faceScale]);
   const rock = mix(tk.inkFaint, tk.bg, 48);
   return (
     <G pointerEvents="none">
@@ -178,7 +336,6 @@ export function SummitRoute({
   depth,
   tk,
   calmProgress,
-  peakY = 0,
 }: {
   current: CalmCurrentProps;
   routeX: number;
@@ -188,8 +345,6 @@ export function SummitRoute({
   depth: number;
   tk: ThemeTokens;
   calmProgress: number;
-  /** Where the mountain peaks — the unclimbed route dashes end there. */
-  peakY?: number;
 }) {
   const base = `M ${routeX} ${timeLen} L ${routeX} ${nowScreenY}`;
   return (
@@ -255,17 +410,9 @@ export function SummitRoute({
         fill="none"
         opacity={0}
       />
-      {/* the mountain keeps going: the unclimbed route up to the peak */}
-      {nowScreenY - peakY > 4 && (
-        <Path
-          d={`M ${routeX} ${nowScreenY} L ${routeX} ${peakY}`}
-          stroke={tk.lineMain}
-          strokeWidth={2}
-          fill="none"
-          strokeDasharray={[2, 6]}
-          opacity={0.4}
-        />
-      )}
+      {/* NOTE the line stops at Now. The way up the mountain is drawn on the
+          ROCK (see the dashed route in the mountain layer), because it travels
+          down with the rock as he climbs — the timeline itself never grows. */}
       {/* arrowhead: the way is up */}
       <Path
         d={`M ${routeX - 6} ${nowScreenY + 12} L ${routeX} ${nowScreenY} L ${routeX + 6} ${nowScreenY + 12}`}

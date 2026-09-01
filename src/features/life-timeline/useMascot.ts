@@ -16,11 +16,6 @@ import { handledToday } from "@/domain/feelings/logic";
 import type { FrameName, MascotType } from "./mascot-frames";
 
 const PX = 2.2; // must match PX in mascot-frames.ts
-/** Summit: how far below his ledge he swings to take hold of a rope. The
- * camera never follows him down, so this whole drop becomes climb — it is
- * what makes answering a rope a real ascent even when the day's rungs sit
- * close together (many ropes → compact ladder, see summitLadder). */
-const SUMMIT_GRAB_DROP = 150;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -59,6 +54,12 @@ export type MascotState = {
    */
   climbTo: (x: number, y: number) => void;
   /**
+   * Summit: hold position and CLIMB for `ms` — hands over hand, no travel.
+   * On the summit the climber never moves; the mountain slides down past him,
+   * so the ascent he performs is a gait, not a journey.
+   */
+  climbInPlace: (ms: number) => void;
+  /**
    * The full sweep: Pip sprints through every given thread's endpoint,
    * calling `onBonk` at each, then finishes at Now with a triumphant line.
    * Under reduced motion the bonks land staggered with no run.
@@ -67,6 +68,13 @@ export type MascotState = {
   /** Localised phrase pools — use for reactions dispatched from outside the hook. */
   phrases: Phrases;
   visible: boolean;
+  /**
+   * False until he has been placed for the first time. Position alone cannot
+   * answer this: on the summit his real world y runs thousands of px negative,
+   * so no "is it very negative" test can tell a live climber from the unborn
+   * sentinel — and a camera slaved to him must not read the sentinel.
+   */
+  born: boolean;
 };
 
 // ─── Phrase libraries (English + Spanish) ────────────────────────────────────
@@ -328,6 +336,8 @@ export function useMascot(
   const posRef = useRef<MascotPos>({ x: -999, y: -999 });
   // Rendering state
   const [pos, setPos] = useState<MascotPos>({ x: -999, y: -999 });
+  const bornRef = useRef(false);
+  const [born, setBorn] = useState(false);
   const posX = useSharedValue(-999);
   const posY = useSharedValue(-999);
   // 0/1 gait phase while running — swapped on the UI thread, no re-renders.
@@ -337,6 +347,7 @@ export function useMascot(
   // that arranges itself around a standing Pip. Never sync from a rAF loop —
   // that re-renders the whole timeline every frame.
   const place = (x: number, y: number, sync: boolean) => {
+    if (!bornRef.current) { bornRef.current = true; setBorn(true); }
     posRef.current = { x, y };
     posX.value = x;
     posY.value = y;
@@ -360,26 +371,13 @@ export function useMascot(
     setArrivedVia(via);
   };
 
-  // Where Pip goes to visit a rope. On the summit each rope hangs from its
-  // own cliff ledge (g.endX/endY = the anchor; g.forkY = the dangling end):
-  // an open rope he GRABS — swinging DOWN onto it, a good stretch below his
-  // ledge, so that answering it means climbing the rope's whole visible span
-  // back up to its cliff edge — and a coiled (answered) one he stands on, up
-  // on its ledge. Horizontal themes keep the endpoint perch.
+  // Where Pip goes to visit a rope.
+  // On the summit his place is the Now line and nothing moves him off it:
+  // the mountain slides down instead. So a rope is worked from HIS altitude
+  // — coiled or hanging, all that changes is which column he steps to.
   const ropeSpot = (g: BranchGeometry): { x: number; y: number } => {
     if (verticalRef.current) {
-      const ax = g.endX;
-      const ay = g.endY;
-      if (g.coiled) {
-        // feet on the ledge lip
-        return { x: ax - PX * 6, y: ay - PX * 16 + 3 };
-      }
-      const low = (g.forkY ?? ay + 360) - 26; // just above the dangling end
-      // Measured from his RESTING ledge (never his live position — that
-      // would creep downward every time the target is recomputed).
-      const grabFrom = nowYRef.current + PX * 10 + SUMMIT_GRAB_DROP;
-      const gripY = Math.max(ay + 48, Math.min(low, grabFrom));
-      return { x: ax - PX * 6, y: gripY - PX * 10 };
+      return { x: g.endX - PX * 6, y: nowYRef.current - PX * 10 };
     }
     return { x: g.endX + 10, y: g.endY - PX * 10 };
   };
@@ -486,6 +484,57 @@ export function useMascot(
     step();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /**
+   * Summit movement. The climber is PINNED to a line on screen (the stage's
+   * camera is slaved to his position), so his motion IS the world's motion:
+   * a straight, smoothly eased glide with no arc and no overshoot. An arc
+   * would bob the whole mountain; an overshoot would leave the camera parked
+   * at the high point with him dropping away from the pin. Sideways moves to
+   * a rope are flat, so taking hold never moves the world at all.
+   */
+  const glideRun = useCallback(
+    (toX: number, toY: number, onDone: () => void) => {
+      const from = posRef.current;
+      const dx = toX - from.x;
+      const dy = toY - from.y;
+      const dist = Math.hypot(dx, dy);
+      const climbing = Math.abs(dy) > 24;
+      // A rung is a screen-jump: give it real time, so the mountain pans by
+      // rather than snaps. Sideways scrambles are quicker.
+      const dur = climbing
+        ? Math.max(700, Math.min(1900, 420 + Math.abs(dy) * 1.5))
+        : Math.max(260, Math.min(900, 180 + dist * 1.1));
+      panShiftRef.current = { x: 0, y: 0 };
+      onTravelRef.current?.(toX, toY);
+      setFlip(dx >= 0 ? 1 : -1);
+      setFrame(climbing ? 'CLIMB_A' : 'RUN_A');
+      const t0 = performance.now();
+      let gait = 0;
+      const tick = (now: number) => {
+        // rAF timestamps can precede the performance.now() taken here — the
+        // lower clamp keeps the first tick from running backwards.
+        const raw = Math.min(1, Math.max(0, (now - t0) / dur));
+        // ease in and out: he leans into the move and settles onto the ledge
+        const t = raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2;
+        const s = panShiftRef.current;
+        placeRef.current(from.x + dx * t + s.x, from.y + dy * t + s.y, false);
+        const g = Math.floor((now - t0) / 130) % 2;
+        if (g !== gait) { gait = g; runPhase.value = g; }
+        if (raw < 1) {
+          rafRef.current = requestAnimationFrame(tick);
+        } else {
+          const s2 = panShiftRef.current;
+          placeRef.current(toX + s2.x, toY + s2.y, true);
+          onDone();
+        }
+      };
+      cancelRaf();
+      rafRef.current = requestAnimationFrame(tick);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs only
+    [],
+  );
+
   // Build jagged waypoints between two positions.
   // Uses angular zigzag: offset perpendicular to main direction alternating sides.
   const makeZigWaypoints = (
@@ -517,7 +566,10 @@ export function useMascot(
     if (viewingIntegratedRef.current) return;
     const id = inspectedId.current;
     if (!id) {
-      if (!chillingRef.current) return;
+      // On the summit his place is the Now line, always — he has no other
+      // resting spot to be away from, so he is always "chilling" there and
+      // any drift (a stage resize, a first layout) is corrected at once.
+      if (!chillingRef.current && !verticalRef.current) return;
       const tx = nowXRef.current - PX * 12 - 10;
       const ty = nowYRef.current - PX * 10;
       if (phase.current === 'jumping') {
@@ -543,15 +595,9 @@ export function useMascot(
       // answer landed while he rested) — that ascent is climbed, not snapped;
       // small drifts are pans and stay glued.
       const cur = posRef.current;
-      // even mid-talk: the earned ledge is always CLIMBED, never snapped
-      // (a jump in flight already returned above and folds the drift itself).
-      // INVARIANT: this 30px threshold must stay > LEDGE_Y (28) — panning
-      // past Now slides the ledge by at most that much, and pan drift must
-      // snap, never climb.
-      if (verticalRef.current && Math.abs(cur.y - ty) > 30) {
-        climbToRef.current(tx, ty);
-        return;
-      }
+      // The summit climber never travels vertically — the mountain slides
+      // under him — so a vertical difference here is the world having moved
+      // (a resize, a time pan, the first layout) and is simply corrected.
       if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
         placeRef.current(tx, ty, true);
       }
@@ -598,13 +644,7 @@ export function useMascot(
 
     // Stationary — snap to follow the branch (handles panning + loudness shifts).
     // Pip naturally scrolls off-screen when the user pans away from today.
-    // A big vertical shift on the summit is an earned ledge — climbed, not
-    // snapped (climbTo releases the rope; its coil stays behind).
     const cur = posRef.current;
-    if (verticalRef.current && Math.abs(cur.y - ty) > 30) {
-      climbToRef.current(tx, ty);
-      return;
-    }
     if (Math.abs(cur.x - tx) >= 1 || Math.abs(cur.y - ty) >= 1) {
       placeRef.current(tx, ty, true);
     }
@@ -642,6 +682,15 @@ export function useMascot(
     setInspectedIdState(branchId);
     markArrival('patrol');
     setArrivedIdState(branchId);
+    if (verticalRef.current) {
+      // Summit: he has hold of the rope. No inspect-and-offer routine — the
+      // rope's own "grab on" prompt is the invitation, so he just hangs
+      // there until it is answered (or another rope calls him over).
+      phase.current = 'inspecting';
+      setFrame('CLIMB_A');
+      scheduleJump(13000 + Math.random() * 7000);
+      return;
+    }
     setFrame('LAND_A');
     timerRef.current = setTimeout(() => {
       phase.current = 'inspecting';
@@ -651,7 +700,7 @@ export function useMascot(
         timerRef.current = setTimeout(() => startTalking(branchId), 500);
       }, 600);
     }, 160);
-  }, [startTalking]);
+  }, [startTalking, scheduleJump]);
 
   // ── Jump ──
   const jumpToNext = useCallback(() => {
@@ -672,17 +721,12 @@ export function useMascot(
       if (s > bestScore) { bestScore = s; best = b; }
     }
 
-    if (verticalRef.current) {
-      // Summit: the patrol only moves the FOCUS — a "grab on" prompt pops
-      // on the highlighted rope; the climber stays hanging or perched.
-      if (best && bestScore !== -Infinity) {
-        setPendingIdState(best.id);
-        lastVisited.current.set(best.id, Date.now());
-      } else {
-        setPendingIdState(null);
-      }
-      scheduleJump(6500 + Math.random() * 3500);
-      return;
+    // Summit: he starts the day on the Now spot and goes OUT to the ropes —
+    // the patrol travels, same as anywhere else. He takes hold of the rope
+    // it picks (onLanded's vertical arm), and the rope's own prompt asks to
+    // be grabbed. Nothing else here needs to know the map is vertical.
+    if (verticalRef.current && best && bestScore !== -Infinity) {
+      lastVisited.current.set(best.id, Date.now());
     }
     if (!best || bestScore === -Infinity) {
       // Every open thread has its answer for today: Pip retires to the Now
@@ -742,13 +786,12 @@ export function useMascot(
 
     timerRef.current = setTimeout(() => {
       const cur = posRef.current;
-      const wps = makeZigWaypoints(cur.x, cur.y, toX, toY, 3, 38);
       phase.current = 'jumping';
       // From here he belongs to the destination: a press mid-run opens the
       // thread he's heading to, never the (possibly deleted) one he left.
       inspectedId.current = targetId;
       setFrame('RUN_A');
-      runWaypoints(wps, () => {
+      const land = () => {
         // Use live geometry in case timeline was panned during the run
         const liveGeo = geometriesRef.current.find(g => g.branchId === targetId);
         const live = liveGeo ? ropeSpotRef.current(liveGeo) : null;
@@ -758,9 +801,11 @@ export function useMascot(
         jumpDestRef.current = null;
         setPendingIdState(null);
         onLanded(targetId);
-      }, 0.16);
+      };
+      if (verticalRef.current) glideRun(toX, toY, land);
+      else runWaypoints(makeZigWaypoints(cur.x, cur.y, toX, toY, 3, 38), land, 0.16);
     }, 500); // 500 ms highlight before he moves
-  }, [onLanded, runWaypoints]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [onLanded, runWaypoints, glideRun]); // eslint-disable-line react-hooks/exhaustive-deps
 
   jumpRef.current = jumpToNext;
 
@@ -965,7 +1010,7 @@ export function useMascot(
     jumpDestRef.current = { x, y, branchId: "__now__" };
     setFrame('RUN_A');
     const cur = posRef.current;
-    runWaypoints(makeZigWaypoints(cur.x, cur.y, x, y, 1, 10), () => {
+    const land = () => {
       const dest = jumpDestRef.current;
       placeRef.current(dest?.x ?? x, dest?.y ?? y, true);
       jumpDestRef.current = null;
@@ -978,9 +1023,41 @@ export function useMascot(
         setFrame('IDLE_A');
         scheduleJump(2200 + Math.random() * 1200);
       }, 340);
-    }, 0.22);
-  }, [fadeBubble, runWaypoints, scheduleJump]); // eslint-disable-line react-hooks/exhaustive-deps
+    };
+    // Summit: bound up the rope in hops (the world drops in bursts under
+    // him); horizontal themes keep the walking run.
+    if (verticalRef.current) glideRun(x, y, land);
+    else runWaypoints(makeZigWaypoints(cur.x, cur.y, x, y, 1, 10), land, 0.22);
+  }, [fadeBubble, runWaypoints, glideRun, scheduleJump]); // eslint-disable-line react-hooks/exhaustive-deps
   climbToRef.current = climbTo;
+
+  /** The climbing gait, in place, for as long as the mountain is moving. */
+  const climbInPlace = useCallback((ms: number) => {
+    if (superBonkActiveRef.current || viewingIntegratedRef.current) return;
+    if (phase.current === 'jumping') return; // a travel already owns him
+    clearTimer();
+    fadeBubble(0, 120);
+    setFrame('CLIMB_A');
+    const t0 = performance.now();
+    let gait = 0;
+    const beat = () => {
+      const now = performance.now();
+      const g = Math.floor((now - t0) / 130) % 2;
+      if (g !== gait) { gait = g; runPhase.value = g; }
+      if (now - t0 < ms) {
+        rafRef.current = requestAnimationFrame(beat);
+      } else {
+        setFrame('LAND_A');
+        timerRef.current = setTimeout(() => {
+          setFrame('IDLE_A');
+          scheduleJump(2200 + Math.random() * 1200);
+        }, 320);
+      }
+    };
+    cancelRaf();
+    rafRef.current = requestAnimationFrame(beat);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs only
+  }, [fadeBubble, scheduleJump]);
 
   // ── Bootstrap ──
   useEffect(() => {
@@ -1024,7 +1101,13 @@ export function useMascot(
         fadeBubble(1, 250);
         timerRef.current = setTimeout(() => {
           fadeBubble(0, 300);
-          timerRef.current = setTimeout(() => jumpRef.current(), 500);
+          // Summit: he STAYS at the Now spot — the day starts there and the
+          // first move is the user's (tap a rope). His own wandering between
+          // ropes is a slow ambient thing, not the opening act.
+          timerRef.current = setTimeout(
+            () => jumpRef.current(),
+            verticalRef.current ? 16000 : 500,
+          );
         }, 2500);
       }, 1200);
     } else {
@@ -1081,6 +1164,7 @@ export function useMascot(
     pendingBranchId: pendingIdState,
     arrivedBranchId: arrivedIdState,
     arrivedVia,
-    onPress, showReaction, focusBranch, climbTo, superBonk, phrases: lang, visible,
+    onPress, showReaction, focusBranch, climbTo, climbInPlace, superBonk,
+    phrases: lang, visible, born,
   };
 }

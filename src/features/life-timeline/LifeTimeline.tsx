@@ -16,6 +16,7 @@ import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
+  useFrameCallback,
   useSharedValue,
   withDelay,
   withRepeat,
@@ -52,7 +53,7 @@ import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
 import { useCalmCurrent } from "./useSquiggle";
 import { useSummitCurrent } from "./useSummit";
-import { ClimbPennant, Ledge, MountainFace, RopeCut, SummitRoute } from "./SummitScene";
+import { ClimbPennant, FaceTexture, Ledge, MountainFace, RopeCut, SkyParallax, SummitRoute } from "./SummitScene";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -634,6 +635,10 @@ export function LifeTimeline() {
             pinnedBranchIds,
             climbRanks,
             retiredIds,
+            // Now sits mid-canvas: the climber stands there all day, the
+            // mountain rises above him and the past falls away below. (The
+            // builder clamps this to half the canvas, which is the point.)
+            ledgeY: Number.MAX_SAFE_INTEGER,
           })
         : buildTimelineLayout(visible, {
             width: size.width,
@@ -661,121 +666,89 @@ export function LifeTimeline() {
     ? { x: sm.routeX, y: sm.nowScreenY }
     : { x: layout.nowX, y: layout.mainY };
 
-  // ── The climbing camera ────────────────────────────────────────────────
+  // ── The climb ──────────────────────────────────────────────────────────
+  // The climber does not move. He and the Now point hold their place on
+  // screen; the MOUNTAIN slides down past them, and that is what reads as
+  // climbing. So there is no camera to follow him: there is one number, how
+  // far the mountain has travelled, and it grows by one rung per rope
+  // answered (plus the final headroom when the summit is earned).
+  //
   // One truth for "handled": the same predicate that coils a rope onto its
-  // cliff ledge marks it conquered — the climber can only top out when every
-  // rope has left the face.
+  // cliff ledge marks it conquered — the summit only comes when every rope
+  // has left the face.
   const unattended = activeLines.filter((b) => !handledToday(b, now)).length;
-  const allDone = unattended === 0;
+  const allDone = unattended === 0 && activeLines.length > 0;
   const ledgeWorldY = sm ? sm.nowScreenY : 0;
   const peakY = ledgeWorldY - (sm?.peakAbove ?? 0);
   const geoById = useMemo(
     () => new Map(layout.geometries.map((g) => [g.branchId, g])),
     [layout.geometries],
   );
-  // His REST spot: the cliff ledge of the last rope he climbed (falling back
-  // to his highest conquered ledge after a reload/stage), the Now spot on an
-  // unclimbed day, the summit once every rope is coiled.
-  const [lastPerchId, setLastPerchId] = useState<string | null>(null);
-  const perchG = useMemo(() => {
-    if (!sm) return null;
-    const climbed = activeLines.filter((b) => handledToday(b, now));
-    const last = lastPerchId ? climbed.find((b) => b.id === lastPerchId) : undefined;
-    const pick = last ?? climbed.slice().sort(
-      (a, b) => (geoById.get(a.id)?.endY ?? 0) - (geoById.get(b.id)?.endY ?? 0),
-    )[0];
-    return pick ? geoById.get(pick.id) ?? null : null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- activeLines derives from visible
-  }, [sm, lastPerchId, geoById, visible, now]);
-  const restSpot = !sm
-    ? { x: 0, y: 0 }
-    : allDone && activeLines.length > 0
-      ? { x: sm.routeX, y: peakY - 6 }
-      : perchG
-        ? { x: perchG.endX, y: perchG.endY - 4 }
-        : { x: sm.routeX, y: ledgeWorldY - 4 };
+  // He stands at the Now point, every day, all day.
+  const restSpot = sm ? { x: sm.routeX, y: ledgeWorldY - 4 } : { x: 0, y: 0 };
   const restPipY = restSpot.y;
 
-  const half = sm ? Math.round(sm.timeLen * 0.5) : 0;
-  const third = sm ? Math.round(sm.timeLen * 0.3) : 0;
-  // The camera works in LEDGE-RELATIVE space: rel = feetY − ledgeY + LEDGE_Y.
-  // During a climb the ledge is still, so rel moves with the climber and the
-  // world slides down in lockstep; during a TIME PAN the climber rides his
-  // ledge, so rel — and the camera — hold still, and the whole scene
-  // (mountain, ledges, ropes, dates) flows together, letting the past fill
-  // the screen to the very top when panning back beyond Now.
-  const relPeak = LEDGE_Y - (sm?.peakAbove ?? 1);
-  const relTop = LEDGE_Y - Math.max(1, sm?.ladderTop ?? 1);
-  const relBase = LEDGE_Y;
-  /** Where the camera rides him, by ALTITUDE (never by time — composed with
-   * his climb the world then moves strictly downward, since both segments
-   * have |dA/drel| < 1):
-   *
-   *   Now ............ 0.5·L — half a screen of sky, the summit far past it
-   *   top rung ....... 0.2·L — riding high, the day's ladder spread below
-   *   the summit ..... 0.3·L — he steps onto the peak and it settles into
-   *                            frame with every conquered ledge under him
-   *
-   * Climbing tightens the sky above him, which is what keeps the peak out of
-   * frame on every rung without burning the screen room the ladder needs. */
-  const highRide = sm ? Math.round(sm.timeLen * 0.2) : 0;
-  const anchorAt = (rel: number): number => {
-    "worklet";
-    if (rel >= relTop) {
-      const t = Math.min(1, Math.max(0, (relBase - rel) / (relBase - relTop)));
-      return half - (half - highRide) * t;
-    }
-    const t = Math.min(1, Math.max(0, (relTop - rel) / (relTop - relPeak)));
-    return highRide + (third - highRide) * t;
-  };
-  const relRest = restPipY - ledgeWorldY + LEDGE_Y;
-  /** The camera's analytic rest value: exact whenever no climb is in flight.
-   * Transient overlays (coin flights, burn smoke, walkthrough halo) spawn at
-   * rest and use this; a spawn mid-climb is off by the climb remainder —
-   * accepted for short-lived screen-space effects. */
-  const camYRest = vertical && sm ? Math.round(anchorAt(relRest) - relRest) : 0;
-  const camYRef = useRef(camYRest);
-  camYRef.current = camYRest;
-  /** Where the climber sits on screen at rest — celebrations anchor here
-   * (rides up with the scene when the user has panned into the past). */
-  const anchorRestY = vertical && sm ? Math.round(restPipY + camYRest) : 0;
+  /** Rungs earned today; the summit adds its headroom on the last one. */
+  const rungsClimbed = sm ? activeLines.filter((b) => handledToday(b, now)).length : 0;
+  const climbRest = sm
+    ? rungsClimbed * sm.ladderStep + (allDone ? sm.ladderHeadroom : 0)
+    : 0;
+  /** How far the mountain has slid, on the UI thread. It GLIDES to each new
+   * rung: the cliff edge above comes down into frame, arrives under his feet,
+   * and everything on the rock — ropes, ledges, coils, texture, the sky at
+   * its own slower rate — travels with it. */
+  const climbSV = useSharedValue(0);
+  const climbRestRef = useRef(climbRest);
+  useEffect(() => {
+    if (!vertical) return;
+    const from = climbRestRef.current;
+    climbRestRef.current = climbRest;
+    if (climbRest === from) return;
+    const rise = Math.abs(climbRest - from);
+    const dur = reducedMotion ? 0 : Math.max(700, Math.min(2100, 380 + rise * 1.6));
+    // A rope leaves the face only once the rock it hangs from has arrived.
+    climbSV.value = withTiming(
+      climbRest,
+      { duration: dur, easing: Easing.inOut(Easing.quad) },
+      (finished) => {
+        "worklet";
+        if (finished) runOnJS(retireAllRef.current)();
+      },
+    );
+    // He climbs in place for exactly as long as the mountain moves.
+    if (climbRest > from) mascotRef.current?.climbInPlace(dur);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable
+  }, [vertical, climbRest, reducedMotion]);
+  const climbProps = useAnimatedProps(() => ({ translateY: climbSV.value }), [climbSV]);
+  /** The sky drifts at a fraction of the rock — parallax, so height reads. */
+  const skyProps = useAnimatedProps(
+    () => ({ translateY: Math.round(climbSV.value * 0.42 * 2) / 2 }),
+    [climbSV],
+  );
+  /** Nothing in the TIME frame moves with the climb, so overlays that live
+   * beside him (coin flights, burn smoke, the walkthrough halo, the
+   * celebration) need no offset at all. */
+  const camYRest = 0;
+  const camYRef = useRef(0);
+  const anchorRestY = vertical && sm ? Math.round(restPipY) : 0;
 
-  // Answering a rope sends him up it to its cliff ledge, where he perches —
-  // and the LAST one earns the summit party: he continues to the peak with
-  // a burst, a banner and his own cheer.
+  // The LAST rope earns the summit party: the mountain's final glide brings
+  // the peak under his feet, with a burst, a banner and his own cheer.
   const prevUnattendedRef = useRef(unattended);
-  const handledIdsRef = useRef<Set<string>>(new Set());
   const [summitParty, setSummitParty] = useState(0);
   useEffect(() => {
     if (!vertical) return;
-    const handledNow = new Set(
-      activeLines.filter((b) => handledToday(b, now)).map((b) => b.id),
-    );
-    const fresh = [...handledNow].find((id) => !handledIdsRef.current.has(id));
-    handledIdsRef.current = handledNow;
     const prev = prevUnattendedRef.current;
     prevUnattendedRef.current = unattended;
     if (unattended >= prev) return;
-    if (fresh) setLastPerchId(fresh); // his new perch: the rope just climbed
     if (unattended === 0 && activeLines.length > 0) {
       setSummitParty((k) => k + 1);
-      // first he tops the rope to its ledge, then continues to the peak —
-      // to EXACTLY the chill spot the follow-Now logic will hold him at
-      // (matching mascotNowX/Y below), so no second run ever re-settles him
-      const peakRun = setTimeout(() => {
-        if (sm)
-          mascotRef.current?.climbTo(
-            sm.routeX + 23 - PX * 12 - 10,
-            peakY - 6 - 13 - PX * 10,
-          );
-      }, reducedMotion ? 0 : 2400);
       const say = setTimeout(
         () => mascotRef.current?.showReaction(t("You did it!")),
-        reducedMotion ? 400 : 5200,
+        reducedMotion ? 400 : 2600,
       );
       const t2 = setTimeout(() => setSummitParty(0), 7000);
       return () => {
-        clearTimeout(peakRun);
         clearTimeout(say);
         clearTimeout(t2);
       };
@@ -1418,40 +1391,6 @@ export function LifeTimeline() {
   const mascotRef = useRef(mascot);
   mascotRef.current = mascot;
 
-  // The camera is slaved to the climber's own position on the UI thread:
-  // the mountain moves down exactly as he moves up — synced by construction,
-  // no separate ease to drift against. (useMascot's tracking effect is the
-  // single climb trigger; every big vertical target change is climbed.)
-  const trackPip = vertical && showMascot;
-  const mascotPosY = mascot.posY;
-  /** His feet in world coords, clamped to the ledge system (patrol wobble
-   * and pan excursions can't drag the camera); falls back to the rest ledge
-   * while he is unborn (-999) or hidden — identical to where the bootstrap
-   * places him, so his appearance never jumps the camera. */
-  const pipFeetY = useDerivedValue(() => {
-    if (!vertical) return 0;
-    const raw = mascotPosY.value;
-    if (!trackPip || raw < -900) return restPipY;
-    const lo = ledgeWorldY + (relPeak - LEDGE_Y) - 20;
-    const hi = ledgeWorldY + (relBase - LEDGE_Y) + 80;
-    return Math.round(Math.min(hi, Math.max(lo, raw + PX * 10)) * 2) / 2;
-  }, [vertical, trackPip, restPipY, ledgeWorldY, relPeak, relBase, mascotPosY]);
-  /** The camera's own altitude — a MONOTONIC follower of the climber. It
-   * rides his ascents in exact sync (an earned climb moves the world down,
-   * frame for frame) but never follows him DOWN: diving off his perch to
-   * grab a rope, a hop, a target wobble — the mountain holds still. The one
-   * sanctioned descent is the rest spot itself dropping (day flip: the whole
-   * ladder resets and the camera returns to the Now spot with it). */
-  const camRelSV = useSharedValue(Number.POSITIVE_INFINITY);
-  const camTranslate = useDerivedValue(() => {
-    if (!vertical) return 0;
-    const relLive = pipFeetY.value - ledgeWorldY + LEDGE_Y;
-    const relRest = restPipY - ledgeWorldY + LEDGE_Y;
-    const rel = Math.max(relRest, Math.min(camRelSV.value, relLive));
-    camRelSV.value = rel;
-    return Math.round((anchorAt(rel) - rel) * 2) / 2;
-  }, [vertical, pipFeetY, ledgeWorldY, restPipY, half, third, highRide, relBase, relTop, relPeak]);
-  const camProps = useAnimatedProps(() => ({ translateY: camTranslate.value }), [camTranslate]);
   /** On the summit the ROPE does the asking, so the prompt is decided here:
    * it also silences Pip's own bubble while it is up — two pills saying
    * different things over one climber is noise. */
@@ -1465,8 +1404,6 @@ export function LifeTimeline() {
     if (!g || !g.inWindow) return null;
     return { id, g };
   })();
-  // The pinned date rail rides the same value, staying in lockstep mid-climb.
-  const railProps = useAnimatedProps(() => ({ translateY: camTranslate.value }), [camTranslate]);
 
   // ── Token drops: they pop off their threads, then fly into the meter ──
   // Each store coin becomes a waiting token (SVG, over its thread), then a
@@ -1780,9 +1717,24 @@ export function LifeTimeline() {
                   }
                 : null)}
             >
-              {/* the climbing camera: the whole world rides this group on the
-                  UI thread; horizontal themes get a plain static group */}
-              <AnimatedOptionG {...(vertical ? { animatedProps: camProps } : null)}>
+              {/* the sky, on its own slower rail behind the mountain: clouds
+                  drifting by low down, stars once the summit is near. The
+                  parallax is what sells the height — the rock rushes past,
+                  the sky only drifts. */}
+              {vertical && sm && (
+                <AnimatedOptionG animatedProps={skyProps}>
+                  <SkyParallax
+                    peakY={peakY}
+                    bottomY={sm.timeLen}
+                    width={svgWidth}
+                    tk={tk}
+                  />
+                </AnimatedOptionG>
+              )}
+              {/* No camera here. On the summit the TIME frame — main line,
+                  Now, its dates, the climber — holds its place on screen; only
+                  the mountain layer below moves (climbProps). */}
+              <G>
               {/* today softly glows: where life is happening */}
               {!vertical && layout.nowX - todayX > 0 && (
                 <Rect
@@ -1831,13 +1783,22 @@ export function LifeTimeline() {
                   The ledge marks Now; the pennant climbs with the day. */}
               {vertical && sm && (
                 <>
+                  {/* THE MOUNTAIN LAYER: rock, its texture and the route to
+                      the summit all travel down as he climbs. Everything
+                      outside this group stays with him. */}
+                  <AnimatedOptionG animatedProps={climbProps}>
                   {/* the unclimbed tint runs from above the peak down to the
                       ledge, so no stray stripe shows in the top-out framing */}
+                  {/* the unclimbed tint: from above the peak down to Now.
+                      It rides the rock, so its lower edge is pulled back by
+                      the distance already climbed — the tint (like the route
+                      dashes below) must never spill past Now onto the
+                      timeline, which does not move. */}
                   <Rect
                     x={0}
                     y={peakY - 300}
                     width={svgWidth}
-                    height={sm.peakAbove + 300}
+                    height={Math.max(0, sm.peakAbove + 300 - climbRest)}
                     fill={tk.inkFaint}
                     opacity={0.05}
                   />
@@ -1847,8 +1808,35 @@ export function LifeTimeline() {
                     width={svgWidth}
                     timeLen={sm.timeLen}
                     depth={900}
+                    faceScale={sm.faceScale}
+                    viewTop={ledgeWorldY - climbRest}
                     tk={tk}
                   />
+                  {/* marks on the rock: without them the world can slide all
+                      it likes and the climb still looks still */}
+                  <FaceTexture
+                    routeX={sm.routeX}
+                    peakY={peakY}
+                    bandTop={ledgeWorldY - climbRest - sm.timeLen}
+                    bandBottom={ledgeWorldY - climbRest + 2 * sm.timeLen}
+                    bottomY={sm.timeLen + 900}
+                    width={svgWidth}
+                    faceScale={sm.faceScale}
+                    tk={tk}
+                  />
+                  {/* the way still to go, drawn on the rock — it ends at Now
+                      (its lower end pulled back by what he has climbed) */}
+                  {ledgeWorldY - climbRest - peakY > 4 && (
+                    <Path
+                      d={`M ${sm.routeX} ${ledgeWorldY - climbRest} L ${sm.routeX} ${peakY}`}
+                      stroke={tk.lineMain}
+                      strokeWidth={2}
+                      fill="none"
+                      strokeDasharray={[2, 6]}
+                      opacity={0.4}
+                    />
+                  )}
+                  </AnimatedOptionG>
                   <SummitRoute
                     current={summitCurrent}
                     routeX={sm.routeX}
@@ -1856,11 +1844,9 @@ export function LifeTimeline() {
                     timeLen={sm.timeLen}
                     tk={tk}
                     calmProgress={calmProgress}
-                    peakY={peakY}
                     depth={900}
                   />
                   <Ledge routeX={sm.routeX} nowScreenY={sm.nowScreenY} tk={tk} />
-                  <ClimbPennant routeX={sm.routeX} liveY={pipFeetY} tk={tk} />
                 </>
               )}
 
@@ -2080,6 +2066,7 @@ export function LifeTimeline() {
                     theme={theme}
                     nowMs={nowTick}
                     orientation={vertical ? "vertical" : "horizontal"}
+                    climbOffset={vertical ? climbSV : null}
                     timeLen={sm?.timeLen ?? 0}
                     wave={vertical ? null : calmCurrent.wave}
                     routeWave={vertical ? summitCurrent.wave : null}
@@ -2404,7 +2391,7 @@ export function LifeTimeline() {
                     />
                   );
                 })()}
-              </AnimatedOptionG>
+              </G>
             </Svg>
           </View>
         </ScrollView>
@@ -2625,11 +2612,11 @@ export function LifeTimeline() {
             backgroundColor: alpha(tk.bg, 0.88),
           }}
         >
-          {/* the labels ride the climbing camera on the UI thread, in exact
-              lockstep with the face beside them (tick counts are bounded, so
-              no viewport cull is needed) */}
+          {/* the dates belong to the TIME frame: they hold their place beside
+              the climber, exactly like the main line and Now (tick counts are
+              bounded, so no viewport cull is needed) */}
           <Svg width={64} height={size.height}>
-            <AnimatedOptionG animatedProps={railProps}>
+            <G>
               {ticks.map((tick) => {
                 const y = dateToScreenY(tick.date, layout.window, sm.timeLen, sm.axisLen);
                 return (
@@ -2646,7 +2633,7 @@ export function LifeTimeline() {
                   </SvgText>
                 );
               })}
-            </AnimatedOptionG>
+            </G>
           </Svg>
         </View>
         )}
