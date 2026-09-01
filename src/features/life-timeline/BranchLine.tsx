@@ -331,10 +331,14 @@ export const BranchLine = memo(function BranchLine({
   // small coil rests at its anchor — still tappable, back as a rope tomorrow
   // (the same date compare that lets a faint lane return elsewhere).
   // For open ropes `(resting || acted)` equals domain handledToday() — the
-  // predicate the climb's ledge count uses — so a rope coils exactly when a
-  // ledge is earned. (handledToday itself lacks acted's isOpen guard, which
-  // a merged-today rope needs to keep drawing its merged path.)
-  if (vertical && (resting || acted) && !g.endsOnMain) {
+  // predicate the climb's ledge count uses — so a rope EARNS its ledge
+  // exactly when it is answered. (handledToday itself lacks acted's isOpen
+  // guard, which a merged-today rope needs to keep drawing its merged path.)
+  // But it only LEAVES the face once the climber has topped it out and is
+  // standing on that ledge — `g.ropeGone`, held back by LifeTimeline until
+  // his climb lands. Until then the answered rope still hangs, now visibly
+  // fixed to its cliff edge, and he climbs it.
+  if (vertical && (resting || acted) && g.ropeGone && !g.endsOnMain) {
     return (
       <AnimatedG
         animatedProps={groupProps}

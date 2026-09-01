@@ -272,12 +272,16 @@ export function useMascot(
    */
   onTravel?: (x: number, y: number) => void,
   /** Summit: steep segments climb (CLIMB frames), and patrol skips the
-   * endpoint-past-Now cull that only makes sense on a horizontal map. */
-  opts?: { vertical?: boolean },
+   * endpoint-past-Now cull that only makes sense on a horizontal map.
+   * `onClimbEnd` fires when a climb to the rest point lands — the summit
+   * retires the rope he just topped out on. */
+  opts?: { vertical?: boolean; onClimbEnd?: () => void },
 ): MascotState {
   const lang = getLang(language);
   const verticalRef = useRef(opts?.vertical ?? false);
   verticalRef.current = opts?.vertical ?? false;
+  const onClimbEndRef = useRef(opts?.onClimbEnd);
+  onClimbEndRef.current = opts?.onClimbEnd;
   const langRef = useRef(lang);
   langRef.current = lang;
   // Stable refs for latest values
@@ -967,6 +971,9 @@ export function useMascot(
       jumpDestRef.current = null;
       phase.current = 'idle';
       setFrame('LAND_A');
+      // He is standing on the ledge: the rope he just topped out on can
+      // leave the face now.
+      onClimbEndRef.current?.();
       timerRef.current = setTimeout(() => {
         setFrame('IDLE_A');
         scheduleJump(2200 + Math.random() * 1200);

@@ -209,6 +209,12 @@ export type SummitLayoutOptions = {
    * a day-seeded order, so a reload mid-day still builds a stable ladder.
    */
   climbRanks?: Record<string, number>;
+  /**
+   * Ropes the climber has already topped out on: theirs are off the face,
+   * coiled on their ledge. An answered rope missing from this set is still
+   * hanging — he is on his way up it.
+   */
+  retiredIds?: readonly string[];
 };
 
 /** How many chars of a rope's title fit its ladder slot. */
@@ -309,6 +315,7 @@ export function buildSummitLayout(
   // so it always crosses the screen wherever he is — but its LABEL has to
   // follow him up, or the ropes he can still grab go nameless once the Now
   // ledge has slid off the bottom of the screen.
+  const retired = new Set(opts.retiredIds ?? []);
   const climbed = rungOf.size;
   const perchY =
     climbed > 0 ? nowScreenY - (ladder.first + ladder.step * (climbed - 1)) : nowScreenY;
@@ -355,6 +362,7 @@ export function buildSummitLayout(
           : openLabelY + LADDER_BASE + (Math.max(0, ordinal) % LADDER_ROWS) * LADDER_STEP,
         labelAnchor: "middle",
         coiled,
+        ropeGone: coiled && retired.has(g.branchId),
         // A waiting rope's anchor is out of view: its moments stay in the
         // band he can actually reach. A coiled rope keeps them on the stub
         // between its ledge and the coil.

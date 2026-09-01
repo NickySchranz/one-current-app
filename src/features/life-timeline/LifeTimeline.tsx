@@ -601,6 +601,25 @@ export function LifeTimeline() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- now: rank flips ride the signature
   }, [handledSig]);
 
+  // An answered rope leaves the face only once he has TOPPED IT OUT and is
+  // standing on its cliff edge. Ropes already answered when the map mounts
+  // are retired straight away — that climb happened in an earlier session.
+  const [retiredIds, setRetiredIds] = useState<string[]>(() =>
+    handledSig ? handledSig.split("|") : [],
+  );
+  const retireAllRef = useRef<() => void>(() => {});
+  retireAllRef.current = () => setRetiredIds(handledSig ? handledSig.split("|") : []);
+  useEffect(() => {
+    if (!vertical) return;
+    // A rope that stops being handled (day flip, reopened) drops out; the
+    // pending ones wait for his climb — with a backstop in case no climb
+    // ever runs (mascot hidden, reduced motion, a jump interrupted).
+    const handled = new Set(handledSig ? handledSig.split("|") : []);
+    setRetiredIds((prev) => prev.filter((id) => handled.has(id)));
+    const t = setTimeout(() => retireAllRef.current(), reducedMotion ? 120 : 4200);
+    return () => clearTimeout(t);
+  }, [vertical, handledSig, reducedMotion]);
+
   const layout = useMemo(
     () =>
       vertical
@@ -614,6 +633,7 @@ export function LifeTimeline() {
             mainShift,
             pinnedBranchIds,
             climbRanks,
+            retiredIds,
           })
         : buildTimelineLayout(visible, {
             width: size.width,
@@ -630,7 +650,7 @@ export function LifeTimeline() {
             // changes and past the save, while the quick menu is still open.
             pinnedBranchIds,
           }),
-    [vertical, visible, size, window_, compact, now, mainShift, topInset, pinnedBranchIds, bottomInset],
+    [vertical, visible, size, window_, compact, now, mainShift, topInset, pinnedBranchIds, bottomInset, climbRanks, retiredIds],
   );
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -1390,7 +1410,7 @@ export function LifeTimeline() {
     burn?.branchId ?? null,
     mascotNowY,
     followPip,
-    { vertical },
+    { vertical, onClimbEnd: () => retireAllRef.current() },
   );
 
   // Keep reaction ref current so effects below can call it

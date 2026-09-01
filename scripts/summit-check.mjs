@@ -230,6 +230,19 @@ await page.close();
       }
       return tops;
     });
+  /** How many ropes still hang on the face (straight vertical hit paths). */
+  const ropeCount = () =>
+    p2.evaluate(() => {
+      let n = 0;
+      for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+        const len = el.getTotalLength();
+        if (len < 260) continue;
+        const a = el.getPointAtLength(0);
+        const b = el.getPointAtLength(len);
+        if (Math.abs(len - Math.abs(b.y - a.y)) <= 3) n++;
+      }
+      return n;
+    });
   // fresh day: he stands at Now, every rope hanging from out of view,
   // the summit far out of sight
   await reseed("fresh");
@@ -310,7 +323,12 @@ await page.close();
     requestAnimationFrame(read);
   });
   await p2.getByText("Let it rest", { exact: false }).first().click();
-  await p2.waitForTimeout(7200);
+  // The answered rope must NOT vanish on the answer — it stays on the face,
+  // now fixed to its cliff edge, and he climbs it.
+  await p2.waitForTimeout(400);
+  const stillHanging = await ropeCount();
+  check(stillHanging === 1, `the answered rope stays on the face while he climbs it (${stillHanging} hanging)`);
+  await p2.waitForTimeout(6800);
   const rows = await p2.evaluate(() => window.__cam);
   const cam = rows.map((r) => r[0]);
   let monotonic = true;
@@ -333,17 +351,7 @@ await page.close();
     topAfter !== null && Math.abs(topAfter - (48 + stageH * 0.3)) < 40,
     `top-out frames the summit near 30% from the top (cap top ${Math.round(topAfter ?? 0)})`,
   );
-  const hanging = await p2.evaluate(() => {
-    let n = 0;
-    for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
-      const len = el.getTotalLength();
-      if (len < 260) continue;
-      const a = el.getPointAtLength(0);
-      const b = el.getPointAtLength(len);
-      if (Math.abs(len - Math.abs(b.y - a.y)) <= 3) n++;
-    }
-    return n;
-  });
+  const hanging = await ropeCount();
   check(hanging === 0, "no rope still hangs after top-out (all coiled on their ledges)");
   // every conquered cliff ledge (its coil) fits inside one screen height
   const coilYs = await p2.evaluate(() =>
