@@ -7,6 +7,7 @@ import { resolveForkDate } from "@/domain/branches/logic";
 import { ANXIETIES, suggestLockedFeelings } from "@/domain/feelings/logic";
 import { FeelingPicker } from "@/features/branch-touch/FeelingPicker";
 import { StepFrame, StepTransition } from "@/features/branch-quick-actions/QuickFlow";
+import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
 import { appNow } from "@/domain/time/clock";
 import {
   AppTextInput,
@@ -65,6 +66,10 @@ export function CreateBranch() {
   const [anxieties, setAnxieties] = useState<string[]>([]);
   const [loudness, setLoudness] = useState<number>(3);
   const [busy, setBusy] = useState(false);
+  /** The plan refused the thread: show why rather than going quiet. */
+  const [blocked, setBlocked] = useState(false);
+  /** The same question every create entry point asks before opening a form. */
+  const canOpenThread = useThreadGate();
 
   // The optimistic line: born with the form, gone if the form closes unsaved.
   // Committing clears draftBranchId first, so this cleanup then does nothing.
@@ -118,6 +123,13 @@ export function CreateBranch() {
       // Otherwise the panel sets itself down: the full map returns, the new
       // line draws itself in, and a small note says it has been added.
       if (result.branch) setOperation({ kind: "idle" });
+    } catch {
+      // The store refuses at the free plan's limit by throwing. Unhandled,
+      // that reached nobody: the last step of the form just stopped working,
+      // with the whole thread already written out. Name the one cause the
+      // plan can be responsible for, and leave the form standing otherwise
+      // so the answers are not lost.
+      setBlocked(!canOpenThread);
     } finally {
       setBusy(false);
     }
@@ -276,6 +288,10 @@ export function CreateBranch() {
           </StepFrame>
         )}
       </StepTransition>
+      <PaywallPrompt
+        reason={blocked ? "thread-limit" : null}
+        onClose={() => setBlocked(false)}
+      />
     </Panel>
   );
 }

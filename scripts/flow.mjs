@@ -51,13 +51,32 @@ localStorage.setItem("one-current-tutorial-v1", "done");
 await page.goto("http://localhost:4173/", { waitUntil: "networkidle" });
 await page.waitForTimeout(1500);
 
-// 1. open the create tray from the FAB
-await page.getByLabel("New thread").first().click();
-await step("01-create-tray");
+/** Walk the create wizard: name → since when → feelings → the last step.
+ * Four steps since the single form was replaced; scripts that filled a name
+ * and reached straight for the last button had no coverage of it at all,
+ * which is how a dead final step shipped unnoticed. */
+async function createThread(page, title, opts = {}) {
+  await page.getByLabel("New thread").first().click();
+  await page.waitForTimeout(900);
+  await page.getByLabel("Name the thread").fill(title);
+  await page.waitForTimeout(200);
+  await page.getByRole("button", { name: "Next" }).first().click();   // → since when
+  await page.waitForTimeout(500);
+  await page.getByText(opts.when ?? "Today", { exact: true }).first().click();
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: "Next" }).first().click();   // → feelings
+  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: "Next" }).first().click();   // → loudness
+  await page.waitForTimeout(600);
+  if (opts.beforeFinish) await opts.beforeFinish(page);
+  await page.getByRole("button", { name: "Start the thread" }).click();
+  await page.waitForTimeout(opts.settle ?? 1400);
+}
 
-// 2. name it, set loudness, start the thread
-await page.getByLabel("Name the thread").fill("Tax return looming");
-await page.getByRole("button", { name: "Start the thread" }).click();
+// 1-2. walk the create wizard: name, since when, feelings, then start it
+await createThread(page, "Tax return looming", {
+  beforeFinish: async () => step("01-create-tray"),
+});
 await step("02-branch-born", 1600);
 
 // 3. close the follow-up tray, then tap the branch line → quick menu
@@ -72,8 +91,10 @@ const pt = await page.evaluate(() => {
 });
 await page.mouse.click(pt.x, pt.y);
 await step("03-armed-bar");
-await page.getByRole("button", { name: "Reflect on this thread" }).click();
-await page.waitForTimeout(500);
+// The "Reflect on this thread" pill beside Pip is gone: a first tap arms the
+// thread and a second opens its decisions.
+await page.mouse.click(pt.x, pt.y);
+await page.waitForTimeout(700);
 await step("03b-quick-menu");
 
 // 4. expand "what does this thread need" and choose Act

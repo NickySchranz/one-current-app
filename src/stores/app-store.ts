@@ -669,8 +669,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async createBranchNow(input) {
     const draftId = get().draftBranchId;
-    // Backstop only: every entry point checks this before opening the form.
-    if (!canCreateThread(get().branches, get().isPro, draftId))
+    // Backstop only: every entry point checks this before opening the form —
+    // and it must ask the SAME question they do. `isPro` is the local testing
+    // flag; the enforced answer is the server's when it has spoken. Reading
+    // the raw flag here meant a real subscriber (serverPro true, isPro false)
+    // was waved through the gate and then refused at the commit, and since
+    // the refusal is a throw behind `void createNow()` the final button in
+    // the create form simply did nothing.
+    if (!canCreateThread(get().branches, selectEffectivePro(get()), draftId))
       throw new Error("Free plan holds ten open threads at a time.");
     const branch = createBranch(input, appNow());
     // The optimistic line becomes the real one: same id, so the line the user

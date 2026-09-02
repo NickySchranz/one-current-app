@@ -39,12 +39,30 @@ const readLog = () =>
     return b ? { loudness: b.loudness, log: b.loudnessLog ?? null } : null;
   });
 
+/** Walk the create wizard: name → since when → feelings → the last step.
+ * Four steps since the single form was replaced; scripts that filled a name
+ * and reached straight for the last button had no coverage of it at all,
+ * which is how a dead final step shipped unnoticed. */
+async function createThread(page, title, opts = {}) {
+  await page.getByLabel("New thread").first().click();
+  await page.waitForTimeout(900);
+  await page.getByLabel("Name the thread").fill(title);
+  await page.waitForTimeout(200);
+  await page.getByRole("button", { name: "Next" }).first().click();   // → since when
+  await page.waitForTimeout(500);
+  await page.getByText(opts.when ?? "Today", { exact: true }).first().click();
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: "Next" }).first().click();   // → feelings
+  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: "Next" }).first().click();   // → loudness
+  await page.waitForTimeout(600);
+  if (opts.beforeFinish) await opts.beforeFinish(page);
+  await page.getByRole("button", { name: "Start the thread" }).click();
+  await page.waitForTimeout(opts.settle ?? 1400);
+}
+
 // 1. create: the log is seeded with the creation loudness
-await page.getByLabel("New thread").first().click();
-await page.waitForTimeout(900);
-await page.getByLabel("Name the thread").fill("Loudness log test");
-await page.getByRole("button", { name: "Start the thread" }).click();
-await page.waitForTimeout(1200);
+await createThread(page, "Loudness log test");
 const created = await readLog();
 console.log(
   `seeded at creation: log=${JSON.stringify(created?.log)}`,
@@ -52,7 +70,13 @@ console.log(
     ? "OK" : "FAIL",
 );
 
-// 2. dial the loudness bar: one entry appended with the dialed value
+// 2. dial the loudness bar: one entry appended with the dialed value.
+// Creating now sets the panel down and returns the map, so the thread's own
+// panel has to be opened first: first tap arms it, second opens it.
+await page.getByText("Loudness log test", { exact: true }).first().click({ force: true });
+await page.waitForTimeout(700);
+await page.getByText("Loudness log test", { exact: true }).first().click({ force: true });
+await page.waitForTimeout(900);
 const bar = page.getByRole("slider").first();
 const box = await bar.boundingBox();
 if (box) await page.mouse.click(box.x + box.width * 0.85, box.y + box.height / 2);
@@ -71,6 +95,10 @@ await page.waitForTimeout(400);
 await page.getByRole("button", { name: /^Act\b/ }).last().click();
 await page.waitForTimeout(600);
 await page.getByLabel("The smallest honest step").fill("write one line");
+await page.waitForTimeout(200);
+// Act is two steps as well: name the step, then say when it begins.
+await page.getByRole("button", { name: "Next" }).first().click();
+await page.waitForTimeout(500);
 await page.getByRole("button", { name: "Place it on today" }).click();
 await page.waitForTimeout(1000);
 const eased = await readLog();
