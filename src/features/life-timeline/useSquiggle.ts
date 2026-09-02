@@ -104,9 +104,8 @@ export type GripRide = {
   /** His x with the face square-on — the rope's un-turned column. */
   baseX: number;
   angle: number;
-  /** The ring's two reaches (see `ringOffset`): right in frame, left off it. */
+  /** How far out on the ring he is (see `ringOffset`). */
   radius: number;
-  radiusLeft: number;
   rot: SharedValue<number>;
 };
 

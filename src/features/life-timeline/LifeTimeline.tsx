@@ -266,14 +266,12 @@ function RingG({
   rot,
   angle,
   radius,
-  radiusLeft,
   children,
 }: {
   opacity: number;
   rot: SharedValue<number> | null;
   angle: number;
   radius: number;
-  radiusLeft: number;
   children: React.ReactNode;
 }) {
   const props = useAnimatedProps(() => {
@@ -281,13 +279,13 @@ function RingG({
     const facing = Math.cos(angle + rot.value);
     // behind the mountain: gone, and not in the way of a tap
     const seen = facing <= -0.12 ? 0 : Math.min(1, (facing + 0.12) / 0.45);
-    const live = ringOffset(angle, rot.value, radius, radiusLeft);
-    const rest = ringOffset(angle, 0, radius, radiusLeft);
+    const live = ringOffset(angle, rot.value, radius);
+    const rest = ringOffset(angle, 0, radius);
     return {
       translateX: Math.round((live - rest) * 2) / 2,
       opacity: opacity * seen,
     };
-  }, [rot, angle, radius, radiusLeft, opacity]);
+  }, [rot, angle, radius, opacity]);
   if (!rot) return <G opacity={opacity}>{children}</G>;
   return <AnimatedOptionG animatedProps={props}>{children}</AnimatedOptionG>;
 }
@@ -978,13 +976,12 @@ export function LifeTimeline() {
    * walks past it and gets snapped back when the turn lands.
    */
   const ringX = useCallback(
-    (g: { endX: number; angle?: number; radius?: number; radiusLeft?: number }): number => {
+    (g: { endX: number; angle?: number; radius?: number }): number => {
       if (!vertical || g.angle === undefined || !g.radius) return g.endX;
-      const rl = g.radiusLeft ?? g.radius;
       return (
         g.endX +
-        ringOffset(g.angle, rotSV.value, g.radius, rl) -
-        ringOffset(g.angle, 0, g.radius, rl)
+        ringOffset(g.angle, rotSV.value, g.radius) -
+        ringOffset(g.angle, 0, g.radius)
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shared value is stable
@@ -1022,18 +1019,10 @@ export function LifeTimeline() {
    * is why the chalk sweep can take one station and let the mountain bring it
    * rope after rope instead of running back and forth across the face.
    */
-  const frontXOf = (g: {
-    endX: number;
-    angle?: number;
-    radius?: number;
-    radiusLeft?: number;
-  }): number => {
+  const frontXOf = (g: { endX: number; angle?: number; radius?: number }): number => {
     if (!vertical || g.angle === undefined || !g.radius) return g.endX;
-    const rl = g.radiusLeft ?? g.radius;
     return (
-      g.endX +
-      ringOffset(0, FRONT_ANGLE, g.radius, rl) -
-      ringOffset(g.angle, 0, g.radius, rl)
+      g.endX + ringOffset(0, FRONT_ANGLE, g.radius) - ringOffset(g.angle, 0, g.radius)
     );
   };
 
@@ -1924,7 +1913,6 @@ export function LifeTimeline() {
       baseX: gripGeo.endX - PX * 6,
       angle: gripGeo.angle,
       radius: gripGeo.radius,
-      radiusLeft: gripGeo.radiusLeft ?? gripGeo.radius,
       rot: rotSV,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values are stable
@@ -2681,7 +2669,6 @@ export function LifeTimeline() {
                     rot={vertical && g.reachesNow ? rotSV : null}
                     angle={g.angle ?? 0}
                     radius={g.radius ?? 0}
-                    radiusLeft={g.radiusLeft ?? g.radius ?? 0}
                   >
                   <BranchLine
                     burning={burn?.branchId === g.branchId && !reducedMotion}
@@ -2781,8 +2768,7 @@ export function LifeTimeline() {
                       rot={vertical && g.reachesNow ? rotSV : null}
                       angle={g.angle ?? 0}
                       radius={g.radius ?? 0}
-                      radiusLeft={g.radiusLeft ?? g.radius ?? 0}
-                    />
+                      />
                   );
                 })}
 
@@ -2970,7 +2956,6 @@ export function LifeTimeline() {
                   rot={vertical ? rotSV : null}
                   angle={grabPrompt.g.angle ?? 0}
                   radius={grabPrompt.g.radius ?? 0}
-                  radiusLeft={grabPrompt.g.radiusLeft ?? grabPrompt.g.radius ?? 0}
                 >
                 <GrabPrompt
                   key={grabPrompt.id}

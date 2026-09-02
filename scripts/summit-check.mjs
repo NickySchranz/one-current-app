@@ -88,6 +88,42 @@ const ropeColumns = (pg) =>
     return xs.sort((p, q) => p - q);
   });
 
+/** The climber's live box: he moves up the rope, so nothing may cache it. */
+const pipBox = (pg) =>
+  pg.evaluate(() => {
+    const sprite = [...document.querySelectorAll("svg g")].find(
+      (g) => g.querySelectorAll(":scope > rect").length > 12,
+    );
+    if (!sprite) return null;
+    const r = sprite.getBoundingClientRect();
+    return {
+      x: Math.round(r.left + r.width / 2),
+      cx: r.left + r.width / 2,
+      y: Math.round(r.top + r.height / 2),
+      top: Math.round(r.top),
+    };
+  });
+
+/**
+ * Open the held rope's decisions by tapping the climber. He SWAYS with the
+ * rope, so a box measured a moment ago can be a miss — measure and click in
+ * the same breath, and try again if the peek did not come up.
+ */
+const openDecisions = async (pg) => {
+  for (let i = 0; i < 4; i++) {
+    const box = await pipBox(pg);
+    if (box) await pg.mouse.click(box.x, box.y);
+    await pg.waitForTimeout(900);
+    const up = await pg
+      .getByText("What does this rope need from you now?", { exact: false })
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (up) return true;
+  }
+  return false;
+};
+
 // ── 1. ropes run vertically; anchors gather near the ledge (top) ──
 const ropes = await page.evaluate(() => {
   const out = [];
@@ -398,17 +434,8 @@ await page.close();
   // One tap sends him over and he takes hold. A SECOND tap on the rope now
   // shins him up it and quiets it, so the way to the decisions sheet is to
   // tap the climber himself — resolved live, since he may have been raised.
-  const pipBox = await p2.evaluate(() => {
-    const sprite = [...document.querySelectorAll("svg g")].find(
-      (g) => g.querySelectorAll(":scope > rect").length > 12,
-    );
-    if (!sprite) return null;
-    const r = sprite.getBoundingClientRect();
-    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
-  });
-  check(!!pipBox, "found the climber on the rope");
-  if (pipBox) await p2.mouse.click(pipBox.x, pipBox.y);
-  await p2.waitForTimeout(1200);
+  const held6 = await pipBox(p2);
+  check(!!held6, "found the climber on the rope");
   // the sheet is up now: its inset must not have moved the time frame, and
   // focusing the rope must not have slid the mountain sideways
   const nowWithSheet = await nowLabelY();
@@ -436,6 +463,7 @@ await page.close();
     `the mountain never leans toward a focused rope (offset ${capBeforeFocus?.offset} → ${capWithFocus?.offset})`,
   );
   const closedBefore = await closedCurveY();
+  check(await openDecisions(p2), "tapping the climber opens his rope's decisions");
   await p2.getByText("What does this rope need from you now?", { exact: false }).first().click();
   await p2.waitForTimeout(700);
   // sample from the answer on: the climb + party must never move the world up
@@ -795,22 +823,6 @@ const emptyX = (pg) =>
   await p2.close();
 }
 
-/** The climber's live box: he moves up the rope, so nothing may cache it. */
-const pipBox = (pg) =>
-  pg.evaluate(() => {
-    const sprite = [...document.querySelectorAll("svg g")].find(
-      (g) => g.querySelectorAll(":scope > rect").length > 12,
-    );
-    if (!sprite) return null;
-    const r = sprite.getBoundingClientRect();
-    return {
-      x: Math.round(r.left + r.width / 2),
-      cx: r.left + r.width / 2,
-      y: Math.round(r.top + r.height / 2),
-      top: Math.round(r.top),
-    };
-  });
-
 /** Where the rope's own visible stroke sits at the climber's altitude. */
 const ropeXAtPip = (pg) =>
   pg.evaluate(() => {
@@ -1131,17 +1143,25 @@ const readBranches = (pg) =>
   // happens to be part-way round already.
   const marks = p5.getByRole("button", { name: "Turn the mountain to this rope" });
   const marked = await marks.count();
-  let turnedByMark = 0;
-  for (let i = 0; i < Math.min(marked, 4); i++) {
-    const before = await ropeColumns(p5);
+  /** A mark is drawn bigger while its own rope faces the viewer (9px vs 6px),
+   * which is the contract itself: press one and THAT rope comes round. */
+  const markIsFront = (i) =>
+    p5.evaluate((k) => {
+      const el = [...document.querySelectorAll('[aria-label="Turn the mountain to this rope"]')][k];
+      if (!el) return false;
+      const dot = el.querySelector("div") ?? el;
+      return Math.round(dot.getBoundingClientRect().width) >= 8;
+    }, i);
+  let brought = 0;
+  const tried = Math.min(marked, 5);
+  for (let i = 0; i < tried; i++) {
     await marks.nth(i).click();
-    await p5.waitForTimeout(900);
-    const after = await ropeColumns(p5);
-    if (after.some((x) => !before.some((y) => Math.abs(x - y) < 24))) turnedByMark++;
+    await p5.waitForTimeout(1000);
+    if (await markIsFront(i)) brought++;
   }
   check(
-    marked > 0 && turnedByMark >= Math.min(marked, 4) - 1,
-    `every mark on the indicator brings its rope round (${turnedByMark} of ${Math.min(marked, 4)})`,
+    marked > 0 && brought === tried,
+    `every mark on the indicator brings its own rope round (${brought} of ${tried})`,
   );
 
   // A thread picked from the wholeness panel: the face turns to it AND the
@@ -1194,8 +1214,7 @@ const readBranches = (pg) =>
     // Act is a "stage" flow: it takes a screen of its own and the map is not
     // on it. The climb must play on the way BACK, from the rope's own column
     // — not be revealed already done with him standing on the route.
-    if (held) await p6.mouse.click(held.x, held.y);
-    await p6.waitForTimeout(1100);
+    if (!(await openDecisions(p6))) check(false, "section 11 could not open the decisions");
     await p6.getByText("What does this rope need from you now?", { exact: false }).first().click();
     await p6.waitForTimeout(600);
     await p6.getByRole("button", { name: /^Act\b/ }).last().click();

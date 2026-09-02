@@ -120,22 +120,18 @@ export function mountainHalfWidth(
 }
 
 /**
- * How far a rope hangs from the route, with the face turned by `rot`. The
- * ring is not a circle but a half-and-half ellipse: the right flank has to
- * stay in frame with sky beyond it, while the left runs off the screen, so
- * the two sides get different reaches. Position stays continuous — the two
- * only ever differ where sin is 0 — and both JS and the UI thread compute a
- * rope's place through this one function, so they cannot disagree.
+ * How far a rope hangs from the ring's CENTRE, with the face turned by `rot`.
+ * One radius, both sides: the ring is centred on the room the screen actually
+ * has (see `ringCx`) rather than on the route, so it does not need a longer
+ * reach one way to use the width. Two different reaches made a degree of turn
+ * move a rope further on one side than the other, which read as ropes
+ * sweeping in wide on the left and crowding together on the right.
+ * Both JS and the UI thread compute a rope's place through this one function,
+ * so they cannot disagree.
  */
-export function ringOffset(
-  angle: number,
-  rot: number,
-  radius: number,
-  radiusLeft: number,
-): number {
+export function ringOffset(angle: number, rot: number, radius: number): number {
   "worklet";
-  const s = Math.sin(angle + rot);
-  return s * (s >= 0 ? radius : radiusLeft);
+  return Math.sin(angle + rot) * radius;
 }
 
 /**
@@ -407,39 +403,54 @@ export function buildSummitLayout(
   // together as soon as there were more than a handful; an angle never does —
   // the turn is what makes room.
   const peakYRest = nowScreenY - ladder.peakAbove;
-  const faceRadius = Math.max(46, mountainHalfWidth(nowScreenY - peakYRest, faceHalf, timeLen) - 34);
   /**
-   * How far a rope may swing LEFT of the route. The two sides are not
-   * symmetric on this map: the right flank has to stay in frame with sky
-   * beyond it, so the reach there is the rock's own half-width, while the
-   * left flank deliberately runs off the screen — so a rope over there is on
-   * rock however far out it goes, and the only real limit is the screen's
-   * own edge. Keeping both sides at the right's reach wasted the whole left
-   * of a phone: five ropes crowded into the middle third with 170px of empty
-   * sky beside them.
+   * The ring the ropes hang on, sized and placed by the room the SCREEN has
+   * rather than by where the route happens to sit.
+   *
+   * The two sides of this map are not alike: the right flank must stay in
+   * frame with sky beyond it (and the date rail past that), while the left
+   * runs off the screen on purpose — so a rope out to the left is on rock
+   * however far it goes, and only the screen's edge stops it. The route is
+   * nowhere near the middle of what that leaves, so a ring centred on the
+   * route could only use the width by reaching further one way than the
+   * other, which made ropes crowd on the short side.
+   *
+   * Centring the ring on the available band instead lets one radius serve
+   * both sides — the widest that fits, evenly. The rock's left flank hides
+   * the offset: there is no visible edge over there to measure it against.
    */
-  // ...but not so much further than the right that the two sides read
-  // differently: dx per degree of turn is proportional to the reach, so a
-  // left reach far greater than the right makes ropes sweep in wide on one
-  // side and crowd together on the other.
-  const leftReach = Math.max(faceRadius, Math.min(Math.round(routeX - 26), Math.round(faceRadius * 1.25)));
+  const rightBound = routeX + Math.max(46, mountainHalfWidth(nowScreenY - peakYRest, faceHalf, timeLen) - 34);
+  const leftBound = 26;
+  const ringCx = Math.round((leftBound + rightBound) / 2);
+  const faceRadius = Math.max(46, Math.round((rightBound - leftBound) / 2));
   /**
-   * Degrees between neighbouring ropes, wrapped into one full turn. A narrow
-   * stage takes a wider step: the ring's reach cannot grow (the rock is only
-   * so wide on the side whose flank is in frame), so the only way for the two
-   * ropes facing you to use a phone's width is to sit further round from each
-   * other. It costs nothing — a phone could not show a third clearly anyway.
+   * Degrees between neighbouring ropes: the ring, shared out. One full turn
+   * divided by the ropes on it is the widest they can be without two landing
+   * in the same place, so it is what they get — the whole mountain is theirs.
+   * This used to be capped at 42° (64° on a phone), which only ever made
+   * them CLOSER than they had to be: three ropes sat inside an 84° wedge on
+   * one side of the route with the rest of the rock empty, and a busy day
+   * crowded them further still. A wider step means fewer face you at once —
+   * that is what turning is for, and the mountain turns to the next rope by
+   * itself once the ones in view are answered.
    */
-  const maxStep = opts.stageWidth < 520 ? 64 : 42;
-  const spacing =
-    openOrder.length > 0 ? Math.min(maxStep, 360 / openOrder.length) : maxStep;
+  const spacing = openOrder.length > 0 ? Math.min(90, 360 / openOrder.length) : 90;
+  /** A ledge must stay on the rock at its own depth; the ring is sized at the
+   * route's, where the rock is widest. Deep rungs never bind, but a shallow
+   * one would hang its ledge in the sky. */
+  const reachAt = (depth: number) =>
+    Math.min(faceRadius, Math.max(46, mountainHalfWidth(depth, faceHalf, timeLen) - 30));
   const angleOf = (id: string) => {
     const i = columnOrder.indexOf(id);
     if (i < 0) return 0;
-    // Centred on the front (a quiet day needs no turning at all) but offset by
-    // half a step, so no rope ever hangs exactly on the route — it would sit
-    // on the main line, the Now marker and the climber all at once.
-    const k = i - (columnOrder.length - 1) / 2 + 0.5;
+    // Centred on the front (a quiet day needs no turning at all), nudged by
+    // half a step so no rope hangs exactly on the route — it would sit on the
+    // main line, the Now marker and the climber all at once. The nudge is
+    // needed only for an ODD count: an even one already straddles the front.
+    // Adding it unconditionally did the opposite of its job, putting a rope
+    // dead on the route for every even number of threads.
+    const n = columnOrder.length;
+    const k = i - (n - 1) / 2 + (n % 2 === 1 ? 0.5 : 0);
     return ((k * spacing) / 180) * Math.PI;
   };
 
@@ -463,17 +474,12 @@ export function buildSummitLayout(
       // thread (x = routeX + sin(angle + rot) · radius), so this is where it
       // sits when the face is square-on to the viewer.
       const angle = angleOf(g.branchId);
-      const radius = coiled
-        ? Math.max(30, mountainHalfWidth(ay - peakYRest, faceHalf, timeLen) - 30)
-        : faceRadius;
-      // The ledge keeps the rope's OWN reach. Collapsing it to the round
-      // right-hand radius moved a coiled rope's ledge ~75px in toward the
-      // route the instant it was answered, so he climbed from a column he
-      // had never been on. The rungs sit deep enough that the rock is at its
-      // full width there (`faceLeft` reaches further still), so a ledge out
-      // at the hanging reach is on rock.
-      const radiusLeft = Math.max(radius, leftReach);
-      const ax = Math.round(base.mainY + ringOffset(angle, 0, radius, radiusLeft));
+      // A coiled rope's ledge keeps the reach the rope had. Giving the ledge
+      // a radius of its own moved it in toward the route the instant the rope
+      // was answered, so the climb started from a column he had never stood
+      // on. The rungs are deep enough that `reachAt` returns the same number.
+      const radius = coiled ? reachAt(ay - peakYRest) : faceRadius;
+      const ax = Math.round(ringCx + ringOffset(angle, 0, radius));
       // the free end runs off below the screen: a rope passes right by him at
       // the Now line (which is where he takes hold of it) and keeps going, so
       // no rope end is ever seen swinging about mid-climb
@@ -491,7 +497,7 @@ export function buildSummitLayout(
         laneX: ax,
         angle,
         radius,
-        radiusLeft,
+        ringCx,
         // Names are centred on their column and ~140px wide, so a column near
         // an edge would push its name off the screen: hold it inside the stage.
         labelX: Math.max(74, Math.min(opts.stageWidth - 74, ax)),

@@ -335,8 +335,8 @@ export function Mascot({
     // his JS-side place only catches up when a turn commits.
     const x = grip
       ? grip.baseX +
-        ringOffset(grip.angle, grip.rot.value, grip.radius, grip.radiusLeft) -
-        ringOffset(grip.angle, 0, grip.radius, grip.radiusLeft)
+        ringOffset(grip.angle, grip.rot.value, grip.radius) -
+        ringOffset(grip.angle, 0, grip.radius)
       : posX.value;
     let o = 1;
     if (viewW > 0) {

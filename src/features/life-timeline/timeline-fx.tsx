@@ -661,7 +661,7 @@ const AnimatedSvgText = Animated.createAnimatedComponent(SvgText);
  */
 function ChalkFx({
   x, y, calm, fromX, fromY,
-  rot = null, angle = 0, radius = 0, radiusLeft = 0,
+  rot = null, angle = 0, radius = 0,
 }: AttackFxProps) {
   const t = useSharedValue(0);
   useEffect(() => {
@@ -673,11 +673,8 @@ function ChalkFx({
   // How far the rope has been carried round by the turn. Zero off the summit.
   const ringDx = useDerivedValue(
     () =>
-      rot
-        ? ringOffset(angle, rot.value, radius, radiusLeft || radius) -
-          ringOffset(angle, 0, radius, radiusLeft || radius)
-        : 0,
-    [rot, angle, radius, radiusLeft],
+      rot ? ringOffset(angle, rot.value, radius) - ringOffset(angle, 0, radius) : 0,
+    [rot, angle, radius],
   );
   // The chalk block, in the air: a low arc from his hand to the rope, then
   // gone. A block, not a speck — white on a pale sky needs a dark rim and a
@@ -783,7 +780,6 @@ type AttackFxProps = {
   rot?: SharedValue<number> | null;
   angle?: number;
   radius?: number;
-  radiusLeft?: number;
 };
 
 /**
