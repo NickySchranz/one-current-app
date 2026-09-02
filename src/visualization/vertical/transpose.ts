@@ -120,11 +120,24 @@ export function mountainHalfWidth(
 }
 
 /**
- * How wide the rock may be, from the route to its flank. The route does not
- * sit at the middle of the canvas and the date rail covers the right edge, so
- * the rock takes the smaller of the two gaps and leaves a margin — which is
- * what puts both flanks just inside the frame instead of off the screen.
+ * How far a rope hangs from the route, with the face turned by `rot`. The
+ * ring is not a circle but a half-and-half ellipse: the right flank has to
+ * stay in frame with sky beyond it, while the left runs off the screen, so
+ * the two sides get different reaches. Position stays continuous — the two
+ * only ever differ where sin is 0 — and both JS and the UI thread compute a
+ * rope's place through this one function, so they cannot disagree.
  */
+export function ringOffset(
+  angle: number,
+  rot: number,
+  radius: number,
+  radiusLeft: number,
+): number {
+  "worklet";
+  const s = Math.sin(angle + rot);
+  return s * (s >= 0 ? radius : radiusLeft);
+}
+
 /**
  * How wide the rock reaches on the RIGHT — the side whose edge is in frame.
  * The margin it leaves is real sky, because the distant ranges live out there
@@ -390,8 +403,27 @@ export function buildSummitLayout(
   // the turn is what makes room.
   const peakYRest = nowScreenY - ladder.peakAbove;
   const faceRadius = Math.max(46, mountainHalfWidth(nowScreenY - peakYRest, faceHalf, timeLen) - 34);
-  /** Degrees between neighbouring ropes, wrapped into one full turn. */
-  const spacing = openOrder.length > 0 ? Math.min(42, 360 / openOrder.length) : 42;
+  /**
+   * How far a rope may swing LEFT of the route. The two sides are not
+   * symmetric on this map: the right flank has to stay in frame with sky
+   * beyond it, so the reach there is the rock's own half-width, while the
+   * left flank deliberately runs off the screen — so a rope over there is on
+   * rock however far out it goes, and the only real limit is the screen's
+   * own edge. Keeping both sides at the right's reach wasted the whole left
+   * of a phone: five ropes crowded into the middle third with 170px of empty
+   * sky beside them.
+   */
+  const leftReach = Math.max(faceRadius, Math.round(routeX - 26));
+  /**
+   * Degrees between neighbouring ropes, wrapped into one full turn. A narrow
+   * stage takes a wider step: the ring's reach cannot grow (the rock is only
+   * so wide on the side whose flank is in frame), so the only way for the two
+   * ropes facing you to use a phone's width is to sit further round from each
+   * other. It costs nothing — a phone could not show a third clearly anyway.
+   */
+  const maxStep = opts.stageWidth < 520 ? 64 : 42;
+  const spacing =
+    openOrder.length > 0 ? Math.min(maxStep, 360 / openOrder.length) : maxStep;
   const angleOf = (id: string) => {
     const i = columnOrder.indexOf(id);
     if (i < 0) return 0;
@@ -425,7 +457,11 @@ export function buildSummitLayout(
       const radius = coiled
         ? Math.max(30, mountainHalfWidth(ay - peakYRest, faceHalf, timeLen) - 30)
         : faceRadius;
-      const ax = Math.round(base.mainY + Math.sin(angle) * radius);
+      // A coiled rope's ledge is drawn ON the rock and reads against the
+      // visible right flank, so it keeps a round ring; only the hanging ropes
+      // borrow the room off the left of the screen.
+      const radiusLeft = coiled ? radius : Math.max(radius, leftReach);
+      const ax = Math.round(base.mainY + ringOffset(angle, 0, radius, radiusLeft));
       // the free end runs off below the screen: a rope passes right by him at
       // the Now line (which is where he takes hold of it) and keeps going, so
       // no rope end is ever seen swinging about mid-climb
@@ -443,6 +479,7 @@ export function buildSummitLayout(
         laneX: ax,
         angle,
         radius,
+        radiusLeft,
         // Names are centred on their column and ~140px wide, so a column near
         // an edge would push its name off the screen: hold it inside the stage.
         labelX: Math.max(74, Math.min(opts.stageWidth - 74, ax)),

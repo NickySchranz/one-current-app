@@ -30,7 +30,7 @@ import { useLayoutStore } from "@/stores/layout-store";
 import { measureNode } from "@/ui/measure";
 import { setWalkthroughPoint, useWalkthroughTarget } from "@/features/tutorial/targets";
 import { buildTimelineLayout } from "@/visualization/main-line/layout";
-import { buildSummitLayout, dateToScreenY, daySeedOrder, SUMMIT_RAIL_W, type SummitLayout } from "@/visualization/vertical/transpose";
+import { buildSummitLayout, dateToScreenY, daySeedOrder, ringOffset, SUMMIT_RAIL_W, type SummitLayout } from "@/visualization/vertical/transpose";
 import { themeOrientation } from "@/visualization/theme";
 import { generateTicks, dateToX, addDays } from "@/visualization/zoom/time-scale";
 import { describeTimeline } from "@/visualization/a11y/describe";
@@ -266,25 +266,28 @@ function RingG({
   rot,
   angle,
   radius,
+  radiusLeft,
   children,
 }: {
   opacity: number;
   rot: SharedValue<number> | null;
   angle: number;
   radius: number;
+  radiusLeft: number;
   children: React.ReactNode;
 }) {
   const props = useAnimatedProps(() => {
     if (!rot) return { translateX: 0, opacity };
-    const a = angle + rot.value;
-    const facing = Math.cos(a);
+    const facing = Math.cos(angle + rot.value);
     // behind the mountain: gone, and not in the way of a tap
     const seen = facing <= -0.12 ? 0 : Math.min(1, (facing + 0.12) / 0.45);
+    const live = ringOffset(angle, rot.value, radius, radiusLeft);
+    const rest = ringOffset(angle, 0, radius, radiusLeft);
     return {
-      translateX: Math.round((Math.sin(a) - Math.sin(angle)) * radius * 2) / 2,
+      translateX: Math.round((live - rest) * 2) / 2,
       opacity: opacity * seen,
     };
-  }, [rot, angle, radius, opacity]);
+  }, [rot, angle, radius, radiusLeft, opacity]);
   if (!rot) return <G opacity={opacity}>{children}</G>;
   return <AnimatedOptionG animatedProps={props}>{children}</AnimatedOptionG>;
 }
@@ -922,9 +925,14 @@ export function LifeTimeline() {
    * walks past it and gets snapped back when the turn lands.
    */
   const ringX = useCallback(
-    (g: { endX: number; angle?: number; radius?: number }): number => {
+    (g: { endX: number; angle?: number; radius?: number; radiusLeft?: number }): number => {
       if (!vertical || g.angle === undefined || !g.radius) return g.endX;
-      return g.endX + (Math.sin(g.angle + rotSV.value) - Math.sin(g.angle)) * g.radius;
+      const rl = g.radiusLeft ?? g.radius;
+      return (
+        g.endX +
+        ringOffset(g.angle, rotSV.value, g.radius, rl) -
+        ringOffset(g.angle, 0, g.radius, rl)
+      );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shared value is stable
     [vertical],
@@ -961,10 +969,20 @@ export function LifeTimeline() {
    * is why the chalk sweep can take one station and let the mountain bring it
    * rope after rope instead of running back and forth across the face.
    */
-  const frontXOf = (g: { endX: number; angle?: number; radius?: number }): number =>
-    !vertical || g.angle === undefined || !g.radius
-      ? g.endX
-      : g.endX + (Math.sin(FRONT_ANGLE) - Math.sin(g.angle)) * g.radius;
+  const frontXOf = (g: {
+    endX: number;
+    angle?: number;
+    radius?: number;
+    radiusLeft?: number;
+  }): number => {
+    if (!vertical || g.angle === undefined || !g.radius) return g.endX;
+    const rl = g.radiusLeft ?? g.radius;
+    return (
+      g.endX +
+      ringOffset(0, FRONT_ANGLE, g.radius, rl) -
+      ringOffset(g.angle, 0, g.radius, rl)
+    );
+  };
 
   /** Bring a rope round to the front; returns how many ms that will take. */
   const turnToRef = useRef<(id: string, force?: boolean, sweep?: boolean) => number>(() => 0);
@@ -990,6 +1008,14 @@ export function LifeTimeline() {
       ? Math.round(Math.max(240, Math.min(560, 120 + delta * 180)))
       : 420;
     rotSV.value = withTiming(target, { duration: dur, easing: Easing.inOut(Easing.quad) });
+    // JS's notion of the ring jumps to the DESTINATION at once. Everything on
+    // this side reasons about which ropes are reachable — `interactive`,
+    // `ringVisible`, the auto-turn — and it used to keep the pre-turn angle
+    // until `commitRot`, so for the whole animation a rope you could plainly
+    // see coming round still had its taps switched off. The rock's own shape
+    // (`rotQ`) still steps at the end; only the reachability leads.
+    rotRef.current = target;
+    setRotTick((k) => k + 1);
     setTimeout(commitRot, dur + 20);
     return dur;
   };
@@ -1013,6 +1039,8 @@ export function LifeTimeline() {
     rotSV.value = reducedMotion
       ? best
       : withTiming(best, { duration: 320, easing: Easing.out(Easing.quad) });
+    rotRef.current = best;
+    setRotTick((k) => k + 1);
     setTimeout(commitRot, reducedMotion ? 0 : 340);
   };
 
@@ -1691,6 +1719,10 @@ export function LifeTimeline() {
   const handOff = useCallback(() => {
     const rot = rotSV.value;
     const held = heldRopeRef.current;
+    // A panel open on a rope means the user is working THAT one: the map does
+    // not get to reassign him mid-decision, and the rope is on its way round
+    // to the front anyway (see the reveal turn below).
+    if (operationBranchRef.current) return;
     const next = ropeAnglesRef.current
       .filter((r) => r.id !== held)
       .filter((r) => {
@@ -1817,6 +1849,7 @@ export function LifeTimeline() {
       baseX: gripGeo.endX - PX * 6,
       angle: gripGeo.angle,
       radius: gripGeo.radius,
+      radiusLeft: gripGeo.radiusLeft ?? gripGeo.radius,
       rot: rotSV,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values are stable
@@ -1824,17 +1857,27 @@ export function LifeTimeline() {
 
   /**
    * About to act on a rope — picked from the wholeness panel, say — that is
-   * round the back of the mountain: bring it round so it can be seen. Only
-   * when it genuinely cannot be: a rope anywhere on the visible face stays
-   * exactly where it is, so the map never shifts under a finger that is
-   * already on it.
+   * round the back of the mountain: bring it round so it can be seen, then
+   * put the climber on it. Only turn when it genuinely cannot be seen: a rope
+   * anywhere on the visible face stays exactly where it is, so the map never
+   * shifts under a finger that is already on it.
    */
   const operationBranchId = operation.kind === "quick-touch" ? operation.branchId : null;
+  const operationBranchRef = useRef(operationBranchId);
+  operationBranchRef.current = operationBranchId;
   useEffect(() => {
     if (!vertical || !operationBranchId) return;
     const r = ropeAnglesRef.current.find((x) => x.id === operationBranchId);
-    if (!r || Math.cos(r.angle + rotSV.value) > 0.25) return;
-    turnToRef.current(operationBranchId, true);
+    if (!r) return;
+    // Turn only when it genuinely cannot be seen.
+    const hidden = Math.cos(r.angle + rotSV.value) <= 0.25;
+    const ms = hidden ? turnToRef.current(operationBranchId, true) : 0;
+    // Then he belongs ON it. Sending him again once the rope has come round
+    // is what makes a thread picked from the wholeness panel put him in the
+    // right place: the panel's own focus fires before the turn does, so
+    // without this he walks to where the rope was hiding and stays there.
+    const tm = setTimeout(() => mascotRef.current?.focusBranch(operationBranchId), ms + 40);
+    return () => clearTimeout(tm);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable
   }, [vertical, operationBranchId]);
 
@@ -1845,14 +1888,14 @@ export function LifeTimeline() {
     if (!vertical || !sm || operation.kind !== "idle") return null;
     const id = mascot.pendingBranchId ?? armedBranchId ?? mascot.inspectedBranchId;
     if (!id) return null;
-    // Once he has shinned up this rope the pill is literally in his way (it
-    // sits a step above his head), and his own bubble should have the floor.
-    if (id === gripId && shinSteps > 0) return null;
     const b = branches.find((x) => x.id === id);
     if (!b || isClosed(b) || handledToday(b, now)) return null;
     const g = layout.geometries.find((x) => x.branchId === id);
     if (!g || !g.inWindow) return null;
-    return { id, g };
+    // The pill sits just above his head, so it climbs with him — hiding it
+    // once he had shinned up took away the only route to a rope's decisions.
+    const rise = id === gripId ? shinSteps * SHIN_PX : 0;
+    return { id, g, rise };
   })();
 
   // The mountain turns by itself at ONE moment only: when every rope facing
@@ -2561,6 +2604,7 @@ export function LifeTimeline() {
                     rot={vertical && g.reachesNow ? rotSV : null}
                     angle={g.angle ?? 0}
                     radius={g.radius ?? 0}
+                    radiusLeft={g.radiusLeft ?? g.radius ?? 0}
                   >
                   <BranchLine
                     burning={burn?.branchId === g.branchId && !reducedMotion}
@@ -2660,6 +2704,7 @@ export function LifeTimeline() {
                       rot={vertical && g.reachesNow ? rotSV : null}
                       angle={g.angle ?? 0}
                       radius={g.radius ?? 0}
+                      radiusLeft={g.radiusLeft ?? g.radius ?? 0}
                     />
                   );
                 })}
@@ -2848,6 +2893,7 @@ export function LifeTimeline() {
                   rot={vertical ? rotSV : null}
                   angle={grabPrompt.g.angle ?? 0}
                   radius={grabPrompt.g.radius ?? 0}
+                  radiusLeft={grabPrompt.g.radiusLeft ?? grabPrompt.g.radius ?? 0}
                 >
                 <GrabPrompt
                   key={grabPrompt.id}
@@ -2855,7 +2901,7 @@ export function LifeTimeline() {
                   // above the grab band — not the dangling end, which hangs
                   // far below the screen once he has climbed, and high
                   // enough to clear the climber hanging there
-                  y={grabPrompt.g.labelY - 104}
+                  y={grabPrompt.g.labelY - 104 - grabPrompt.rise}
                   text={t(
                     GRAB_PROMPTS[
                       (promptHash(grabPrompt.id) + Math.floor(nowTick / 86400000)) %
@@ -3244,7 +3290,12 @@ export function LifeTimeline() {
                     key={r.id}
                     accessibilityRole="button"
                     accessibilityLabel={t("Turn the mountain to this rope")}
-                    onPress={guarded(() => turnToRef.current(r.id))}
+                    // Forced: pressing a rope's own mark is a deliberate ask
+                    // to be shown it. The unforced guard exists to stop a tap
+                    // on a ROPE from sliding it out from under the finger —
+                    // here it just made the mark do nothing for any rope
+                    // already part-way round.
+                    onPress={guarded(() => turnToRef.current(r.id, true))}
                     hitSlop={8}
                   >
                     <View

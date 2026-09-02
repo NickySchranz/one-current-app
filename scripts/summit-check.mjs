@@ -1107,6 +1107,66 @@ const readBranches = (pg) =>
   await p4.close();
 }
 
+// ── 10. the two ways in from outside the map ──
+{
+  const p5 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  p5.on("pageerror", (e) => errors.push(e.message));
+  await p5.addInitScript(() => {
+    localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+    localStorage.setItem("one-current-tutorial-v1", "done");
+    localStorage.setItem("one-current-pro", "1");
+    localStorage.setItem("one-current-theme", "summit");
+  });
+  await p5.goto("http://localhost:4179/", { waitUntil: "networkidle" });
+  await p5.waitForTimeout(1500);
+  await p5.getByRole("button", { name: "More" }).first().click();
+  await p5.waitForTimeout(500);
+  await p5.getByRole("button", { name: "Load example threads" }).click();
+  await p5.waitForTimeout(900);
+  await p5.reload({ waitUntil: "networkidle" });
+  await p5.waitForTimeout(2600);
+
+  // A rope's mark on the indicator is a deliberate "show me this one": it
+  // must turn the face EVERY time, not quietly do nothing for a rope that
+  // happens to be part-way round already.
+  const marks = p5.getByRole("button", { name: "Turn the mountain to this rope" });
+  const marked = await marks.count();
+  let turnedByMark = 0;
+  for (let i = 0; i < Math.min(marked, 4); i++) {
+    const before = await ropeColumns(p5);
+    await marks.nth(i).click();
+    await p5.waitForTimeout(900);
+    const after = await ropeColumns(p5);
+    if (after.some((x) => !before.some((y) => Math.abs(x - y) < 24))) turnedByMark++;
+  }
+  check(
+    marked > 0 && turnedByMark >= Math.min(marked, 4) - 1,
+    `every mark on the indicator brings its rope round (${turnedByMark} of ${Math.min(marked, 4)})`,
+  );
+
+  // A thread picked from the wholeness panel: the face turns to it AND the
+  // climber ends up on it. He used to walk to where it had been hiding and
+  // stay there, because the panel's focus fires before the turn does.
+  await p5.keyboard.press("Escape").catch(() => {});
+  await p5.waitForTimeout(400);
+  const chip = p5.getByRole("button", { name: /scattered|gathered|split|whole|pulled/i }).first();
+  if (await chip.isVisible().catch(() => false)) {
+    await chip.click();
+    await p5.waitForTimeout(700);
+    await p5.getByText("pulling hardest right now").first().click();
+    await p5.waitForTimeout(3000);
+    const box = await pipBox(p5);
+    const cols = await ropeColumns(p5);
+    const onRope = box ? cols.some((x) => Math.abs(x - box.cx) < 34) : false;
+    check(
+      !!box && onRope,
+      `a thread picked from the wholeness panel puts him on it (him ${box?.x}, ropes ${cols.join(",")})`,
+    );
+  }
+  await p5.screenshot({ path: "/tmp/summit-10-fromoutside.png" });
+  await p5.close();
+}
+
 await browser.close();
 server.close();
 

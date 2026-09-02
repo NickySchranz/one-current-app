@@ -17,6 +17,7 @@ import { mix } from "@/ui/color";
 import type { ColorKey, FrameName, MascotType, Pixel } from "./mascot-frames";
 import { CHARACTER_FRAMES, PX } from "./mascot-frames";
 import { swayOffsetAt, type GripRide, type SwayRide } from "./useSquiggle";
+import { ringOffset } from "@/visualization/vertical/transpose";
 
 // ─── Color palette ────────────────────────────────────────────────────────────
 
@@ -333,7 +334,9 @@ export function Mascot({
     // column IS his x — computed here per frame from the live turn, because
     // his JS-side place only catches up when a turn commits.
     const x = grip
-      ? grip.baseX + (Math.sin(grip.angle + grip.rot.value) - Math.sin(grip.angle)) * grip.radius
+      ? grip.baseX +
+        ringOffset(grip.angle, grip.rot.value, grip.radius, grip.radiusLeft) -
+        ringOffset(grip.angle, 0, grip.radius, grip.radiusLeft)
       : posX.value;
     let o = 1;
     if (viewW > 0) {

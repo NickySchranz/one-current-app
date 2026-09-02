@@ -19,6 +19,7 @@ import Svg, { Circle, Defs, Ellipse, G, LinearGradient, Path, Rect, Stop, Text a
 import type { PathProps } from "react-native-svg";
 import type { ThemeId } from "@/visualization/theme";
 import { pathLength, samplePath } from "@/visualization/path-sample";
+import { ringOffset } from "@/visualization/vertical/transpose";
 import { mix } from "@/ui/color";
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -658,7 +659,10 @@ const AnimatedSvgText = Animated.createAnimatedComponent(SvgText);
  * either, which also keeps this clear of the rope's own mountain
  * coordinates: a short segment at his altitude IS the rope.
  */
-function ChalkFx({ x, y, calm, fromX, fromY, rot = null, angle = 0, radius = 0 }: AttackFxProps) {
+function ChalkFx({
+  x, y, calm, fromX, fromY,
+  rot = null, angle = 0, radius = 0, radiusLeft = 0,
+}: AttackFxProps) {
   const t = useSharedValue(0);
   useEffect(() => {
     t.value = 0;
@@ -668,8 +672,12 @@ function ChalkFx({ x, y, calm, fromX, fromY, rot = null, angle = 0, radius = 0 }
 
   // How far the rope has been carried round by the turn. Zero off the summit.
   const ringDx = useDerivedValue(
-    () => (rot ? (Math.sin(angle + rot.value) - Math.sin(angle)) * radius : 0),
-    [rot, angle, radius],
+    () =>
+      rot
+        ? ringOffset(angle, rot.value, radius, radiusLeft || radius) -
+          ringOffset(angle, 0, radius, radiusLeft || radius)
+        : 0,
+    [rot, angle, radius, radiusLeft],
   );
   // The chalk block, in the air: a low arc from his hand to the rope, then
   // gone. A block, not a speck — white on a pale sky needs a dark rim and a
@@ -775,6 +783,7 @@ type AttackFxProps = {
   rot?: SharedValue<number> | null;
   angle?: number;
   radius?: number;
+  radiusLeft?: number;
 };
 
 /**

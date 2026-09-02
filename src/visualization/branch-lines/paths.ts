@@ -51,8 +51,12 @@ export type BranchGeometry = {
   /** Summit only: where this rope hangs AROUND the mountain (radians, 0 =
    * square-on to the viewer). Turning the face adds to it. */
   angle?: number;
-  /** Summit only: how far out from the route that angle sits. */
+  /** Summit only: how far out from the route that angle sits, on the side
+   * whose flank is in frame (the right). */
   radius?: number;
+  /** Summit only: the reach on the LEFT, where the flank runs off the screen
+   * — larger, so the ring uses the room the screen actually has. */
+  radiusLeft?: number;
 };
 
 export type TimelineMetrics = {

@@ -405,18 +405,29 @@ export function MountainFace({
   const cap = useMemo(() => {
     // a fifth of the stage: a cap you can see, at any stage size
     const drop = Math.round(0.22 * timeLen);
+    // Snow lies DEEPER down the flanks than across the middle of the face —
+    // which is also what stops the snow line from grazing the silhouette at a
+    // hair's angle. A hem that met each flank tangentially left a sliver of
+    // bare rock a few px wide at the corner, and that sliver was the notch
+    // showing at the cap's left edge.
+    const sideDrop = Math.round(drop * 1.5);
     const capBottom = peakY + drop;
-    const left = flank(routeX, peakY, peakY, capBottom, faceLeft, -1, 31, timeLen, rot);
-    const right = flank(routeX, peakY, peakY, capBottom, faceHalf, 1, 33, timeLen, rot);
-    let d = `M ${left[left.length - 1].x} ${capBottom}`;
+    const sideBottom = peakY + sideDrop;
+    const left = flank(routeX, peakY, peakY, sideBottom, faceLeft, -1, 31, timeLen, rot);
+    const right = flank(routeX, peakY, peakY, sideBottom, faceHalf, 1, 33, timeLen, rot);
+    let d = `M ${left[left.length - 1].x} ${sideBottom}`;
     for (let i = left.length - 1; i >= 0; i--) d += ` L ${left[i].x} ${left[i].y}`;
     d += ` L ${routeX} ${Math.round(peakY)}`;
     for (const p of right) d += ` L ${p.x} ${p.y}`;
     const lx = left[left.length - 1].x;
     const rx = right[right.length - 1].x;
+    // The hem rises from each flank's end toward the shallower middle, so it
+    // starts and finishes exactly where the snow's own edges stop; the last
+    // point lands on the path's start, making the close a no-op.
     for (let i = 1; i <= 5; i++) {
       const t = i / 5;
-      d += ` L ${Math.round(rx + (lx - rx) * t)} ${Math.round(capBottom + (seeded(i, 35) - 0.2) * (drop * 0.22))}`;
+      const lift = Math.sin(Math.PI * t) * (0.7 + 0.3 * seeded(i, 35)) * (sideDrop - drop);
+      d += ` L ${Math.round(rx + (lx - rx) * t)} ${Math.round(sideBottom - lift)}`;
     }
     return d + " Z";
   }, [routeX, peakY, faceHalf, faceLeft, timeLen, rot]);
@@ -426,8 +437,11 @@ export function MountainFace({
   return (
     <G pointerEvents="none">
       <Path d={body} fill={rock} opacity={0.66} />
-      <Path d={body} fill="none" stroke={tk.inkSoft} strokeWidth={2} opacity={0.5} />
       <Path d={cap} fill="#ffffff" opacity={0.65} />
+      {/* The silhouette goes on LAST, over the snow's own edge: the cap's
+          flanks trace the same profile, so drawing it after left the outline
+          buried along the snow line and a hair of white outside it. */}
+      <Path d={body} fill="none" stroke={tk.inkSoft} strokeWidth={2} opacity={0.5} />
     </G>
   );
 }
