@@ -78,17 +78,41 @@ const branchPoint = (page, frac = 0.5) =>
   await page.screenshot({ path: "/tmp/gest-02-after-pan.png" });
   console.log("pan: done");
 
-  // ---- 2. vertical loudness dial --------------------------------------------
+  // ---- 2. loudness comes from the panel, never from a drag -----------------
   await page.getByRole("button", { name: "Now", exact: true }).first().click();
   await page.waitForTimeout(1500);
+  const readLoud = () =>
+    page.evaluate(() =>
+      JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]")
+        .map((b) => `${b.title}:${b.loudness}`)
+        .sort()
+        .join("|"),
+    );
+  const loudBeforeDrag = await readLoud();
   const pt = await branchPoint(page, 0.5);
+  // A drag on a lane used to dial it. It must not any more.
   await page.mouse.move(pt.x, pt.y);
   await page.mouse.down();
   for (let i = 1; i <= 14; i++) await page.mouse.move(pt.x, pt.y + i * 8);
-  await page.screenshot({ path: "/tmp/gest-03-dial-mid.png" });
+  await page.screenshot({ path: "/tmp/gest-03-drag-mid.png" });
   await page.mouse.up();
   await page.waitForTimeout(1200);
-  await page.screenshot({ path: "/tmp/gest-04-dial-after.png" });
+  const loudAfterDrag = await readLoud();
+  const dragKeptQuiet = loudAfterDrag === loudBeforeDrag;
+  // Press-and-hold is the way in: it pops the dial panel.
+  await page.mouse.move(pt.x, pt.y);
+  await page.mouse.down();
+  await page.waitForTimeout(700);
+  await page.mouse.up();
+  await page.waitForTimeout(900);
+  const panelOpened = (await page.getByRole("slider").count()) > 0;
+  await page.screenshot({ path: "/tmp/gest-04-hold-panel.png" });
+  console.log(
+    "dial:",
+    dragKeptQuiet ? "a drag no longer dials" : "DRAG STILL DIALS",
+    panelOpened ? "press-and-hold opens the panel" : "HOLD DID NOT OPEN THE PANEL",
+  );
+  if (!dragKeptQuiet || !panelOpened) process.exitCode = 1;
   const stored = await page.evaluate(() => {
     const out = [];
     for (let i = 0; i < localStorage.length; i++) {
@@ -150,7 +174,6 @@ const branchPoint = (page, frac = 0.5) =>
     arg1.loudness <= arg0.loudness &&
     arg1.loudnessSetOn !== arg0.loudnessSetOn;
   // with nothing armed, Bonk strikes wherever Pip is patrolling
-  await page.getByRole("button", { name: "Put the club away" }).click().catch(() => {});
   await page.waitForTimeout(400);
   const barStillThere = await bonk.isVisible().catch(() => false);
   const beforeFree = await page.evaluate(() => JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]"));
@@ -163,9 +186,12 @@ const branchPoint = (page, frac = 0.5) =>
     return was && b.loudnessSetOn === todayStr && (was.loudnessSetOn !== b.loudnessSetOn || b.loudness < was.loudness);
   });
 
-  // Reflect opens the full panel for whatever is focused
-  await page.getByRole("button", { name: "Reflect on this thread" }).click();
-  await page.waitForTimeout(800);
+  // A second tap on the same thread opens the full panel. (The old route was
+  // a "Reflect on this thread" pill beside Pip, which no longer exists — the
+  // tap itself is the route now, and on the summit map a second tap instead
+  // shins him up the rope, which is a summit-only branch in selectBranch.)
+  await page.getByText("The argument with my father", { exact: true }).first().click({ force: true });
+  await page.waitForTimeout(900);
   const panelOnSecondTap =
     (await page.getByText("How loud is this thread right now?").count()) > 0 ||
     (await page.getByText("What does this thread need from you now?").count()) > 0;
@@ -189,13 +215,12 @@ const branchPoint = (page, frac = 0.5) =>
   const page = await newPage();
   await loadExamples(page);
   const pt = await branchPoint(page, 0.6);
+  // First tap arms the thread, second opens its decisions (the "Reflect on
+  // this thread" pill that used to be the second step is gone).
   await page.mouse.click(pt.x, pt.y);
-  await page.waitForTimeout(500);
-  {
-    const reflect = page.getByRole("button", { name: "Reflect on this thread" });
-    if (await reflect.isVisible().catch(() => false)) await reflect.click();
-  }
   await page.waitForTimeout(600);
+  await page.mouse.click(pt.x, pt.y);
+  await page.waitForTimeout(700);
   await page.getByText("What does this thread need from you now?").first().click();
   await page.waitForTimeout(500);
   const integrate = page.getByRole("button", { name: /^Integrate\b/ }).last();
@@ -215,13 +240,11 @@ const branchPoint = (page, frac = 0.5) =>
 {
   const page = await newPage();
   await loadExamples(page);
+  // First tap arms it, second opens its decisions.
   await page.getByText("The rent increase letter", { exact: true }).first().click({ force: true });
-  await page.waitForTimeout(500);
-  {
-    const reflect = page.getByRole("button", { name: "Reflect on this thread" });
-    if (await reflect.isVisible().catch(() => false)) await reflect.click();
-  }
   await page.waitForTimeout(600);
+  await page.getByText("The rent increase letter", { exact: true }).first().click({ force: true });
+  await page.waitForTimeout(700);
   await page.getByText("What does this thread need from you now?").first().click();
   await page.waitForTimeout(500);
   await page.getByRole("button", { name: /^Integrate\b/ }).last().click();

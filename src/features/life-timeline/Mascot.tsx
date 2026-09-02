@@ -5,12 +5,18 @@
 
 import { useMemo } from "react";
 import { Platform } from "react-native";
-import Animated, { useAnimatedProps, type SharedValue } from "react-native-reanimated";
+import Animated, {
+  useAnimatedProps,
+  useAnimatedReaction,
+  useDerivedValue,
+  type SharedValue,
+} from "react-native-reanimated";
 import { G, Rect, Text as SvgText, Circle, Polygon } from "react-native-svg";
 import type { ThemeTokens } from "@/ui/theme";
 import { mix } from "@/ui/color";
 import type { ColorKey, FrameName, MascotType, Pixel } from "./mascot-frames";
 import { CHARACTER_FRAMES, PX } from "./mascot-frames";
+import { swayOffsetAt, type GripRide, type SwayRide } from "./useSquiggle";
 
 // ─── Color palette ────────────────────────────────────────────────────────────
 
@@ -273,14 +279,30 @@ type Props = {
   showTapHint: boolean;
   theme: ThemeTokens;
   onPress: () => void;
+  /** Summit: how far up the rope he has shinned (px above his station). His
+   * station itself never moves — this is an offset that always unwinds. */
+  rise?: SharedValue<number>;
+  /** Summit: the rope he has hold of, so he swings with it. Null = still. */
+  sway?: SwayRide | null;
+  /** Summit: the rope he has hold of as the mountain TURNS — his hands stay
+   * on it every frame instead of snapping across when the turn commits. */
+  grip?: GripRide | null;
 };
 
 const AnimatedG = Animated.createAnimatedComponent(G);
+
+/** Sprite-local y of his overhead grip (the CLIMB frames reach at row 6-7).
+ * Precision hardly matters: the sway's gradient down a rope is under 0.1, so
+ * ±10px of hand height is under a pixel of offset. */
+const HAND_DY = PX * 7;
 
 export function Mascot({
   posX, posY, frame, flip, mascotType,
   bubbleO, bubbleText, showTapHint, theme, onPress, runPhase,
   viewW = 0,
+  rise = undefined,
+  sway = null,
+  grip = null,
 }: Props) {
   const palette = useMemo(() => resolveColors(theme.accent), [theme.accent]);
   const frames = CHARACTER_FRAMES[mascotType];
@@ -307,15 +329,51 @@ export function Mascot({
   // canvas edges the group fades out — when the view sits in the past, Pip
   // belongs to Now, and no half-bubble should hover at the boundary.
   const rideProps = useAnimatedProps(() => {
-    const x = posX.value;
+    // While he has hold of a rope on the turning mountain, the rope's own
+    // column IS his x — computed here per frame from the live turn, because
+    // his JS-side place only catches up when a turn commits.
+    const x = grip
+      ? grip.baseX + (Math.sin(grip.angle + grip.rot.value) - Math.sin(grip.angle)) * grip.radius
+      : posX.value;
     let o = 1;
     if (viewW > 0) {
       const rightFade = Math.max(0, Math.min(1, (viewW - 60 - x) / 45));
       const leftFade = Math.max(0, Math.min(1, (x + 20) / 45));
       o = Math.min(rightFade, leftFade);
     }
-    return { x, y: posY.value, opacity: o };
-  }, [posX, posY, viewW]);
+    // The shin-up rides here so his bubble comes up the rope with him; the
+    // edge fade stays on the un-offset x, which is where he really belongs.
+    return { x, y: posY.value - (rise ? rise.value : 0), opacity: o };
+  }, [posX, posY, viewW, rise, grip]);
+
+  // He hangs on the rope, so he swings with it — the rope's own formula, the
+  // rope's own clock, sampled at the altitude his hands are actually at.
+  // Geometry is the mountain at REST and the rope's group carries the
+  // mountain's travel, so screen y minus that travel is the rope's frame.
+  const swayV = useDerivedValue(() => {
+    if (!sway) return 0;
+    const hands = posY.value - (rise ? rise.value : 0) + HAND_DY - sway.climb.value;
+    return swayOffsetAt(
+      hands - sway.anchorY,
+      sway.total,
+      sway.level,
+      sway.phase,
+      sway.clock.value,
+    );
+  }, [sway, posY, rise]);
+  const swayProps = useAnimatedProps(
+    () => ({ translateX: Math.round(swayV.value * 2) / 2 }),
+    [swayV],
+  );
+  // His arms swap overhead at each extreme of the swing, so it reads as
+  // working the rope rather than sliding along it — no rotated pixel art.
+  useAnimatedReaction(
+    () => (swayV.value >= 0 ? 1 : 0),
+    (side, prev) => {
+      if (sway && runPhase && side !== prev) runPhase.value = side;
+    },
+    [sway, runPhase, swayV],
+  );
 
   const transform = flip === -1 ? `translate(${spriteW}, 0) scale(-1, 1)` : undefined;
 
@@ -332,6 +390,10 @@ export function Mascot({
           viewW={viewW}
         />
       )}
+      {/* Only the sprite swings — speech should not pendulum, so the bubble
+          above stays outside this group. Costs nothing when `sway` is null:
+          the prop reads a constant 0 and never changes. */}
+      <AnimatedG animatedProps={swayProps}>
       {/* Plain G on purpose: any accessibility role on an SVG group makes
           react-native-svg (web) emit an HTML <button> inside the <svg>,
           which renders nothing — Pip vanishes entirely. */}
@@ -357,6 +419,7 @@ export function Mascot({
         {/* Generous transparent hit area */}
         <Rect x={-4} y={-8} width={spriteW + 8} height={PX * 16 + 8} fill="transparent" onPress={onPress} />
       </G>
+      </AnimatedG>
     </AnimatedG>
   );
 }

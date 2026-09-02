@@ -78,10 +78,10 @@ type Props = {
   /** The app's current moment (epoch ms) — moves live, jumps on fast-forward. */
   nowMs?: number;
   /** While the loudness dial is being dragged: the level under the thumb. */
-  loudnessPreview?: number;
+  
   /** A press starts here; sliding up or down dials this thread's loudness. */
-  dialEnabled?: boolean;
-  onDialTouchStart?: (branchId: string, e: GestureResponderEvent) => void;
+  holdEnabled?: boolean;
+  onHoldStart?: (branchId: string, e: GestureResponderEvent) => void;
   /** A press-and-hold is charging on this line: it swells until the pop. */
   holding?: boolean;
   /** Hold progress 0..1 on the UI thread (only read while `holding`). */
@@ -110,13 +110,40 @@ type Props = {
   /** False when this line is round the back of the summit's mountain: it is
    * drawn away to nothing, so it must not answer taps either. */
   interactive?: boolean;
+  /** Summit: the world's seconds, shared with the climber so he swings in
+   * step with the rope he is holding. Null elsewhere (local clock). */
+  clock?: SharedValue<number> | null;
 };
 
 /** Cheap stable hash → [0, 2π): every rope sways on its own phase. */
-function phaseFromId(id: string): number {
+export function phaseFromId(id: string): number {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
   return (Math.abs(h) % 1000) / 1000 * 2 * Math.PI;
+}
+
+/**
+ * Loud enough to move. The one predicate the rope's own sway and the climber
+ * hanging on it both read — they must never disagree about whether it moves.
+ * (`acted` folds into `!decidedToday`: a closed line fails `isOpen` already.)
+ */
+export function lineTrembles(o: {
+  branch: PsychologicalBranch;
+  inWindow: boolean;
+  level: number;
+  reducedMotion: boolean;
+  now: Date;
+  born: boolean;
+}): boolean {
+  return (
+    o.inWindow &&
+    !o.reducedMotion &&
+    o.level > 1 &&
+    isOpen(o.branch) &&
+    !restingToday(o.branch, o.now) &&
+    !decidedToday(o.branch, o.now) &&
+    !o.born
+  );
 }
 
 /** One branch: fork curve, run, optional merge curve, moments, label, endpoint. */
@@ -132,9 +159,8 @@ export const BranchLine = memo(function BranchLine({
   burning = false,
   reducedMotion = false,
   nowMs,
-  loudnessPreview,
-  dialEnabled = false,
-  onDialTouchStart,
+  holdEnabled = false,
+  onHoldStart,
   onSelect,
   onSelectMoment,
   onSelectMergePoint,
@@ -148,6 +174,7 @@ export const BranchLine = memo(function BranchLine({
   routeWave = null,
   climbOffset = null,
   interactive = true,
+  clock = null,
 }: Props) {
   const vertical = orientation === "vertical";
   const t = useT();
@@ -186,23 +213,23 @@ export const BranchLine = memo(function BranchLine({
   // Local closures over the id-keyed stable handlers (recreated only when
   // THIS branch renders — the parent's identity stays stable).
   const select = () => onSelect(branch.id);
-  const dialTouch =
-    dialEnabled && onDialTouchStart
-      ? (e: GestureResponderEvent) => onDialTouchStart(branch.id, e)
+  const holdTouch =
+    holdEnabled && onHoldStart
+      ? (e: GestureResponderEvent) => onHoldStart(branch.id, e)
       : undefined;
 
   // The line slithers with its loudness — a wave travelling toward Now, wider
   // and faster the louder it is. Both ends stay anchored; a decision today
   // quiets it. The hit path keeps the true geometry and feeds the sampler.
-  const loudness = Math.max(1, Math.min(5, loudnessPreview ?? g.loudness));
-  const trembling =
-    g.inWindow &&
-    !reducedMotion &&
-    loudness > 1 &&
-    isOpen(branch) &&
-    !resting &&
-    !acted &&
-    !born;
+  const loudness = Math.max(1, Math.min(5, g.loudness));
+  const trembling = lineTrembles({
+    branch,
+    inWindow: g.inWindow,
+    level: loudness,
+    reducedMotion,
+    now,
+    born,
+  });
 
   const emphasized =
     !resting &&
@@ -225,6 +252,10 @@ export const BranchLine = memo(function BranchLine({
     attachEnd: g.endsOnMain,
     mode: vertical ? "sway" : "slither",
     swayPhase: vertical ? phaseFromId(branch.id) : 0,
+    // Summit hands in the world's clock so the climber gripping this rope can
+    // reproduce its sway exactly (see Mascot's `sway`). The horizontal maps
+    // keep the local one, which ticks only while something is trembling.
+    clock,
   });
 
   // The fork and merge dots sit ON the main line, so they rise and fall
@@ -388,7 +419,7 @@ export const BranchLine = memo(function BranchLine({
       animatedProps={groupProps}
       accessible
       accessibilityLabel={describeBranch(branch, t)}
-      onPressIn={dialTouch}
+      onPressIn={holdTouch}
     >
       {/* the rope itself hangs on the mountain: hit area and strokes ride
           its slide, while the label and moments below stay with the climber */}
@@ -403,8 +434,8 @@ export const BranchLine = memo(function BranchLine({
         fill="none"
         pointerEvents={interactive ? "auto" : "none"}
         onPress={interactive ? select : undefined}
-        {...(Platform.OS === "web" && dialTouch
-          ? ({ onPointerDown: dialTouch } as object)
+        {...(Platform.OS === "web" && holdTouch
+          ? ({ onPointerDown: holdTouch } as object)
           : null)}
       />
 

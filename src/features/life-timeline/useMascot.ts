@@ -33,6 +33,13 @@ export type MascotState = {
   posY: SharedValue<number>;
   /** 0/1 while running: which gait frame shows (UI-thread swap). */
   runPhase: SharedValue<number>;
+  /**
+   * Summit: how far UP the rope he has shinned, in px above his station. A
+   * rope offset, never a change of station — `place()` and the tracking
+   * effect stay the only writers of posY, and this always unwinds to 0 when
+   * he lets go. His own altitude does not move; that invariant is intact.
+   */
+  rise: SharedValue<number>;
   frame: FrameName;
   flip: number;
   bubbleO: SharedValue<number>;
@@ -53,6 +60,12 @@ export type MascotState = {
    * so the ascent he performs is a gait, not a journey.
    */
   climbInPlace: (ms: number) => void;
+  /**
+   * Summit: shin `px` up the rope he is holding (0 slides him back down to
+   * his station). How high he is on a rope is how far he has quieted it, so
+   * this is called with the level he has won, not with a gesture.
+   */
+  shinUp: (px: number) => void;
   /**
    * Summit: let go of whatever he is holding and walk back to Now. Used when a
    * turn carries his rope round the back of the mountain — he must not be
@@ -294,6 +307,12 @@ export function useMascot(
     /** Summit: whether a rope is on the visible side of the mountain. Patrol
      * only ever visits ropes the user can see. */
     ringVisible?: (g: BranchGeometry) => boolean;
+    /** Summit sweep: bring this rope round to the front now, and say how many
+     * ms that will take (0 if it is already facing). */
+    sweepTurn?: (branchId: string) => number;
+    /** Summit sweep: where he stands to throw at a rope once it has been
+     * brought to the front — backed off it, so the chalk has an arc to fly. */
+    sweepStandX?: (g: BranchGeometry) => number;
     onClimbEnd?: () => void;
   },
 ): MascotState {
@@ -311,6 +330,10 @@ export function useMascot(
   ringXRef.current = opts?.ringX;
   const ringVisibleRef = useRef(opts?.ringVisible);
   ringVisibleRef.current = opts?.ringVisible;
+  const sweepTurnRef = useRef(opts?.sweepTurn);
+  sweepTurnRef.current = opts?.sweepTurn;
+  const sweepStandXRef = useRef(opts?.sweepStandX);
+  sweepStandXRef.current = opts?.sweepStandX;
   const langRef = useRef(lang);
   langRef.current = lang;
   // Stable refs for latest values
@@ -516,7 +539,17 @@ export function useMascot(
    * a rope are flat, so taking hold never moves the world at all.
    */
   const glideRun = useCallback(
-    (toX: number, toY: number, onDone: () => void) => {
+    (
+      toX: number,
+      toY: number,
+      onDone: () => void,
+      /**
+       * Where he is headed, re-read every frame. The summit's ropes hang on a
+       * ring that can still be turning while he crosses to one — without this
+       * he runs to where the rope WAS and is snapped sideways on arrival.
+       */
+      retarget?: () => { x: number; y: number } | null,
+    ) => {
       if (stillRef.current) {
         panShiftRef.current = { x: 0, y: 0 };
         placeRef.current(toX, toY, true);
@@ -524,8 +557,8 @@ export function useMascot(
         return;
       }
       const from = posRef.current;
-      const dx = toX - from.x;
-      const dy = toY - from.y;
+      let dx = toX - from.x;
+      let dy = toY - from.y;
       const dist = Math.hypot(dx, dy);
       const climbing = Math.abs(dy) > 24;
       // A rung is a screen-jump: give it real time, so the mountain pans by
@@ -545,6 +578,15 @@ export function useMascot(
         const raw = Math.min(1, Math.max(0, (now - t0) / dur));
         // ease in and out: he leans into the move and settles onto the ledge
         const t = raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2;
+        // Follow the rope if it is still coming round: the eased path bends
+        // onto its moving column instead of ending beside it.
+        const live = retarget?.();
+        if (live) {
+          dx = live.x - from.x;
+          dy = live.y - from.y;
+          toX = live.x;
+          toY = live.y;
+        }
         const s = panShiftRef.current;
         placeRef.current(from.x + dx * t + s.x, from.y + dy * t + s.y, false);
         const g = Math.floor((now - t0) / 130) % 2;
@@ -884,9 +926,15 @@ export function useMascot(
       if (superBonkActiveRef.current || branchIds.length === 0) return;
       superBonkActiveRef.current = true;
       clearTimer(); cancelRaf();
+      dropRise();
       chillingRef.current = false;
       setPendingIdState(null);
       setArrivedIdState(null);
+      // He lets go of whatever he was on for the whole sweep. Nulling the
+      // STATE too (not just the ref) is what makes the summit's release rule
+      // — "a rope turned away sends him home" — dead while the sweep itself
+      // turns the mountain a full circle.
+      setInspectedIdState(null);
       fadeBubble(0, 120);
 
       const finish = () => {
@@ -900,7 +948,7 @@ export function useMascot(
         jumpDestRef.current = { x: tx, y: ty, branchId: "__now__" };
         chillingRef.current = true;
         setFrame('RUN_A');
-        runWaypoints(makeZigWaypoints(posRef.current.x, posRef.current.y, tx, ty, 1, 16), () => {
+        const lap = () => {
           jumpDestRef.current = null;
           phase.current = 'idle';
           setFrame('REACT');
@@ -914,29 +962,64 @@ export function useMascot(
               onDone?.();
             }, 400);
           }, 2600);
-        }, 0.5);
+        };
+        // The summit never zig-zags: the zig runs perpendicular to travel,
+        // which on a vertical map is VERTICAL — and he holds one altitude.
+        if (verticalRef.current) glideRun(tx, ty, lap);
+        else runWaypoints(makeZigWaypoints(posRef.current.x, posRef.current.y, tx, ty, 1, 16), lap, 0.5);
       };
+
+      /** How long he lingers on a rope once the chalk has landed. */
+      const beat = branchIds.length > 8 ? 170 : 220;
 
       const hop = (i: number) => {
         if (i >= branchIds.length) { finish(); return; }
         const id = branchIds[i];
         const geo = geometriesRef.current.find((g) => g.branchId === id);
         if (!geo) { hop(i + 1); return; }
-        const { x: tx, y: ty } = ropeSpotRef.current(geo);
+        // The mountain starts turning NOW, and his destination is already
+        // known without waiting for it: a rope brought to the front sits at a
+        // computable column — the SAME column for every waiting rope, since
+        // they share one radius. So he takes his station once and the
+        // mountain delivers rope after rope into his hand.
+        const t0 = performance.now();
+        const turnMs = sweepTurnRef.current ? sweepTurnRef.current(id) : 0;
+        const stand = sweepStandXRef.current?.(geo);
+        const spot = ropeSpotRef.current(geo);
+        const tx = stand ?? spot.x;
+        const ty = spot.y;
         phase.current = 'jumping';
         inspectedId.current = id;
         jumpDestRef.current = { x: tx, y: ty, branchId: id };
-        setFrame('RUN_A');
-        runWaypoints(makeZigWaypoints(posRef.current.x, posRef.current.y, tx, ty, 1, 14), () => {
+
+        const strike = () => {
+          jumpDestRef.current = null;
           setFrame('LAND_A');
           onBonk(id);
-          timerRef.current = setTimeout(() => hop(i + 1), 220);
-        }, 0.5);
+          timerRef.current = setTimeout(() => hop(i + 1), beat);
+        };
+        // He must not throw at a rope that has not arrived yet.
+        const waitOutTurn = () => {
+          const left = turnMs - (performance.now() - t0);
+          if (left < 16) strike();
+          else timerRef.current = setTimeout(strike, left);
+        };
+
+        if (Math.abs(tx - posRef.current.x) < 14 && Math.abs(ty - posRef.current.y) < 14) {
+          // Already on his station — the normal case after the first rope.
+          placeRef.current(tx, ty, true);
+          setFrame('IDLE_A');
+          waitOutTurn();
+          return;
+        }
+        setFrame('RUN_A');
+        if (verticalRef.current) glideRun(tx, ty, waitOutTurn);
+        else runWaypoints(makeZigWaypoints(posRef.current.x, posRef.current.y, tx, ty, 1, 14), strike, 0.5);
       };
       hop(0);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs and stable callbacks
-    [fadeBubble, runWaypoints, scheduleJump],
+    [fadeBubble, runWaypoints, glideRun, scheduleJump],
   );
 
   // ── Focus: run to a specific branch when user taps it ──
@@ -1008,11 +1091,65 @@ export function useMascot(
     };
     // The summit never zig-zags: the zig is perpendicular to travel, which on
     // a vertical map means VERTICAL — and he holds one altitude all day.
-    if (verticalRef.current) glideRun(toX, toY, land);
-    else runWaypoints(makeZigWaypoints(cur.x, cur.y, toX, toY, 2, 30), land, 0.2);
+    if (verticalRef.current) {
+      // The rope may still be coming round while he crosses to it, so his
+      // destination is re-read every frame — he arrives ON it, not beside it.
+      glideRun(toX, toY, land, () => {
+        const g = geometriesRef.current.find((x) => x.branchId === branchId);
+        return g ? ropeSpotRef.current(g) : null;
+      });
+    } else runWaypoints(makeZigWaypoints(cur.x, cur.y, toX, toY, 2, 30), land, 0.2);
   }, [fadeBubble, runWaypoints, glideRun, lang, scheduleJump]); // eslint-disable-line react-hooks/exhaustive-deps
   focusBranchRef.current = focusBranch;
 
+
+  /**
+   * How far up the rope he has shinned. Not a change of station: his own
+   * altitude is fixed by `place()`, and this offset always unwinds to 0 when
+   * he lets go — so the pinned time frame stays pinned.
+   */
+  const rise = useSharedValue(0);
+  /** The shin's own gait handle. NOT rafRef: that one owns travel. */
+  const gaitRafRef = useRef<number | null>(null);
+  const stopGait = () => {
+    if (gaitRafRef.current !== null) {
+      cancelAnimationFrame(gaitRafRef.current);
+      gaitRafRef.current = null;
+    }
+  };
+  /** Slide back down to his station — used wherever he lets go of a rope. */
+  const dropRise = () => {
+    stopGait();
+    cancelAnimation(rise);
+    if (rise.value === 0) return;
+    rise.value = stillRef.current ? 0 : withTiming(0, { duration: 300, easing: Easing.out(Easing.quad) });
+  };
+
+  const shinUp = useCallback((px: number) => {
+    if (superBonkActiveRef.current || viewingIntegratedRef.current) return;
+    if (Math.abs(rise.value - px) < 0.5) return;
+    cancelAnimation(rise);
+    // Reduced motion: the height is information (how far he has quieted it),
+    // the travel is decoration — so it lands rather than climbs.
+    if (stillRef.current) {
+      rise.value = px;
+      return;
+    }
+    const up = px > rise.value;
+    rise.value = withTiming(px, { duration: 380, easing: Easing.out(Easing.quad) });
+    stopGait();
+    if (!up) return; // sliding back down needs no hand-over-hand
+    const t0 = performance.now();
+    let gait = -1;
+    const beat = () => {
+      const g = Math.floor((performance.now() - t0) / 130) % 2;
+      if (g !== gait) { gait = g; runPhase.value = g; }
+      gaitRafRef.current =
+        performance.now() - t0 < 380 ? requestAnimationFrame(beat) : null;
+    };
+    gaitRafRef.current = requestAnimationFrame(beat);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs and shared values only
+  }, []);
 
   /** Let go and walk back to the Now spot. */
   const goHome = useCallback(() => {
@@ -1020,6 +1157,7 @@ export function useMascot(
     if (heldRef.current) return; // the user is holding this thread open
     clearTimer();
     cancelRaf();
+    dropRise();
     inspectedId.current = null;
     setInspectedIdState(null);
     setPendingIdState(null);
@@ -1048,6 +1186,9 @@ export function useMascot(
   /** The climbing gait, in place, for as long as the mountain is moving. */
   const climbInPlace = useCallback((ms: number) => {
     if (superBonkActiveRef.current || viewingIntegratedRef.current) return;
+    // The rope has been answered: he settles back onto his station and then
+    // climbs the rock, rather than climbing from partway up a dead rope.
+    dropRise();
     // A travel in flight does NOT get to swallow the climb: tapping a rope
     // starts a sideways scramble, and answering it quickly lands mid-scramble.
     // Put him down at its destination and climb — the mountain is already
@@ -1200,7 +1341,7 @@ export function useMascot(
     }
   }, [heldBranchId, scheduleJump]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => () => { clearTimer(); cancelRaf(); }, []);
+  useEffect(() => () => { clearTimer(); cancelRaf(); stopGait(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onPress = useCallback(() => {
     const id = inspectedId.current;
@@ -1211,14 +1352,14 @@ export function useMascot(
   const visible = branches.some(b => !isClosed(b));
 
   return {
-    pos, posX, posY, runPhase, frame, flip,
+    pos, posX, posY, runPhase, rise, frame, flip,
     bubbleO, bubbleText,
     mascotType,
     inspectedBranchId: inspectedIdState,
     pendingBranchId: pendingIdState,
     arrivedBranchId: arrivedIdState,
     arrivedVia,
-    onPress, showReaction, focusBranch, climbInPlace, goHome, superBonk,
+    onPress, showReaction, focusBranch, climbInPlace, shinUp, goHome, superBonk,
     phrases: lang, visible, born,
   };
 }

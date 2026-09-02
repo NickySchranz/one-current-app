@@ -15,7 +15,6 @@ import Animated, {
   runOnJS,
   useAnimatedProps,
   useAnimatedReaction,
-  useAnimatedStyle,
   useDerivedValue,
   useFrameCallback,
   type SharedValue,
@@ -38,7 +37,7 @@ import { describeTimeline } from "@/visualization/a11y/describe";
 import { effectiveLoudness, isClosed, mostActivated } from "@/domain/branches/logic";
 import { decidedToday, energySplit, handledToday } from "@/domain/feelings/logic";
 import type { PsychologicalBranch, Loudness } from "@/domain/branches/types";
-import { BranchLine } from "./BranchLine";
+import { BranchLine, lineTrembles, phaseFromId } from "./BranchLine";
 import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
 import { TimelineHelp } from "@/features/timeline-help/TimelineHelp";
 import { WholenessIndicator } from "./WholenessIndicator";
@@ -48,12 +47,11 @@ import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
 import { alpha, mix } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
-import { loudnessWord } from "@/ui/LoudnessSlider";
 import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, ChargePop, CoinToken, COIN_FLY_MS, COIN_HOVER, COIN_LEAD, LungeG, MergePreviewTarget, NowGlow, PopBurst, ReclaimFly, SmokeFly, ThemeBackdrop, ThemeScenery, TokenFly, useDashFlow } from "./timeline-fx";
 import { Mascot, estTextWidth } from "./Mascot";
 import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
-import { useCalmCurrent } from "./useSquiggle";
+import { useCalmCurrent, type GripRide, type SwayRide } from "./useSquiggle";
 import { useSummitCurrent } from "./useSummit";
 import { DistantCliffs, FaceTexture, Ledge, MountainFace, RopeCut, SkyParallax, SummitRoute } from "./SummitScene";
 
@@ -381,12 +379,13 @@ function GrabPrompt({
 /** Movement below this is still a tap; beyond it the gesture picks an axis. */
 const DECIDE_PX = 8;
 
-/** Vertical pixels per loudness step — up is louder, down is quieter. */
-const STEP_PX = 36;
-
-function clampLevel(level: number): number {
-  return Math.max(1, Math.min(5, level));
-}
+/**
+ * Summit: how far up the rope one step of quiet carries him, and how many
+ * steps he can climb before he is level with the rope's own name band. His
+ * height on a rope is how much of it he has quieted since taking hold.
+ */
+const SHIN_PX = 26;
+const SHIN_STEPS = 4;
 
 /**
  * A number that glides to its target over ~a third of a second (ease-out
@@ -413,7 +412,6 @@ function useEased(target: number, reducedMotion: boolean): number {
   return value;
 }
 
-type LoudnessPreview = { branchId: string; level: number };
 
 export function LifeTimeline() {
   const branches = useAppStore((s) => s.branches);
@@ -452,8 +450,6 @@ export function LifeTimeline() {
   const reducedMotion = useAppStore((s) => s.reducedMotion);
   const mascotTypePref = useAppStore((s) => s.mascotType);
   const draftBranchId = useAppStore((s) => s.draftBranchId);
-  const dialLoudness = useAppStore((s) => s.dialLoudness);
-  const maybeDropCoin = useAppStore((s) => s.maybeDropCoin);
   const coins = useAppStore((s) => s.coins);
   const actions = useAppStore((s) => s.actions);
   const language = useAppStore((s) => s.language);
@@ -499,6 +495,34 @@ export function LifeTimeline() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hit, clearHit, reducedMotion]);
+
+  /**
+   * The store holds ONE hit at a time, but a full send lands one every couple
+   * of hundred ms while each impact plays for over a second — so each is
+   * queued here and expires on its own. Without this the sweep would cut every
+   * puff off at a fifth of its life and you would never see the chalk fly.
+   * The thrower's position is captured with the puff: he has moved on by the
+   * time the dust settles.
+   */
+  const [puffs, setPuffs] = useState<
+    { key: number; branchId: string; calm: boolean; fromX: number; fromY: number }[]
+  >([]);
+  useEffect(() => {
+    if (!hit || reducedMotion) return;
+    // His LIVE position, not the coarse React one: mid-sweep he lands and
+    // throws between renders, and the chalk has to leave the hand he has now.
+    const m = mascotRef.current;
+    const p = {
+      key: hit.key,
+      branchId: hit.branchId,
+      calm: hit.calm,
+      fromX: m ? m.posX.value : 0,
+      fromY: m ? m.posY.value : 0,
+    };
+    setPuffs((q) => (q.some((x) => x.key === p.key) ? q : [...q, p]));
+    const id = setTimeout(() => setPuffs((q) => q.filter((x) => x.key !== p.key)), 1250);
+    return () => clearTimeout(id);
+  }, [hit, reducedMotion]);
 
   // A worry is burning: when the fire has consumed everything, the thread is
   // removed from the app for good — only the lesson walks out.
@@ -788,6 +812,24 @@ export function LifeTimeline() {
    * down into frame and settles under his feet, and the rock, its texture,
    * the ropes and the sky travel with it. */
   const climbSV = useSharedValue(climbDist);
+  // One world clock: the wave, the weather, the scenery and the summit's ropes
+  // all share a single continuous animation instead of four identical ramps —
+  // and sharing it is what lets the climber swing in step with his rope.
+  const worldClock = useSharedValue(0);
+  useEffect(() => {
+    if (reducedMotion) {
+      cancelAnimation(worldClock);
+      worldClock.value = 0;
+      return;
+    }
+    worldClock.value = 0;
+    worldClock.value = withRepeat(
+      withTiming(3600, { duration: 3600_000, easing: Easing.linear }),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(worldClock);
+  }, [reducedMotion, worldClock]);
   const climbSigRef = useRef(climbSig);
   const climbDistRef = useRef(climbDist);
   const retireTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -872,13 +914,19 @@ export function LifeTimeline() {
     setRotTick((k) => k + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shared value is stable
   }, []);
-  /** Where a rope sits on screen with the face turned as it is — the JS-side
-   * twin of RingG's worklet, for anything that has to walk or point there. */
+  /**
+   * Where a rope sits on screen with the face turned as it is — the JS-side
+   * twin of RingG's worklet, for anything that has to walk or point there.
+   * It reads the LIVE turn, not the committed one: a climber sent to a rope
+   * while the face is still turning must aim at where the rope IS, or he
+   * walks past it and gets snapped back when the turn lands.
+   */
   const ringX = useCallback(
     (g: { endX: number; angle?: number; radius?: number }): number => {
       if (!vertical || g.angle === undefined || !g.radius) return g.endX;
-      return g.endX + (Math.sin(g.angle + rotRef.current) - Math.sin(g.angle)) * g.radius;
+      return g.endX + (Math.sin(g.angle + rotSV.value) - Math.sin(g.angle)) * g.radius;
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shared value is stable
     [vertical],
   );
   const ringXRef = useRef(ringX);
@@ -902,23 +950,48 @@ export function LifeTimeline() {
    */
   const FRONT_ANGLE = 0.36;
 
-  /** Bring a rope round to the front (used when one takes focus). */
-  const turnToRef = useRef<(id: string, force?: boolean) => void>(() => {});
-  turnToRef.current = (id: string, force = false) => {
+  /** The turn that brings `angle` to the front, taken the short way round. */
+  const frontTarget = (angle: number, rot: number): number => {
+    const want = FRONT_ANGLE - angle;
+    return want + Math.round((rot - want) / (2 * Math.PI)) * 2 * Math.PI;
+  };
+  /**
+   * Where a rope will BE once it has been turned to the front. Every waiting
+   * rope shares one radius, so this is the same column for all of them — which
+   * is why the chalk sweep can take one station and let the mountain bring it
+   * rope after rope instead of running back and forth across the face.
+   */
+  const frontXOf = (g: { endX: number; angle?: number; radius?: number }): number =>
+    !vertical || g.angle === undefined || !g.radius
+      ? g.endX
+      : g.endX + (Math.sin(FRONT_ANGLE) - Math.sin(g.angle)) * g.radius;
+
+  /** Bring a rope round to the front; returns how many ms that will take. */
+  const turnToRef = useRef<(id: string, force?: boolean, sweep?: boolean) => number>(() => 0);
+  turnToRef.current = (id: string, force = false, sweep = false) => {
     const r = ropeAngles.find((x) => x.id === id);
-    if (!r) return;
+    if (!r) return 0;
     // A rope you can already see stays where it is: turning one out from under
     // the finger that just tapped it would make the map fight the user. Only a
     // rope round the side gets brought to the front.
-    if (!force && Math.cos(r.angle + rotSV.value) > 0.55) return;
-    const want = FRONT_ANGLE - r.angle;
-    const k = Math.round((rotSV.value - want) / (2 * Math.PI));
-    const target = want + k * 2 * Math.PI;
-    if (Math.abs(target - rotSV.value) < 0.03) return;
-    rotSV.value = reducedMotion
-      ? target
-      : withTiming(target, { duration: 420, easing: Easing.inOut(Easing.quad) });
-    setTimeout(commitRot, reducedMotion ? 0 : 440);
+    if (!force && Math.cos(r.angle + rotSV.value) > 0.55) return 0;
+    const target = frontTarget(r.angle, rotSV.value);
+    const delta = Math.abs(target - rotSV.value);
+    if (delta < 0.03) return 0;
+    if (reducedMotion) {
+      rotSV.value = target;
+      setTimeout(commitRot, 0);
+      return 0;
+    }
+    // A focus turn is one fixed beat. A sweep turn is PACED by how far the
+    // face has to come round: a neighbour arrives briskly, while the far side
+    // still reads as a turn rather than a jump cut.
+    const dur = sweep
+      ? Math.round(Math.max(240, Math.min(560, 120 + delta * 180)))
+      : 420;
+    rotSV.value = withTiming(target, { duration: dur, easing: Easing.inOut(Easing.quad) });
+    setTimeout(commitRot, dur + 20);
+    return dur;
   };
 
   const turnSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -933,9 +1006,7 @@ export function LifeTimeline() {
     let best = rot;
     let bestGap = Infinity;
     for (const r of ropeAngles) {
-      const want = FRONT_ANGLE - r.angle;
-      const k = Math.round((rot - want) / (2 * Math.PI));
-      const target = want + k * 2 * Math.PI;
+      const target = frontTarget(r.angle, rot);
       const gap = Math.abs(rot - target);
       if (gap < bestGap) { bestGap = gap; best = target; }
     }
@@ -1097,26 +1168,18 @@ export function LifeTimeline() {
 
   // ---- gestures: tap / horizontal time-pan / vertical loudness dial --------
 
-  const candidateRef = useRef<{ branchId: string; startLevel: number } | null>(null);
-  const modeRef = useRef<"idle" | "dial" | "pan">("idle");
+  /** The thread under the finger, for the press-and-hold that opens its panel. */
+  const candidateRef = useRef<{ branchId: string } | null>(null);
+  const modeRef = useRef<"idle" | "pan">("idle");
   /** Face-drag anchor: scroll events lag the finger, so the drag offsets
    * from the position captured at its start, not the live one. */
   const hscrollStartRef = useRef(0);
-  const dialLevelRef = useRef(0);
   const lastXRef = useRef(0);
   const lastYRef = useRef(0);
   const stagePosRef = useRef({ x: 0, y: 0 });
   const blockTapsUntilRef = useRef(0);
-  const previewRef = useRef<LoudnessPreview | null>(null);
-  const [preview, setPreviewState] = useState<LoudnessPreview | null>(null);
   const [scrollLocked, setScrollLocked] = useState(false);
-  const chipX = useSharedValue(0);
-  const chipY = useSharedValue(0);
 
-  const setPreview = (p: LoudnessPreview | null) => {
-    previewRef.current = p;
-    setPreviewState(p);
-  };
 
   // ── Press-and-hold: the Facebook-emoji move. Holding a line makes it
   // swell (holdP drives the BranchLine scale + bulge); at HOLD_MS it pops
@@ -1147,7 +1210,6 @@ export function LifeTimeline() {
   const resetGesture = () => {
     modeRef.current = "idle";
     candidateRef.current = null;
-    if (previewRef.current) setPreview(null);
     setScrollLocked(false);
     cancelHold();
   };
@@ -1180,25 +1242,18 @@ export function LifeTimeline() {
         onStartShouldSetPanResponder: () => false,
         onMoveShouldSetPanResponder: (_e, gs) => {
           if (Math.hypot(gs.dx, gs.dy) <= DECIDE_PX) return false;
+          // A drag on a thread never changes its loudness: that is the
+          // panel's job alone (press-and-hold pops it, a second tap opens
+          // it). A dial hidden in a drag made every pan a risk, and on the
+          // summit it fought the one gesture that map is built on — turning
+          // the mountain. So a drag anywhere means the same thing whether it
+          // began on a thread or on bare ground.
           if (verticalRef.current) {
-            // Summit swaps the axes: sideways on a rope dials its loudness,
-            // up/down anywhere climbs through time, and a plain sideways
-            // drag off any rope pans across the face — RN-web ScrollViews
-            // don't drag-scroll with a mouse, so the gesture owns it.
-            if (candidateRef.current && Math.abs(gs.dx) >= Math.abs(gs.dy)) {
-              modeRef.current = "dial";
-              return true;
-            }
-            // Any other drag is 2D: up/down climbs through time while
-            // sideways slides the face — one gesture, both axes (RN-web
-            // ScrollViews can't drag-scroll with a mouse, so the map owns it).
+            // Summit: one 2D drag — up/down climbs through time while
+            // sideways turns the face (RN-web ScrollViews can't drag-scroll
+            // with a mouse, so the map owns both axes).
             modeRef.current = "pan";
             candidateRef.current = null;
-            return true;
-          }
-          if (candidateRef.current && Math.abs(gs.dy) >= Math.abs(gs.dx)) {
-            // Vertical wins: the thumb is dialing loudness now.
-            modeRef.current = "dial";
             return true;
           }
           if (Math.abs(gs.dx) > Math.abs(gs.dy)) {
@@ -1207,7 +1262,8 @@ export function LifeTimeline() {
             candidateRef.current = null;
             return true;
           }
-          // Plain vertical drag off any thread: the stage scrolls natively.
+          // Plain vertical drag: the stage scrolls natively.
+          candidateRef.current = null;
           return false;
         },
         onPanResponderTerminationRequest: () => false,
@@ -1218,34 +1274,8 @@ export function LifeTimeline() {
           measureNode(stageRef.current, (x, y) => {
             stagePosRef.current = { x, y };
           });
-          if (modeRef.current === "dial" && candidateRef.current) {
-            const c = candidateRef.current;
-            const level = clampLevel(
-              c.startLevel +
-                Math.round((verticalRef.current ? gs.dx : -gs.dy) / STEP_PX),
-            );
-            dialLevelRef.current = level;
-            setPreview({ branchId: c.branchId, level });
-          }
         },
         onPanResponderMove: (_e, gs) => {
-          if (modeRef.current === "dial") {
-            const c = candidateRef.current;
-            if (!c) return;
-            // Right = louder on the summit map; up = louder everywhere else.
-            const level = clampLevel(
-              c.startLevel +
-                Math.round((verticalRef.current ? gs.dx : -gs.dy) / STEP_PX),
-            );
-            if (level !== dialLevelRef.current) {
-              dialLevelRef.current = level;
-              setPreview({ branchId: c.branchId, level });
-            }
-            // The chip floats up-left of the thumb, never underneath it.
-            chipX.value = Math.max(8, gs.moveX - stagePosRef.current.x - 48);
-            chipY.value = Math.max(8, gs.moveY - stagePosRef.current.y - 48);
-            return;
-          }
           if (modeRef.current === "pan") {
             if (verticalRef.current) {
               // sideways: TURN the face. A drag across the stage is about a
@@ -1290,23 +1320,13 @@ export function LifeTimeline() {
             // side — and let the JS side know which ropes are in front now.
             settleTurnRef.current();
           }
-          if (modeRef.current === "dial" && candidateRef.current) {
-            // The drag ends here — whatever happens, the tap must not follow.
-            blockTapsUntilRef.current = Date.now() + 350;
-            const c = candidateRef.current;
-            if (dialLevelRef.current !== c.startLevel) {
-              // Rolled before the commit: the loudness log is the coin's
-              // anti-farm memory and must still end at the old level here.
-              maybeDropCoin(c.branchId, c.startLevel, dialLevelRef.current);
-              void dialLoudness(c.branchId, dialLevelRef.current as Loudness);
-            }
-          } else if (modeRef.current === "pan") {
+          if (modeRef.current === "pan") {
             blockTapsUntilRef.current = Date.now() + 350;
           }
           resetGesture();
         },
         onPanResponderTerminate: () => {
-          // Taken away by the system: revert the dial, commit nothing.
+          // Taken away by the system: commit nothing.
           if (modeRef.current !== "idle") blockTapsUntilRef.current = Date.now() + 350;
           resetGesture();
         },
@@ -1341,6 +1361,25 @@ export function LifeTimeline() {
       // dial, a second tap opens the full decisions. Pip makes no offer
       // either way; the user already said which thread they mean.
       if (isClosed(b) || armedBranchId === branchId) {
+        // Summit: he already has this rope. A tap sends him a little way UP
+        // it, and that climb IS the act — one step quieter, no sheet, no
+        // chalk fx, no charge. The sideways drag still makes bigger moves,
+        // and the sheet is a tap on Pip (or the rope's own prompt) away.
+        if (verticalRef.current && !isClosed(b) && !handledToday(b, nowRef.current)) {
+          const felt = Math.round(effectiveLoudness(b, nowRef.current));
+          if (felt > 1) {
+            const store = useAppStore.getState();
+            // Rolled before the commit: the loudness log is the token's
+            // anti-farm memory and must still end at the old level here.
+            store.maybeDropCoin(branchId, felt, felt - 1);
+            void store.dialLoudness(branchId, Math.max(1, felt - 1) as Loudness);
+            return; // armed STAYS set — the next tap climbs again
+          }
+          // As quiet as it goes: he shrugs instead of climbing.
+          const m = mascotRef.current;
+          if (m) m.showReaction(randomFrom(m.phrases.attackCalm));
+          return;
+        }
         setArmedBranchId(null);
         setOperation({ kind: "quick-touch", branchId });
         return;
@@ -1366,14 +1405,11 @@ export function LifeTimeline() {
     },
     [setView],
   );
-  const dialTouchStart = useCallback(
+  const holdTouchStart = useCallback(
     (branchId: string, _e: GestureResponderEvent) => {
       const b = branchesRef.current.find((x) => x.id === branchId);
       if (!b) return;
-      candidateRef.current = {
-        branchId,
-        startLevel: Math.round(effectiveLoudness(b, nowRef.current)),
-      };
+      candidateRef.current = { branchId };
       setScrollLocked(true);
       // Arm the hold: if the finger stays put past HOLD_MS, the line pops
       // open its loudness dial. Any drag or early release cancels it.
@@ -1626,6 +1662,16 @@ export function LifeTimeline() {
       turnKey: rotTick,
       ringVisible: (g) =>
         g.angle === undefined || Math.cos(g.angle + rotRef.current) > 0.25,
+      /** The chalk sweep turns the face to every rope in turn — including the
+       * ones round the back, which is the whole point of it. */
+      sweepTurn: (id) => turnToRef.current(id, true, true),
+      /** His station at a rope brought to the front, backed off it so the
+       * chalk has an arc to fly — never so far back that he crosses the route. */
+      sweepStandX: (g) => {
+        const fx = frontXOf(g);
+        const back = Math.min(34, Math.max(8, fx - (sm ? sm.routeX : fx) - 18));
+        return fx - PX * 6 - back;
+      },
       onClimbEnd: () => retireAllRef.current(),
     },
   );
@@ -1635,6 +1681,163 @@ export function LifeTimeline() {
   const mascotRef = useRef(mascot);
   mascotRef.current = mascot;
 
+  const heldRopeId = mascot.inspectedBranchId ?? mascot.arrivedBranchId ?? null;
+  /**
+   * A turn can carry the rope he is holding round the back of the mountain.
+   * He does not ride it out of sight: he lets go and takes the nearest rope
+   * still facing the viewer, or goes back to Now if the face has none left.
+   * Called the moment his rope stops facing us, not when the turn commits.
+   */
+  const handOff = useCallback(() => {
+    const rot = rotSV.value;
+    const held = heldRopeRef.current;
+    const next = ropeAnglesRef.current
+      .filter((r) => r.id !== held)
+      .filter((r) => {
+        const b = branchesRef.current.find((x) => x.id === r.id);
+        return b && !isClosed(b) && !handledToday(b, nowRef.current);
+      })
+      .map((r) => ({ id: r.id, facing: Math.cos(r.angle + rot) }))
+      .filter((r) => r.facing > 0.55)
+      .sort((a, b) => b.facing - a.facing)[0];
+    setArmedBranchId(null);
+    if (next) mascotRef.current?.focusBranch(next.id);
+    else mascotRef.current?.goHome();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs and shared values are stable
+  }, []);
+  const heldRopeRef = useRef(heldRopeId);
+  heldRopeRef.current = heldRopeId;
+  const ropeAnglesRef = useRef(ropeAngles);
+  ropeAnglesRef.current = ropeAngles;
+  /**
+   * Timed off the LIVE turn, not off its commit: the handover happens as his
+   * rope goes round the shoulder of the rock, which is the moment it stops
+   * being something he could be holding.
+   */
+  const heldAngle = vertical
+    ? ropeAngles.find((x) => x.id === heldRopeId)?.angle
+    : undefined;
+  useAnimatedReaction(
+    () => (heldAngle === undefined ? 1 : Math.cos(heldAngle + rotSV.value)),
+    (facing, prev) => {
+      if (prev === null || heldAngle === undefined) return;
+      if (prev > 0.34 && facing <= 0.34) runOnJS(handOff)();
+    },
+    [heldAngle, handOff],
+  );
+
+  /**
+   * He actually HAS the rope — arrived at it, not still travelling and not
+   * mid-sweep. `arrivedBranchId` is the right test: it survives a reaction (a
+   * token cheer must not drop him back down the rope) but is null through
+   * every run and every full send.
+   */
+  const gripId =
+    vertical && mascot.arrivedBranchId && mascot.arrivedBranchId === heldRopeId
+      ? heldRopeId
+      : null;
+  const gripGeo = gripId ? layout.geometries.find((x) => x.branchId === gripId) : undefined;
+  const gripBranch = gripId ? branches.find((x) => x.id === gripId) : undefined;
+  /** The level under his hands right now. */
+  const gripLevelNow =
+    gripBranch && gripGeo ? Math.max(1, Math.min(5, gripGeo.loudness)) : 1;
+  const gripTrembles =
+    !!gripBranch &&
+    !!gripGeo &&
+    lineTrembles({
+      branch: gripBranch,
+      inWindow: gripGeo.inWindow,
+      level: gripLevelNow,
+      reducedMotion,
+      now,
+      born: false,
+    });
+  /**
+   * What he needs to swing with the rope he is holding: the rope's own
+   * formula, its own clock, its own phase. Memoized on primitives only, so
+   * the ticking clock cannot churn its identity.
+   */
+  const swayRide = useMemo<SwayRide | null>(() => {
+    if (!vertical || !gripTrembles || !gripGeo) return null;
+    if (gripGeo.coiled || !gripGeo.reachesNow) return null;
+    return {
+      clock: worldClock,
+      climb: climbSV,
+      anchorY: gripGeo.endY,
+      total: gripGeo.forkY - gripGeo.endY,
+      level: gripLevelNow,
+      phase: phaseFromId(gripGeo.branchId),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values are stable
+  }, [
+    vertical,
+    gripTrembles,
+    gripId,
+    gripGeo?.endY,
+    gripGeo?.forkY,
+    gripGeo?.coiled,
+    gripGeo?.reachesNow,
+    gripLevelNow,
+  ]);
+
+  /**
+   * How high he is on a rope is how far he has quieted it since he took hold.
+   * The level he grabbed at is snapshotted ONCE — re-reading it as the level
+   * falls would leave the rise permanently zero — so he always starts at his
+   * station, rises as it quiets, and slides back down if it gets louder again.
+   */
+  const gripAtRef = useRef<{ id: string; level: number } | null>(null);
+  const [gripAt, setGripAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (!vertical || !gripId) {
+      gripAtRef.current = null;
+      setGripAt(null);
+      return;
+    }
+    if (gripAtRef.current?.id === gripId) return; // same rope: keep the anchor
+    const b = branchesRef.current.find((x) => x.id === gripId);
+    const lvl = b ? Math.round(effectiveLoudness(b, nowRef.current)) : null;
+    gripAtRef.current = lvl == null ? null : { id: gripId, level: lvl };
+    setGripAt(lvl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately not `branches`
+  }, [vertical, gripId]);
+
+  const shinSteps =
+    gripAt != null && gripBranch && !handledToday(gripBranch, now)
+      ? Math.max(0, Math.min(SHIN_STEPS, gripAt - gripLevelNow))
+      : 0;
+  useEffect(() => {
+    mascotRef.current?.shinUp(shinSteps * SHIN_PX);
+  }, [shinSteps]);
+
+  /** His hands stay on the rope for every frame of a turn (see GripRide). */
+  const gripRide = useMemo<GripRide | null>(() => {
+    if (!gripId || !gripGeo || gripGeo.angle === undefined || !gripGeo.radius) return null;
+    return {
+      baseX: gripGeo.endX - PX * 6,
+      angle: gripGeo.angle,
+      radius: gripGeo.radius,
+      rot: rotSV,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values are stable
+  }, [gripId, gripGeo?.endX, gripGeo?.angle, gripGeo?.radius]);
+
+  /**
+   * About to act on a rope — picked from the wholeness panel, say — that is
+   * round the back of the mountain: bring it round so it can be seen. Only
+   * when it genuinely cannot be: a rope anywhere on the visible face stays
+   * exactly where it is, so the map never shifts under a finger that is
+   * already on it.
+   */
+  const operationBranchId = operation.kind === "quick-touch" ? operation.branchId : null;
+  useEffect(() => {
+    if (!vertical || !operationBranchId) return;
+    const r = ropeAnglesRef.current.find((x) => x.id === operationBranchId);
+    if (!r || Math.cos(r.angle + rotSV.value) > 0.25) return;
+    turnToRef.current(operationBranchId, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable
+  }, [vertical, operationBranchId]);
+
   /** On the summit the ROPE does the asking, so the prompt is decided here:
    * it also silences Pip's own bubble while it is up — two pills saying
    * different things over one climber is noise. */
@@ -1642,25 +1845,15 @@ export function LifeTimeline() {
     if (!vertical || !sm || operation.kind !== "idle") return null;
     const id = mascot.pendingBranchId ?? armedBranchId ?? mascot.inspectedBranchId;
     if (!id) return null;
+    // Once he has shinned up this rope the pill is literally in his way (it
+    // sits a step above his head), and his own bubble should have the floor.
+    if (id === gripId && shinSteps > 0) return null;
     const b = branches.find((x) => x.id === id);
     if (!b || isClosed(b) || handledToday(b, now)) return null;
     const g = layout.geometries.find((x) => x.branchId === id);
     if (!g || !g.inWindow) return null;
     return { id, g };
   })();
-  // A turn can carry the rope he is holding round the back of the mountain.
-  // Rather than being scrolled out of view on it, he lets go and walks back to
-  // Now — the one place on this map that is always where he belongs.
-  const heldRopeId = mascot.inspectedBranchId ?? mascot.arrivedBranchId ?? null;
-  useEffect(() => {
-    if (!vertical || !heldRopeId) return;
-    const r = ropeAngles.find((x) => x.id === heldRopeId);
-    if (!r) return;
-    if (Math.cos(r.angle + rotRef.current) > 0.4) return;
-    if (armedBranchId === heldRopeId) setArmedBranchId(null);
-    mascotRef.current?.goHome();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable
-  }, [vertical, rotTick, heldRopeId, ropeAngles, armedBranchId]);
 
   // The mountain turns by itself at ONE moment only: when every rope facing
   // the viewer has been handled, it brings the next one round — the day's work
@@ -1729,7 +1922,10 @@ export function LifeTimeline() {
           setFlights((f) => [
             ...f,
             verticalRef.current
-              ? { key: c.key, branchId: c.branchId, x0: g.endX + COIN_LEAD - scrollXRef.current, y0: workedYRef.current(g) - COIN_HOVER }
+              // Where the rope actually is with the face turned as it is: a
+              // sweep can rain several tokens, and they all launched from the
+              // un-turned column before.
+              ? { key: c.key, branchId: c.branchId, x0: ringXRef.current(g) + COIN_LEAD - scrollXRef.current, y0: workedYRef.current(g) - COIN_HOVER }
               : { key: c.key, branchId: c.branchId, x0: g.endX + COIN_LEAD, y0: g.endY - COIN_HOVER - scrollYRef.current },
           ]);
           coinTimersRef.current.set(c.key, setTimeout(() => finishCoin(c.key), COIN_FLY_MS));
@@ -1835,24 +2031,6 @@ export function LifeTimeline() {
   // Every fork dot, merge dot and branch end rides the same wave (see
   // BranchLine), so nothing sits flat against a moving line.
   const wavePeriodMs = tk.mainFlowDuration * 1.4;
-  // One world clock: the wave, weather and scenery all share a single
-  // continuous animation instead of three identical ramps.
-  const worldClock = useSharedValue(0);
-  useEffect(() => {
-    if (reducedMotion) {
-      cancelAnimation(worldClock);
-      worldClock.value = 0;
-      return;
-    }
-    worldClock.value = 0;
-    worldClock.value = withRepeat(
-      withTiming(3600, { duration: 3600_000, easing: Easing.linear }),
-      -1,
-      false,
-    );
-    return () => cancelAnimation(worldClock);
-  }, [reducedMotion, worldClock]);
-
   // Hooks can't be conditional: both currents are always mounted, and the
   // inactive one gets dormant inputs (zero progress and a zero-length line),
   // so its breathing gate keeps every clock cancelled.
@@ -1893,9 +2071,6 @@ export function LifeTimeline() {
     1100,
   );
 
-  const chipStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: chipX.value }, { translateY: chipY.value }],
-  }));
 
   // +84: breathing room below the lanes, so the lowest one can be pulled up
   // clear of the pinned date strip and the bonk bar. Inside the canvas (not a
@@ -1905,7 +2080,6 @@ export function LifeTimeline() {
   // The summit turns instead of scrolling sideways, so its canvas is exactly
   // the stage: the old `laneSpan + 84` left 84px of phantom horizontal travel.
   const svgWidth = size.width;
-  const previewBranch = preview ? byId.get(preview.branchId) : undefined;
 
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
@@ -2400,6 +2574,9 @@ export function LifeTimeline() {
                     // thread's merge point sits on the main line, which does
                     // not move — so neither may its curve.
                     climbOffset={vertical && g.reachesNow ? climbSV : null}
+                    // Summit shares the world's clock with the climber so he
+                    // swings in step with the rope he is holding.
+                    clock={vertical ? worldClock : null}
                     // round the back of the mountain: not there to be tapped
                     interactive={
                       !vertical ||
@@ -2414,13 +2591,11 @@ export function LifeTimeline() {
                     routeWave={null}
                     waveNowX={vertical ? routeLen : layout.nowX}
                     wavePeriodMs={wavePeriodMs}
-                    loudnessPreview={
-                      preview?.branchId === branch.id ? preview.level : undefined
-                    }
-                    // A decision today settles the loudness too: the dial
-                    // rests with the line until tomorrow (or until it reopens).
-                    dialEnabled={!isClosed(branch) && !decidedToday(branch, now)}
-                    onDialTouchStart={dialTouchStart}
+                    // A decision today settles the loudness too: the line
+                    // rests until tomorrow (or until it reopens), so it takes
+                    // no press-and-hold either.
+                    holdEnabled={!isClosed(branch) && !decidedToday(branch, now)}
+                    onHoldStart={holdTouchStart}
                     holding={holdBranchId === branch.id}
                     holdP={holdP}
                     focused={false}
@@ -2460,26 +2635,34 @@ export function LifeTimeline() {
 
               {/* the impact of Pip's strike — on the summit it lands on the
                   rope where HE holds it, at his altitude, not at the anchor */}
-              {hit &&
-                !reducedMotion &&
-                (() => {
-                  const g = layout.geometries.find((x) => x.branchId === hit.branchId);
+              {!reducedMotion &&
+                puffs.map((p) => {
+                  const g = layout.geometries.find((x) => x.branchId === p.branchId);
                   if (!g || !g.inWindow) return null;
                   const strikeY = vertical
-                    ? Math.max(g.endY, Math.min(g.forkY, mascot.pos.y + PX * 10))
+                    ? Math.max(g.endY, Math.min(g.forkY, p.fromY + PX * 10))
                     : g.endY;
                   return (
                     <AttackFx
-                      key={hit.key}
+                      key={p.key}
+                      // The rope's UN-turned column: `rot` adds the turn per
+                      // frame on the UI thread, so the chalk stays on the rope
+                      // even mid-turn and even if the face is dragged while
+                      // the dust is still settling.
                       x={g.endX}
                       y={strikeY}
                       path={g.path}
                       variant={attackVariantFor(theme)}
                       accent={tk.accent}
-                      calm={hit.calm}
+                      calm={p.calm}
+                      fromX={p.fromX + PX * 7}
+                      fromY={p.fromY + PX * 4}
+                      rot={vertical && g.reachesNow ? rotSV : null}
+                      angle={g.angle ?? 0}
+                      radius={g.radius ?? 0}
                     />
                   );
-                })()}
+                })}
 
               {/* the pop at the end of a press-and-hold: the dial's arrival */}
               {holdPop &&
@@ -2487,7 +2670,7 @@ export function LifeTimeline() {
                   const g = layout.geometries.find((x) => x.branchId === holdPop.branchId);
                   if (!g || !g.inWindow) return null;
                   return (
-                    <PopBurst key={holdPop.key} x={g.endX - 3} y={workedY(g)} color={tk.accent} />
+                    <PopBurst key={holdPop.key} x={ringX(g) - 3} y={workedY(g)} color={tk.accent} />
                   );
                 })()}
 
@@ -2496,7 +2679,10 @@ export function LifeTimeline() {
                 if (flights.some((f) => f.key === c.key)) return null;
                 const g = layout.geometries.find((x) => x.branchId === c.branchId);
                 if (!g || !g.inWindow) return null;
-                const cx = g.endX + COIN_LEAD;
+                // On the turned face a token hovers over the rope it came
+                // from, not over its un-turned column — and its flight starts
+                // from the same place (see `flights`).
+                const cx = ringX(g) + COIN_LEAD;
                 const fadeW = vertical ? svgWidth : layout.metrics.width;
                 const fade = Math.max(
                   0,
@@ -2602,19 +2788,28 @@ export function LifeTimeline() {
                operation.kind !== "viewing-integrated" && (
                 <LungeG
                   active={Boolean(hit && !hit.calm && !reducedMotion)}
+                  // Summit: he plants and throws. No body tilt (the rotation
+                  // has no origin and would swing him off the face) and no
+                  // hop — he is hanging on a rope, not jumping at one.
+                  tilt={vertical ? 0 : 9}
+                  hop={vertical ? 2 : 10}
                   dx={(() => {
                     if (!hit) return 0;
                     const g = layout.geometries.find((x) => x.branchId === hit.branchId);
-                    return g ? Math.max(-70, Math.min(70, g.endX - mascot.pos.x)) * 0.85 : 0;
+                    if (!g) return 0;
+                    // Toward where the rope actually IS with the face turned
+                    // as it is. On the summit he plants and THROWS, so it is a
+                    // small forward pitch rather than a leap at the line.
+                    const toward = Math.max(-70, Math.min(70, ringX(g) - mascot.pos.x));
+                    return toward * (vertical ? 0.18 : 0.85);
                   })()}
                   dy={(() => {
                     if (!hit) return 0;
+                    // He never leaves his altitude on the summit.
+                    if (vertical) return 0;
                     const g = layout.geometries.find((x) => x.branchId === hit.branchId);
                     if (!g) return 0;
-                    const strikeY = vertical
-                      ? Math.max(g.endY, Math.min(g.forkY, mascot.pos.y + PX * 10))
-                      : g.endY;
-                    return Math.max(-44, Math.min(44, strikeY - mascot.pos.y)) * 0.85;
+                    return Math.max(-44, Math.min(44, g.endY - mascot.pos.y)) * 0.85;
                   })()}
                 >
                 <Mascot
@@ -2622,9 +2817,16 @@ export function LifeTimeline() {
                   posY={mascot.posY}
                   viewW={vertical ? size.width : layout.metrics.width}
                   runPhase={mascot.runPhase}
-                  frame={hit && !hit.calm ? "LAND_A" : mascot.frame}
+                  // A summit strike is a throw, so he keeps the frame he has
+                  // — a LAND_A jolt would drop him off the rope he is on.
+                  frame={hit && !hit.calm && !vertical ? "LAND_A" : mascot.frame}
                   flip={mascot.flip}
                   mascotType={mascot.mascotType}
+                  // Summit: he shins up the rope he is quieting, and swings
+                  // with it while he hangs there.
+                  rise={mascot.rise}
+                  sway={swayRide}
+                  grip={gripRide}
                   bubbleO={grabPrompt ? undefined : mascot.bubbleO}
                   bubbleText={mascot.bubbleText}
                   showTapHint={mascot.frame === 'IDLE_A' || mascot.frame === 'IDLE_B'}
@@ -3130,18 +3332,55 @@ export function LifeTimeline() {
           const openTargets = activeLines
             .map((b) => ({ b, g: layout.geometries.find((x) => x.branchId === b.id) }))
             .filter((x) => x.g && x.g.inWindow)
-            // Summit's sweep runs along the ledge (left → right); elsewhere
-            // top → bottom through the lanes.
-            .sort((a, bx) =>
-              vertical
-                ? (a.g!.endX ?? 0) - (bx.g!.endX ?? 0)
-                : (a.g!.endY ?? 0) - (bx.g!.endY ?? 0),
-            );
+            // Summit: a rope answered today is coiled at its cliff ledge — it
+            // is not on the face any more, so there is nothing there to chalk.
+            // Sweeping it would quiet a thread that is already settled, at a
+            // spot the climber cannot even stand.
+            .filter((x) => !vertical || !handledToday(x.b, now));
+          /**
+           * The order the sweep works in. On the summit it runs ROUND THE RING
+           * in one direction, so every rope — including the ones round the back
+           * — is turned to the front and chalked in turn. Sorting by `endX` (a
+           * rope's un-turned rest column) made him zig-zag as soon as the face
+           * had been turned at all, and never brought the hidden ones round.
+           * Elsewhere: top → bottom through the lanes, as before.
+           *
+           * The order cannot reshuffle mid-sweep even though chalking changes
+           * `laneY`: the loudness pull is at most 0.45 of a lane gap per side,
+           * so two adjacent lanes can never cross.
+           */
+          const sweepIds = (): string[] => {
+            if (!vertical) {
+              return openTargets
+                .slice()
+                .sort((a, bx) => (a.g!.endY ?? 0) - (bx.g!.endY ?? 0))
+                .map((x) => x.b.id);
+            }
+            const ring = openTargets
+              .filter((x) => x.g!.angle !== undefined)
+              .map((x) => ({ id: x.b.id, angle: x.g!.angle as number }))
+              .sort((a, bx) => a.angle - bx.angle);
+            const offRing = openTargets
+              .filter((x) => x.g!.angle === undefined)
+              .map((x) => x.b.id);
+            if (ring.length === 0) return offRing;
+            // Start from the end of the ring FARTHER from the front, so the
+            // sweep ends near where the mountain already was: the one long
+            // turn happens at the start, where it reads as "here we go",
+            // rather than whipping round over the celebration.
+            const rot = rotRef.current;
+            let front = 0;
+            for (let i = 1; i < ring.length; i++) {
+              if (Math.cos(ring[i].angle + rot) > Math.cos(ring[front].angle + rot)) front = i;
+            }
+            const order = front < ring.length / 2 ? ring.slice().reverse() : ring;
+            return [...order.map((r) => r.id), ...offRing];
+          };
           const superReady = bonkCharge >= 100 && openTargets.length > 0;
           const fireSuperBonk = () => {
             if (!superReady) return;
             consumeSuperBonk();
-            const ids = openTargets.map((x) => x.b.id);
+            const ids = sweepIds();
             if (reducedMotion) {
               // No run — the bonks land one after another on their own.
               ids.forEach((id, i) => setTimeout(() => void attackBranch(id), i * 160));
@@ -3237,54 +3476,6 @@ export function LifeTimeline() {
           activeLines={activeLines}
           onChipHeight={(h) => setTopInset(Math.max(0, Math.round(9.6 + h) + 8))}
         />
-
-        {/* while the thumb dials a thread's loudness: its name and level, live */}
-        {preview && previewBranch && (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              {
-                position: "absolute",
-                left: 0,
-                top: 0,
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-                paddingVertical: 4,
-                paddingHorizontal: 10,
-                borderRadius: 6,
-                backgroundColor: tk.bgRaised,
-                borderWidth: 1,
-                borderColor: alpha(tk.lineAxis, 0.55),
-              },
-              tk.shadows ? shadow(tk) : null,
-              chipStyle,
-            ]}
-          >
-            <T style={{ fontSize: 12 }}>
-              {previewBranch.title.length > 22
-                ? previewBranch.title.slice(0, 20) + "…"
-                : previewBranch.title}
-            </T>
-            <View style={{ flexDirection: "row", gap: 3 }}>
-              {[1, 2, 3, 4, 5].map((n) => (
-                <View
-                  key={n}
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 3,
-                    backgroundColor:
-                      n <= preview.level ? tk.accent : alpha(tk.lineAxis, 0.55),
-                  }}
-                />
-              ))}
-            </View>
-            <T style={{ fontSize: 11, color: tk.inkSoft }}>
-              {t(loudnessWord(preview.level))}
-            </T>
-          </Animated.View>
-        )}
 
         {branches.length === 0 && (
           <View

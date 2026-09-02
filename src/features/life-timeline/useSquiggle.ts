@@ -45,6 +45,69 @@ function lerpTable(table: number[], level: number): number {
   return table[lo] + (table[hi] - table[lo]) * (clamped - lo);
 }
 
+/**
+ * How far sideways a hanging rope stands, at arc distance `a` below its
+ * anchor. ONE formula: the rope's own path worklet and the climber holding on
+ * to it both call this, so he can never drift off the rope he is on.
+ *   a      arc distance below the top anchor (px, in the rope's REST frame)
+ *   total  the rope's full length, anchor → dangling end (px)
+ *   level  felt loudness 1–5 (fractional allowed)
+ *   phase  the rope's own seed (see `phaseFromId` in BranchLine)
+ *   tRaw   seconds on the clock
+ *   seat   1 for a free bottom end; < 1 re-seats a visible fork
+ * Time is quantized HERE and not by the callers: the rope's `d` and the
+ * climber must land on the same 30Hz grid or he lags it by a pixel or two.
+ */
+export function swayOffsetAt(
+  a: number,
+  total: number,
+  level: number,
+  phase: number,
+  tRaw: number,
+  seat = 1,
+): number {
+  "worklet";
+  if (total <= 0) return 0;
+  const t = Math.round(tRaw * 30) / 30;
+  const amp = lerpTable(SWAY_AMP, level);
+  const omega = 2 * Math.PI * lerpTable(SWAY_HZ, level);
+  const pend = Math.max(0, Math.min(1, a / total));
+  return amp * pend * seat * Math.sin(omega * t - KROPE * a + phase);
+}
+
+/**
+ * What a climber needs to ride one rope's sway (see Mascot's `sway` prop).
+ * All of it is known in JS at render time, so the offset is recomputed from
+ * the formula rather than published out of the rope — which keeps the rope's
+ * live rotation out of his column (see `ringX` vs `RingG`).
+ */
+export type SwayRide = {
+  clock: SharedValue<number>;
+  /** The mountain's travel: screen y − this = the rope's rest frame. */
+  climb: SharedValue<number>;
+  /** Rest-frame y of the rope's top anchor (`geometry.endY`). */
+  anchorY: number;
+  /** Rest-frame length, anchor → dangling end (`forkY − endY`). */
+  total: number;
+  level: number;
+  phase: number;
+};
+
+/**
+ * What a climber needs to stay ON a rope while the mountain turns under him.
+ * The ropes hang around the rock, so a rope's column is `sin(angle + turn)`
+ * from the route — and the turn lives on the UI thread. His JS-side place is
+ * only refreshed when a turn COMMITS, so without this he would snap across
+ * the face one whole animation late; with it his hands never leave the rope.
+ */
+export type GripRide = {
+  /** His x with the face square-on — the rope's un-turned column. */
+  baseX: number;
+  angle: number;
+  radius: number;
+  rot: SharedValue<number>;
+};
+
 export type BranchStrokeProps = {
   /** For the visible line: squiggle `d` + the newborn draw-in dash. */
   line: Partial<PathProps>;
@@ -89,6 +152,12 @@ export function useBranchStrokes(opts: {
   mode?: StrokeMode;
   /** Per-rope phase offset so a face of ropes never sways in sync. */
   swayPhase?: number;
+  /**
+   * The world's seconds, so a rider outside this hook can reproduce the sway
+   * exactly. Summit only: the horizontal themes keep the local clock, which
+   * ticks only while something is actually trembling.
+   */
+  clock?: SharedValue<number> | null;
 }): BranchStrokeProps {
   const {
     trembling,
@@ -105,6 +174,7 @@ export function useBranchStrokes(opts: {
     attachEnd = false,
     mode = "slither",
     swayPhase = 0,
+    clock: clockIn = null,
   } = opts;
 
   const riding = wave != null && !reducedMotion && (attachStart || attachEnd);
@@ -137,28 +207,35 @@ export function useBranchStrokes(opts: {
   }, [pts, riding, attachStart, attachEnd, total]);
 
   // Time in seconds, ticking on the UI thread while the slither is active.
-  const clock = useSharedValue(0);
+  // A caller may hand us the world's clock instead, so that something outside
+  // this hook (the climber hanging on a rope) can reproduce the sway exactly.
+  const localClock = useSharedValue(0);
+  const clock = clockIn ?? localClock;
+  const ownsClock = clockIn == null;
   useEffect(() => {
+    // The world's clock is not ours to stop: cancelling it when one rope goes
+    // quiet would freeze the main wave, the weather and the scenery app-wide.
+    if (!ownsClock) return;
     if (!trembling || pts.length === 0) {
-      cancelAnimation(clock);
-      clock.value = 0;
+      cancelAnimation(localClock);
+      localClock.value = 0;
       return;
     }
-    clock.value = 0;
+    localClock.value = 0;
     // One long linear ramp, repeated: the sine only cares about elapsed time.
-    clock.value = withRepeat(
+    localClock.value = withRepeat(
       withTiming(3600, { duration: 3600_000, easing: Easing.linear }),
       -1,
       false,
     );
-    return () => cancelAnimation(clock);
-  }, [trembling, pts, clock]);
+    return () => cancelAnimation(localClock);
+  }, [ownsClock, trembling, pts, localClock]);
 
   // The squiggled path, built once per frame and shared by all three strokes.
   // Two motions can compose: the loudness slither along the whole line, and
   // the main wave carrying the attached end(s) in the timeline's rhythm.
   // The slither advances at 30Hz too — dependents only fire on change.
-  const tick = useDerivedValue(() => Math.round(clock.value * 30) / 30, []);
+  const tick = useDerivedValue(() => Math.round(clock.value * 30) / 30, [clock]);
   const d = useDerivedValue(() => {
     if (pts.length === 0) return basePath;
     const ampP = wave ? Math.min(1.35, wave.progressSV.value + wave.surgeSV.value) : 0;
@@ -171,16 +248,12 @@ export function useBranchStrokes(opts: {
       // Summit never rides the calm wave (wave is null there), so this is
       // always the full rebuild — same cost class as a loud slither. No
       // frozen middle is possible: every point below the anchor moves.
-      const swayAmp = trembling ? lerpTable(SWAY_AMP, level) : 0;
-      const swayOmega = 2 * Math.PI * lerpTable(SWAY_HZ, level);
       let out = "";
       for (let i = 0; i < pts.length; i++) {
         const p = pts[i];
         const a = total - p.s; // arc distance below the top anchor
-        const pend = a / Math.max(total, 1);
         const seat = attachStart ? Math.min(1, p.s / FORK_CLAMP) : 1;
-        const off =
-          swayAmp * pend * seat * Math.sin(swayOmega * t - KROPE * a + swayPhase);
+        const off = swayOffsetAt(a, total, level, swayPhase, t, seat);
         const x = p.x + p.nx * off;
         const y = p.y + p.ny * off;
         out += `${out ? "L" : "M"}${Math.round(x * 10) / 10} ${Math.round(y * 10) / 10}`;

@@ -350,6 +350,8 @@ export function ReclaimFly({
 }
 
 const AnimatedCircleFx = Animated.createAnimatedComponent(Circle);
+const AnimatedGFx = Animated.createAnimatedComponent(G);
+const AnimatedRectFx = Animated.createAnimatedComponent(Rect);
 
 /** The ember palette, borrowed from the dragon. */
 const EMBER = "#ff9a3d";
@@ -565,7 +567,8 @@ type AttackVariant =
   | "catnap"
   | "abyss"
   | "gravemist"
-  | "pompom";
+  | "pompom"
+  | "summit";
 
 export function attackVariantFor(theme: ThemeId): AttackVariant {
   switch (theme) {
@@ -576,11 +579,24 @@ export function attackVariantFor(theme: ThemeId): AttackVariant {
     case "abyss":
     case "gravemist":
     case "pompom":
+    case "summit":
       return theme;
     default:
       return "generic";
   }
 }
+
+// Chalk, matching SummitScene's rope palette — which imports `Fleck` from
+// this file, so the constants cannot be shared without a cycle.
+// CHALK_SMUDGE is also a harness hook: summit-check finds the mark on the
+// rope by this stroke. Do not change it without changing that script.
+const CHALK = "#ffffff";
+const CHALK_DUST = "#f0e3c8"; // = SummitScene's FRAY
+const CHALK_SMUDGE = "#f4ead6";
+/** White on a pale sky is invisible: the block and its ring need a rim. */
+const CHALK_RIM = "#9aa7b4";
+/** Fraction of the fx's life the chalk block spends in the air (~200ms). */
+const THROW = 0.18;
 
 /** One flying particle of an impact: shoots outward, arcs, fades. */
 export function Fleck({ x, y, angle, dist, size, color, rise, delay, t }: {
@@ -608,18 +624,24 @@ export function Fleck({ x, y, angle, dist, size, color, rise, delay, t }: {
 }
 
 /** The expanding shockwave at the point of impact. */
-export function Shockwave({ x, y, color, t, scale = 1 }: {
+export function Shockwave({ x, y, color, t, scale = 1, delay = 0 }: {
   x: number;
   y: number;
   color: string;
   t: SharedValue<number>;
   scale?: number;
+  /** Hold off until this fraction of `t` — a thrown impact waits for the
+   * throw to land before the ring goes out. */
+  delay?: number;
 }) {
-  const props = useAnimatedProps(() => ({
-    r: Math.max(0.1, 5 + t.value * 40 * scale),
-    opacity: (1 - t.value) * 0.55,
-    strokeWidth: Math.max(0.2, 2.4 * (1 - t.value)),
-  }));
+  const props = useAnimatedProps(() => {
+    const local = Math.max(0, Math.min(1, (t.value - delay) / (1 - delay)));
+    return {
+      r: Math.max(0.1, 5 + local * 40 * scale),
+      opacity: local <= 0 ? 0 : (1 - local) * 0.55,
+      strokeWidth: Math.max(0.2, 2.4 * (1 - local)),
+    };
+  });
   return <AnimatedCircleFx cx={x} cy={y} fill="none" stroke={color} animatedProps={props} />;
 }
 
@@ -630,14 +652,142 @@ export function Shockwave({ x, y, color, t, scale = 1 }: {
  */
 const AnimatedSvgText = Animated.createAnimatedComponent(SvgText);
 
-export function AttackFx({ x, y, path, variant, accent, calm }: {
+/**
+ * Summit's strike: he throws a block of chalk at the rope and it bursts into
+ * dust. No slash — nobody slashes a rope — and no white flash of the line
+ * either, which also keeps this clear of the rope's own mountain
+ * coordinates: a short segment at his altitude IS the rope.
+ */
+function ChalkFx({ x, y, calm, fromX, fromY, rot = null, angle = 0, radius = 0 }: AttackFxProps) {
+  const t = useSharedValue(0);
+  useEffect(() => {
+    t.value = 0;
+    t.value = withTiming(1, { duration: 1150, easing: Easing.out(Easing.quad) });
+    return () => cancelAnimation(t);
+  }, [t]);
+
+  // How far the rope has been carried round by the turn. Zero off the summit.
+  const ringDx = useDerivedValue(
+    () => (rot ? (Math.sin(angle + rot.value) - Math.sin(angle)) * radius : 0),
+    [rot, angle, radius],
+  );
+  // The chalk block, in the air: a low arc from his hand to the rope, then
+  // gone. A block, not a speck — white on a pale sky needs a dark rim and a
+  // real size or it reads as nothing at all.
+  const BLOCK = 7;
+  const blockProps = useAnimatedProps(() => {
+    const e = Math.min(1, t.value / THROW);
+    const hx = fromX ?? x;
+    const hy = fromY ?? y;
+    const tx = x + ringDx.value;
+    return {
+      x: hx + (tx - hx) * e - BLOCK / 2,
+      y: hy + (y - hy) * e - 34 * Math.sin(Math.PI * e) - BLOCK / 2,
+      opacity: e >= 1 ? 0 : 1,
+      // it tumbles as it flies
+      rotation: e * 190,
+    };
+  });
+  // The puff: a soft cloud of dust that blooms where it struck and thins out.
+  const cloudProps = useAnimatedProps(() => {
+    const l = Math.max(0, Math.min(1, (t.value - THROW) / 0.45));
+    return {
+      r: Math.max(0.1, 4 + l * (calm ? 12 : 26)),
+      opacity: l <= 0 || l >= 1 ? 0 : 0.5 * (1 - l) * (calm ? 0.5 : 1),
+    };
+  });
+  // The impact rides the turn: the dust goes round the back WITH its rope.
+  const ringRide = useAnimatedProps(() => ({
+    translateX: Math.round(ringDx.value * 2) / 2,
+  }));
+  // The chalk left on the rope. A summit rope is a straight vertical line
+  // (transpose builds `M ax dangleY L ax ay`), so a short segment at his own
+  // altitude IS the rope — no mountain-coordinate path, no climb offset.
+  const smudgeProps = useAnimatedProps(() => {
+    const l = Math.max(0, (t.value - THROW) / (1 - THROW));
+    return {
+      opacity: l <= 0 ? 0 : 0.7 * (1 - l) * (calm ? 0.4 : 1),
+      strokeWidth: 5 + l * 4,
+    };
+  });
+
+  // He throws chalk at the rope: the block flies, bursts, and leaves a
+  // white smudge that settles as dust. No slash — nobody slashes a rope.
+  const n = calm ? 6 : 16;
+  return (
+    <G pointerEvents="none">
+      <AnimatedRectFx
+        width={BLOCK}
+        height={BLOCK - 2}
+        rx={1.6}
+        fill={CHALK}
+        stroke={CHALK_RIM}
+        strokeWidth={1}
+        animatedProps={blockProps}
+      />
+      <AnimatedGFx animatedProps={ringRide}>
+        <AnimatedPath
+          d={`M ${x} ${y - 26} L ${x} ${y + 26}`}
+          stroke={CHALK_SMUDGE}
+          strokeLinecap="round"
+          fill="none"
+          animatedProps={smudgeProps}
+        />
+        <AnimatedCircleFx cx={x} cy={y} fill={CHALK} animatedProps={cloudProps} />
+        <Shockwave x={x} y={y} color={CHALK_RIM} t={t} scale={calm ? 0.4 : 0.85} delay={THROW} />
+        {Array.from({ length: n }, (_, i) => (
+          // dust, not shrapnel: a settling fan, never a full circle
+          <Fleck
+            key={i}
+            x={x}
+            y={y}
+            angle={Math.PI * (0.12 + (0.76 * ((i * 7) % n)) / n)}
+            dist={(calm ? 14 : 34) * (0.6 + ((i * 37) % 10) / 18)}
+            size={2 + ((i * 13) % 5) / 2}
+            color={i % 3 === 0 ? CHALK_DUST : CHALK}
+            rise={-8}
+            delay={THROW + (i % 5) * 0.035}
+            t={t}
+          />
+        ))}
+        {!calm && <MinusOne x={x} y={y} color={CHALK_DUST} t={t} delay={THROW} />}
+      </AnimatedGFx>
+    </G>
+  );
+}
+
+type AttackFxProps = {
   x: number;
   y: number;
   path: string;
   variant: AttackVariant;
   accent: string;
   calm: boolean;
-}) {
+  /** Where a thrown strike starts: his hand, in screen coordinates. */
+  fromX?: number;
+  fromY?: number;
+  /**
+   * Summit: the rope hangs round a mountain that turns, so `x` is its
+   * UN-turned column and the turn is added here, per frame, on the UI thread.
+   * The JS side's committed angle is a whole animation behind — and the user
+   * can turn the face while a puff is still in the air.
+   */
+  rot?: SharedValue<number> | null;
+  angle?: number;
+  radius?: number;
+};
+
+/**
+ * Which strike this theme lands. A dispatcher with no hooks of its own, so
+ * each strike's per-frame work exists only where it is actually drawn — the
+ * chalk's worklets must not tick through a bonk on the twelve flat maps.
+ */
+export function AttackFx(props: AttackFxProps) {
+  if (props.variant === "summit") return <ChalkFx {...props} />;
+  return <StrikeFx {...props} />;
+}
+
+function StrikeFx({ x, y, path, variant, accent, calm }: AttackFxProps) {
   const t = useSharedValue(0);
   const shake = useSharedValue(0);
   useEffect(() => {
@@ -676,7 +826,8 @@ export function AttackFx({ x, y, path, variant, accent, calm }: {
     );
   }
 
-  const P: Record<AttackVariant, { colors: string[]; n: number; rise: number; spread: number; extra?: "slash" | "ripple" | "whoosh" | "bang" | "wisp" }> = {
+  // "summit" has its own component (ChalkFx) — it never reaches here.
+  const P: Record<Exclude<AttackVariant, "summit">, { colors: string[]; n: number; rise: number; spread: number; extra?: "slash" | "ripple" | "whoosh" | "bang" | "wisp" }> = {
     generic: { colors: [accent, "#ffffff"], n: 16, rise: 8, spread: 44, extra: "slash" },
     demonfire: { colors: ["#8a8a8a", "#bdbdbd", EMBER], n: 12, rise: 22, spread: 22 },
     koipond: { colors: ["#9fd4e8", "#d7f0fa", "#6db8d6"], n: 12, rise: 14, spread: 26, extra: "ripple" },
@@ -686,7 +837,7 @@ export function AttackFx({ x, y, path, variant, accent, calm }: {
     gravemist: { colors: ["#cdd6dd", "#93a1ac"], n: 9, rise: 10, spread: 34, extra: "wisp" },
     pompom: { colors: ["#f2c9a0", "#e8b184", "#fff1df"], n: 13, rise: 12, spread: 24 },
   };
-  const cfg = P[variant];
+  const cfg = P[variant as Exclude<AttackVariant, "summit">];
 
   const slashProps = useAnimatedProps(() => ({
     opacity: t.value < 0.35 ? 0.9 : Math.max(0, 0.9 - (t.value - 0.35) * 3),
@@ -767,16 +918,24 @@ export function AttackFx({ x, y, path, variant, accent, calm }: {
   );
 }
 
-const AnimatedGFx = Animated.createAnimatedComponent(G);
-
 /**
  * Pip's strike: windup squash, a leap at the line, a jolt on landing, and a
  * little hop back — all as one transform burst around the sprite.
  */
-export function LungeG({ active, dx, dy, children }: {
+export function LungeG({ active, dx, dy, tilt = 9, hop = 10, children }: {
   active: boolean;
   dx: number;
   dy: number;
+  /**
+   * Degrees of body rotation at the top of the leap. The rotation has no
+   * origin, so it turns the group about the canvas origin rather than about
+   * the sprite — harmless at a leap's scale on a horizontal map, but on the
+   * summit (where he plants and THROWS instead of leaping) it would fling
+   * him across the face, so that caller passes 0.
+   */
+  tilt?: number;
+  /** How high the leap arcs. A throw does not leave the ground. */
+  hop?: number;
   children: React.ReactNode;
 }) {
   const p = useSharedValue(0);
@@ -800,26 +959,31 @@ export function LungeG({ active, dx, dy, children }: {
     const squash = p.value <= 0.25 ? 1 - p.value * 0.5 : 1 + leap * 0.08;
     return {
       translateX: dx * leap,
-      translateY: dy * leap - Math.sin(leap * Math.PI) * 10,
+      translateY: dy * leap - Math.sin(leap * Math.PI) * hop,
       scaleY: squash,
-      rotation: leap * (dx >= 0 ? 9 : -9),
+      rotation: leap * (dx >= 0 ? tilt : -tilt),
     };
   });
   return <AnimatedGFx animatedProps={props}>{children}</AnimatedGFx>;
 }
 
 /** The "−1" that floats off a struck thread: the mechanic, made visible. */
-function MinusOne({ x, y, color, t }: {
+function MinusOne({ x, y, color, t, delay = 0 }: {
   x: number;
   y: number;
   color: string;
   t: SharedValue<number>;
+  /** Hold off until this fraction of `t` (a thrown impact lands late). */
+  delay?: number;
 }) {
-  const props = useAnimatedProps(() => ({
-    y: y - 16 - t.value * 26,
-    opacity: t.value < 0.12 ? t.value * 8 : Math.max(0, 1.15 - t.value * 1.15),
-    fontSize: 15 + t.value * 4,
-  }));
+  const props = useAnimatedProps(() => {
+    const local = Math.max(0, Math.min(1, (t.value - delay) / (1 - delay)));
+    return {
+      y: y - 16 - local * 26,
+      opacity: local <= 0 ? 0 : local < 0.12 ? local * 8 : Math.max(0, 1.15 - local * 1.15),
+      fontSize: 15 + local * 4,
+    };
+  });
   return (
     <AnimatedSvgText
       x={x}

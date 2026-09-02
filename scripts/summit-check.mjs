@@ -68,6 +68,26 @@ await page.getByRole("button", { name: "Now", exact: true }).first().click();
 await page.waitForTimeout(2500);
 await page.screenshot({ path: "/tmp/summit-01-map.png" });
 
+/** Every visible rope's column — a turn shows up as a new arrangement. */
+const ropeColumns = (pg) =>
+  pg.evaluate(() => {
+    const xs = [];
+    for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+      const len = el.getTotalLength();
+      if (len < 80) continue;
+      const a = el.getPointAtLength(0);
+      const b = el.getPointAtLength(len);
+      if (Math.abs(len - Math.abs(b.y - a.y)) > 3) continue;
+      let o = 1;
+      for (let n = el; n && n.tagName !== "svg"; n = n.parentElement)
+        o *= Number(getComputedStyle(n).opacity);
+      if (o < 0.6) continue;
+      const m = el.getScreenCTM();
+      xs.push(Math.round(m.a * a.x + m.c * a.y + m.e));
+    }
+    return xs.sort((p, q) => p - q);
+  });
+
 // ── 1. ropes run vertically; anchors gather near the ledge (top) ──
 const ropes = await page.evaluate(() => {
   const out = [];
@@ -161,16 +181,23 @@ const pt = await page.evaluate(() => {
   }
   return null;
 });
-// leftward = quieter (a fresh example thread never starts at 1, so a
-// change is guaranteed; rightward could no-op on an already-loud rope)
+// A drag that STARTS on a rope means the same as a drag anywhere else:
+// sideways turns the mountain. Loudness is the panel's business alone.
+const colsBefore = await ropeColumns(page);
+// Far enough to carry the face a whole rope round: a short drag settles
+// back onto the rope it started on, which would prove nothing.
+const dir = pt.x > 640 ? -1 : 1;
 await page.mouse.move(pt.x, pt.y);
 await page.mouse.down();
-for (let i = 1; i <= 14; i++) await page.mouse.move(pt.x - i * 8, pt.y);
-await page.screenshot({ path: "/tmp/summit-03-dial-mid.png" });
+for (let i = 1; i <= 20; i++) await page.mouse.move(pt.x + dir * i * 20, pt.y);
+await page.screenshot({ path: "/tmp/summit-03-turn-mid.png" });
 await page.mouse.up();
 await page.waitForTimeout(1200);
 const after = await loudnessSnapshot();
-check(before !== after && after.length > 0, "horizontal drag dials loudness");
+const colsAfter = await ropeColumns(page);
+check(before === after && after.length > 0, "a drag on a rope does NOT dial its loudness");
+const turnedByDrag = colsAfter.some((x) => !colsBefore.some((y) => Math.abs(x - y) < 24));
+check(turnedByDrag, "a sideways drag on a rope turns the mountain instead");
 
 await page.screenshot({ path: "/tmp/summit-04-final.png" });
 await page.close();
@@ -367,25 +394,46 @@ await page.close();
   });
   check(!!pt2, "found the last hanging rope");
   await p2.mouse.click(pt2.x, pt2.y);
-  // tapping a rope that was round the side turns it to face you, so it has
-  // moved: the second tap goes where it is now, as a hand would
-  await p2.waitForTimeout(900);
-  const pt2b = await ropePoint();
-  await p2.mouse.click((pt2b ?? pt2).x, (pt2b ?? pt2).y);
+  await p2.waitForTimeout(2000);
+  // One tap sends him over and he takes hold. A SECOND tap on the rope now
+  // shins him up it and quiets it, so the way to the decisions sheet is to
+  // tap the climber himself — resolved live, since he may have been raised.
+  const pipBox = await p2.evaluate(() => {
+    const sprite = [...document.querySelectorAll("svg g")].find(
+      (g) => g.querySelectorAll(":scope > rect").length > 12,
+    );
+    if (!sprite) return null;
+    const r = sprite.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  });
+  check(!!pipBox, "found the climber on the rope");
+  if (pipBox) await p2.mouse.click(pipBox.x, pipBox.y);
   await p2.waitForTimeout(1200);
   // the sheet is up now: its inset must not have moved the time frame, and
   // focusing the rope must not have slid the mountain sideways
   const nowWithSheet = await nowLabelY();
   const capWithFocus = await capBox();
+  // A tray inset would compress the time axis and shift Now by tens of px.
+  // The 1px allowance is the same pinned-chip coupling the check below names:
+  // arming a rope changes topInset, which nudges nowScreenY sub-pixel.
   check(
-    nowBeforeSheet !== null && nowWithSheet === nowBeforeSheet,
+    nowBeforeSheet !== null &&
+      nowWithSheet !== null &&
+      Math.abs(nowWithSheet - nowBeforeSheet) <= 1,
     `the tray moves nothing (Now ${nowBeforeSheet} → ${nowWithSheet})`,
   );
+  // The route must never LEAN toward a focused rope: routeX places the rock,
+  // its texture, the summit dashes and every rope column, so a lean would
+  // drag the whole mountain sideways (tens of px). The 5px allowance is a
+  // known, separate coupling: arming a rope raises its pinned chip, which
+  // changes topInset, which changes timeLen, which resizes the rock's
+  // profile by ~4px. Present on the summit since the pinned chip was; not a
+  // lean, and it does not move the rock relative to Now by more than a hair.
   check(
     capBeforeFocus !== null &&
       capWithFocus !== null &&
-      Math.abs(capWithFocus.offset - capBeforeFocus.offset) <= 2,
-    `the mountain never moves sideways against the timeline (offset ${capBeforeFocus?.offset} → ${capWithFocus?.offset})`,
+      Math.abs(capWithFocus.offset - capBeforeFocus.offset) <= 5,
+    `the mountain never leans toward a focused rope (offset ${capBeforeFocus?.offset} → ${capWithFocus?.offset})`,
   );
   const closedBefore = await closedCurveY();
   await p2.getByText("What does this rope need from you now?", { exact: false }).first().click();
@@ -570,6 +618,24 @@ const ropeIn = (pg) =>
     return null;
   });
 
+/** Screen top of the "Now" label — the pin the whole time frame hangs on. */
+const nowTopOf = (pg) =>
+  pg.evaluate(() => {
+    const el = [...document.querySelectorAll("text")].find((t) => t.textContent === "Now");
+    return el ? Math.round(el.getBoundingClientRect().top) : null;
+  });
+
+/** The snow cap's box: where the mountain itself is. */
+const capBoxOf = (pg) =>
+  pg.evaluate(() => {
+    const cap = [...document.querySelectorAll('path[fill="#ffffff"]')].find(
+      (el) => el.getAttribute("opacity") === "0.65",
+    );
+    if (!cap) return null;
+    const b = cap.getBoundingClientRect();
+    return { top: Math.round(b.top), left: Math.round(b.left) };
+  });
+
 /** A point on the rock clear of every rope, to start a turn from. */
 const emptyX = (pg) =>
   pg.evaluate(() => {
@@ -676,6 +742,8 @@ const emptyX = (pg) =>
       const nowEl = [...document.querySelectorAll("text")].find((t) => t.textContent === "Now");
       return {
         pip: sprite ? Math.round(sprite.getBoundingClientRect().left) : null,
+        // his height too: a leaked shin-up would slowly break the pin
+        top: sprite ? Math.round(sprite.getBoundingClientRect().top) : null,
         now: nowEl ? Math.round(nowEl.getBoundingClientRect().left) : null,
       };
     });
@@ -695,16 +763,348 @@ const emptyX = (pg) =>
       await p2.waitForTimeout(1600);
     }
     const back = await climberX();
+    // He must arrive ON the rope he is handed to, not run past it and get
+    // snapped back when the turn lands: no single frame may jump.
+    let worstJump = 0;
+    let last = null;
+    for (let i = 0; i < 60; i++) {
+      const c = await climberX();
+      if (c.pip !== null && last !== null) worstJump = Math.max(worstJump, Math.abs(c.pip - last));
+      last = c.pip;
+      await p2.waitForTimeout(50);
+    }
+    check(worstJump < 40, `he arrives on the rope, never snapping onto it (worst frame ${worstJump}px)`);
+    // A rope turned away is not one he rides out of sight: he takes the
+    // nearest rope still facing the viewer, or goes back to Now if the face
+    // has none left. Either way he must end up somewhere a hand could reach.
+    const facingXs = await ropeColumns(p2);
+    const atHome = back.pip !== null && Math.abs(back.pip - home.pip) < 30;
+    const onAnother =
+      back.pip !== null && facingXs.some((x) => Math.abs(x - (back.pip + 13)) < 44);
     check(
-      home.pip !== null &&
-        onRope.pip !== null &&
-        back.pip !== null &&
-        Math.abs(back.pip - home.pip) < 30,
-      `a rope turned away sends him back to Now (home ${home.pip} → rope ${onRope.pip} → ${back.pip})`,
+      home.pip !== null && onRope.pip !== null && back.pip !== null && (atHome || onAnother),
+      `a rope turned away hands him to one still in view, or to Now (${home.pip} → ${onRope.pip} → ${back.pip}, ${atHome ? "home" : onAnother ? "on another rope" : "NOWHERE"})`,
+    );
+    // And he is back down at his own altitude: the shin-up never leaks.
+    check(
+      home.top !== null && back.top !== null && Math.abs(back.top - home.top) <= 12,
+      `and he is back down at his station (top ${home.top} → ${onRope.top} → ${back.top})`,
     );
   }
   await p2.screenshot({ path: "/tmp/summit-07-turned.png" });
   await p2.close();
+}
+
+/** The climber's live box: he moves up the rope, so nothing may cache it. */
+const pipBox = (pg) =>
+  pg.evaluate(() => {
+    const sprite = [...document.querySelectorAll("svg g")].find(
+      (g) => g.querySelectorAll(":scope > rect").length > 12,
+    );
+    if (!sprite) return null;
+    const r = sprite.getBoundingClientRect();
+    return {
+      x: Math.round(r.left + r.width / 2),
+      cx: r.left + r.width / 2,
+      y: Math.round(r.top + r.height / 2),
+      top: Math.round(r.top),
+    };
+  });
+
+/** Where the rope's own visible stroke sits at the climber's altitude. */
+const ropeXAtPip = (pg) =>
+  pg.evaluate(() => {
+    const sprite = [...document.querySelectorAll("svg g")].find(
+      (g) => g.querySelectorAll(":scope > rect").length > 12,
+    );
+    if (!sprite) return null;
+    const box = sprite.getBoundingClientRect();
+    const row = box.top + box.height * 0.4; // roughly his hands
+    const centre = box.left + box.width / 2;
+    // Each visible rope's x AT that row, found by bisection on arc length
+    // (the ropes are near-vertical, so y is monotonic along them); then the
+    // one whose column is his is the one closest to his centre.
+    let best = null;
+    let bestDx = Infinity;
+    for (const el of document.querySelectorAll("path")) {
+      const stroke = el.getAttribute("stroke");
+      if (!stroke || stroke === "transparent" || stroke === "none") continue;
+      const len = el.getTotalLength();
+      if (len < 400) continue; // a rope, not a mark
+      let o = 1;
+      for (let n = el; n && n.tagName !== "svg"; n = n.parentElement)
+        o *= Number(getComputedStyle(n).opacity);
+      if (o < 0.6) continue;
+      const m = el.getScreenCTM();
+      if (!m) continue;
+      const yAt = (l) => {
+        const q = el.getPointAtLength(l);
+        return m.b * q.x + m.d * q.y + m.f;
+      };
+      let lo = 0;
+      let hi = len;
+      if ((yAt(lo) - row) * (yAt(hi) - row) > 0) continue; // does not cross him
+      const rising = yAt(hi) > yAt(lo);
+      for (let k = 0; k < 40; k++) {
+        const mid = (lo + hi) / 2;
+        if (yAt(mid) < row === rising) lo = mid;
+        else hi = mid;
+      }
+      const q = el.getPointAtLength((lo + hi) / 2);
+      const x = m.a * q.x + m.c * q.y + m.e;
+      if (Math.abs(x - centre) < bestDx) {
+        bestDx = Math.abs(x - centre);
+        best = x;
+      }
+    }
+    return bestDx <= 40 ? best : null;
+  });
+
+const readBranches = (pg) =>
+  pg.evaluate(() => JSON.parse(localStorage.getItem("one-current/table/branches") ?? "[]"));
+
+// ── 8. he swings with the rope he holds, and shins up it to quiet it ──
+{
+  const p3 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  p3.on("pageerror", (e) => errors.push(e.message));
+  await p3.addInitScript(() => {
+    localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+    localStorage.setItem("one-current-tutorial-v1", "done");
+    localStorage.setItem("one-current-pro", "1");
+    localStorage.setItem("one-current-theme", "summit");
+  });
+  await p3.goto("http://localhost:4179/", { waitUntil: "networkidle" });
+  await p3.waitForTimeout(1500);
+  await p3.getByRole("button", { name: "More" }).first().click();
+  await p3.waitForTimeout(500);
+  await p3.getByRole("button", { name: "Load example threads" }).click();
+  await p3.waitForTimeout(900);
+  // Every open rope at full loudness, so the sway is at its widest and a tap
+  // has room to drop it more than once.
+  await p3.evaluate(() => {
+    const key = "one-current/table/branches";
+    const rows = JSON.parse(localStorage.getItem(key) ?? "[]").map((b) =>
+      b.status !== "merged" && b.status !== "converted-to-project" && !b.mergeDate
+        ? { ...b, loudness: 5, loudnessSetOn: new Date().toISOString().slice(0, 10) }
+        : b,
+    );
+    localStorage.setItem(key, JSON.stringify(rows));
+  });
+  await p3.reload({ waitUntil: "networkidle" });
+  await p3.waitForTimeout(2600);
+
+  const rope8 = await ropeIn(p3);
+  check(!!rope8, "found a rope to grab");
+  if (rope8) {
+    await p3.mouse.click(rope8.x, rope8.y);
+    await p3.waitForTimeout(2200); // he walks over and takes hold
+
+    // ── the swing: the rope moves, and he moves WITH it ──
+    let ropeLo = Infinity, ropeHi = -Infinity;
+    let gapLo = Infinity, gapHi = -Infinity;
+    for (let i = 0; i < 70; i++) {
+      const [rx, pip] = [await ropeXAtPip(p3), await pipBox(p3)];
+      if (rx !== null && pip) {
+        ropeLo = Math.min(ropeLo, rx);
+        ropeHi = Math.max(ropeHi, rx);
+        const gap = pip.cx - rx;
+        gapLo = Math.min(gapLo, gap);
+        gapHi = Math.max(gapHi, gap);
+      }
+      await p3.waitForTimeout(45);
+    }
+    const ropeTravel = Math.round(ropeHi - ropeLo);
+    const gapSpread = Math.round(gapHi - gapLo);
+    check(ropeTravel > 3, `the rope he holds really sways (${ropeTravel}px of travel)`);
+    // The real assertion: any mistake in the phase, the clock, the pendulum
+    // taper or the mountain's own travel shows up here as a widening gap.
+    check(
+      gapLo < Infinity && gapSpread <= 4,
+      `he swings WITH it, not beside it (gap held to ${gapSpread}px)`,
+    );
+
+    // ── the shin: a tap on his rope quiets it and sends him up it ──
+    const before = await readBranches(p3);
+    const beforeBox = await pipBox(p3);
+    const capBefore = await capBoxOf(p3);
+    const nowBefore = await nowTopOf(p3);
+    const coilsBefore = await p3.evaluate(
+      () => document.querySelectorAll('[aria-label*="coil"]').length,
+    );
+    const rope8b = await ropeIn(p3);
+    // Anywhere on the rope but ON him: his own hit rect opens the sheet.
+    if (rope8b) await p3.mouse.click(rope8b.x, (beforeBox?.top ?? rope8b.y) + 150);
+    await p3.waitForTimeout(1100);
+    const after = await readBranches(p3);
+    const afterBox = await pipBox(p3);
+    const heldId = await p3.evaluate(() => {
+      const sprite = [...document.querySelectorAll("svg g")].find(
+        (g) => g.querySelectorAll(":scope > rect").length > 12,
+      );
+      return sprite ? 1 : 0;
+    });
+    const dropped = before.filter((b) => {
+      const a = after.find((x) => x.id === b.id);
+      return a && Math.round(a.loudness) === Math.round(b.loudness) - 1;
+    });
+    check(
+      dropped.length === 1,
+      `a tap on his rope drops exactly one thread one step (${dropped.length})`,
+    );
+    check(
+      !!beforeBox && !!afterBox && beforeBox.top - afterBox.top >= 15,
+      `and sends him up the rope (top ${beforeBox?.top} → ${afterBox?.top})`,
+    );
+    const sheetUp = await p3
+      .getByText("What does this rope need from you now?", { exact: false })
+      .first()
+      .isVisible()
+      .catch(() => false);
+    check(!sheetUp && heldId === 1, "the climb IS the act — no sheet opens");
+    // Quieting is a touch, not a rung: nothing about the day's ladder moves.
+    const capAfter = await capBoxOf(p3);
+    const nowAfter = await nowTopOf(p3);
+    const coilsAfter = await p3.evaluate(
+      () => document.querySelectorAll('[aria-label*="coil"]').length,
+    );
+    check(
+      capBefore !== null &&
+        capAfter !== null &&
+        Math.abs(capAfter.top - capBefore.top) <= 1 &&
+        nowAfter === nowBefore &&
+        coilsAfter === coilsBefore,
+      `quieting adds no rung (cap ${capBefore?.top} → ${capAfter?.top}, Now ${nowBefore} → ${nowAfter})`,
+    );
+  }
+  await p3.screenshot({ path: "/tmp/summit-08-shinned.png" });
+  await p3.close();
+}
+
+// ── 9. full send: chalk at every rope, the mountain turning to reach them ──
+{
+  const p4 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  p4.on("pageerror", (e) => errors.push(e.message));
+  await p4.addInitScript(() => {
+    localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+    localStorage.setItem("one-current-tutorial-v1", "done");
+    localStorage.setItem("one-current-pro", "1");
+    localStorage.setItem("one-current-theme", "summit");
+    // A full meter straight from storage: loadSettings reads this key and
+    // clamps it to 0–100, so the pill comes up ready with no panel to visit.
+    localStorage.setItem("one-current-bonk-charge", "100");
+  });
+  await p4.goto("http://localhost:4179/", { waitUntil: "networkidle" });
+  await p4.waitForTimeout(1500);
+  await p4.getByRole("button", { name: "More" }).first().click();
+  await p4.waitForTimeout(500);
+  await p4.getByRole("button", { name: "Load example threads" }).click();
+  await p4.waitForTimeout(900);
+  // Answer one thread for today so there IS a coiled rope for the sweep to
+  // leave alone — the example data has none.
+  await p4.evaluate(() => {
+    const key = "one-current/table/branches";
+    const rows = JSON.parse(localStorage.getItem(key) ?? "[]");
+    const open = rows.filter(
+      (b) => b.status !== "merged" && b.status !== "converted-to-project" && !b.mergeDate,
+    );
+    if (open.length) open[0].lastDecisionOn = new Date().toISOString().slice(0, 10);
+    localStorage.setItem(key, JSON.stringify(rows));
+  });
+  await p4.reload({ waitUntil: "networkidle" });
+  await p4.waitForTimeout(2600);
+
+  check(
+    await p4.getByText("FULL SEND!").first().isVisible().catch(() => false),
+    'the pill reads "FULL SEND!"',
+  );
+  const todayIso = new Date().toISOString().slice(0, 10);
+  // The ropes still HANGING: one answered today is coiled at its ledge, off
+  // the face, and the sweep must leave it alone.
+  const openIds = (await readBranches(p4))
+    .filter((b) => b.status !== "merged" && b.status !== "converted-to-project" && !b.mergeDate)
+    .filter((b) => b.lastDecisionOn !== todayIso && b.leftOn !== todayIso)
+    .map((b) => b.id);
+  const settledIds = (await readBranches(p4))
+    .filter((b) => b.status !== "merged" && b.status !== "converted-to-project" && !b.mergeDate)
+    .filter((b) => b.lastDecisionOn === todayIso || b.leftOn === todayIso)
+    .map((b) => b.id);
+  const settledBefore = (await readBranches(p4)).filter((b) => settledIds.includes(b.id));
+  await p4.getByRole("button", { name: "Full send: Pip steadies every rope" }).click();
+  // Sample right through the sweep: count how many times the face settles
+  // into a NEW arrangement, and catch the chalk in the air at least once.
+  const frames = [];
+  let chalkMiss = null;
+  for (let i = 0; i < 110; i++) {
+    frames.push(await ropeColumns(p4));
+    const miss = await p4.evaluate(() => {
+      const sm = document.querySelector('path[stroke="#f4ead6"]');
+      if (!sm) return null;
+      const m = sm.getScreenCTM();
+      if (!m) return null;
+      const p = sm.getPointAtLength(0);
+      const cx = m.a * p.x + m.c * p.y + m.e;
+      let best = Infinity;
+      for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+        const len = el.getTotalLength();
+        if (len < 80) continue;
+        let o = 1;
+        for (let n = el; n && n.tagName !== "svg"; n = n.parentElement)
+          o *= Number(getComputedStyle(n).opacity);
+        if (o < 0.6) continue;
+        const mm = el.getScreenCTM();
+        if (!mm) continue;
+        const a = el.getPointAtLength(0);
+        best = Math.min(best, Math.abs(mm.a * a.x + mm.c * a.y + mm.e - cx));
+      }
+      return Number.isFinite(best) ? Math.round(best) : null;
+    });
+    if (miss !== null) chalkMiss = chalkMiss === null ? miss : Math.min(chalkMiss, miss);
+    await p4.waitForTimeout(60);
+  }
+  const same = (a, b) => a.length === b.length && a.every((v, k) => Math.abs(v - b[k]) < 4);
+  let stops = 0;
+  for (let i = 1; i < frames.length; i++) {
+    if (!same(frames[i], frames[i - 1]) && (i + 1 >= frames.length || same(frames[i + 1], frames[i])))
+      stops++;
+  }
+  check(
+    stops >= Math.min(3, openIds.length - 1),
+    `the mountain turns rope by rope through a full send (${stops} settles for ${openIds.length} ropes)`,
+  );
+  check(
+    chalkMiss !== null && chalkMiss < 26,
+    `the chalk lands on the rope, not its un-turned column (${chalkMiss}px off)`,
+  );
+  // Every rope was chalked, including the ones that were round the back:
+  // dialLoudness stamps loudnessSetOn, and the example data never sets it.
+  await p4.waitForTimeout(1500);
+  const rows9 = await readBranches(p4);
+  const chalked = rows9.filter(
+    (b) => openIds.includes(b.id) && b.loudnessSetOn === todayIso,
+  ).length;
+  check(
+    chalked === openIds.length && openIds.length >= 4,
+    `a full send chalks every rope, hidden or not (${chalked}/${openIds.length})`,
+  );
+  // And it leaves the coiled ones alone: answered today, they are not on the
+  // face any more, so there is nothing there to chalk.
+  const disturbed = settledIds.filter((id) => {
+    const was = settledBefore.find((x) => x.id === id);
+    const is = rows9.find((x) => x.id === id);
+    return was && is && is.loudness !== was.loudness;
+  });
+  check(
+    settledIds.length > 0 && disturbed.length === 0,
+    `a rope already answered today is left coiled, not chalked (${settledIds.length} settled, ${disturbed.length} disturbed)`,
+  );
+  // And when it is over, the map holds still: nothing turns on its own.
+  await p4.waitForTimeout(4200);
+  const restA = await ropeColumns(p4);
+  await p4.waitForTimeout(1800);
+  const restB = await ropeColumns(p4);
+  check(same(restA, restB), "the mountain never turns on its own once the sweep is done");
+  await p4.screenshot({ path: "/tmp/summit-09-fullsend.png" });
+  await p4.close();
 }
 
 await browser.close();
