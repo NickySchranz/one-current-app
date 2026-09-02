@@ -146,7 +146,12 @@ export function ringOffset(
  */
 export function faceHalfFor(stageWidth: number, routeX: number): number {
   const room = stageWidth - SUMMIT_RAIL_W - routeX;
-  return Math.max(60, Math.round(room - Math.max(30, 0.13 * stageWidth)));
+  // The sky it leaves used to be 0.13 of the stage. That put the rock's right
+  // flank — and so the ring's right LIMB, where ropes bunch as they come
+  // round — well inside the frame, where the bunching is the thing you look
+  // at. A narrower margin still leaves the distant ranges room and pushes
+  // that limb toward the edge, which is where the left one already is.
+  return Math.max(60, Math.round(room - Math.max(26, 0.09 * stageWidth)));
 }
 
 /**
@@ -413,7 +418,11 @@ export function buildSummitLayout(
    * of a phone: five ropes crowded into the middle third with 170px of empty
    * sky beside them.
    */
-  const leftReach = Math.max(faceRadius, Math.round(routeX - 26));
+  // ...but not so much further than the right that the two sides read
+  // differently: dx per degree of turn is proportional to the reach, so a
+  // left reach far greater than the right makes ropes sweep in wide on one
+  // side and crowd together on the other.
+  const leftReach = Math.max(faceRadius, Math.min(Math.round(routeX - 26), Math.round(faceRadius * 1.25)));
   /**
    * Degrees between neighbouring ropes, wrapped into one full turn. A narrow
    * stage takes a wider step: the ring's reach cannot grow (the rock is only
@@ -457,10 +466,13 @@ export function buildSummitLayout(
       const radius = coiled
         ? Math.max(30, mountainHalfWidth(ay - peakYRest, faceHalf, timeLen) - 30)
         : faceRadius;
-      // A coiled rope's ledge is drawn ON the rock and reads against the
-      // visible right flank, so it keeps a round ring; only the hanging ropes
-      // borrow the room off the left of the screen.
-      const radiusLeft = coiled ? radius : Math.max(radius, leftReach);
+      // The ledge keeps the rope's OWN reach. Collapsing it to the round
+      // right-hand radius moved a coiled rope's ledge ~75px in toward the
+      // route the instant it was answered, so he climbed from a column he
+      // had never been on. The rungs sit deep enough that the rock is at its
+      // full width there (`faceLeft` reaches further still), so a ledge out
+      // at the hanging reach is on rock.
+      const radiusLeft = Math.max(radius, leftReach);
       const ax = Math.round(base.mainY + ringOffset(angle, 0, radius, radiusLeft));
       // the free end runs off below the screen: a rope passes right by him at
       // the Now line (which is where he takes hold of it) and keeps going, so

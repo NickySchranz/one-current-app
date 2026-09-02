@@ -25,7 +25,7 @@ import Animated, {
   Easing,
 } from "react-native-reanimated";
 import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from "react-native-svg";
-import { filterBranches, useAppStore } from "@/stores/app-store";
+import { filterBranches, useAppStore, operationDepth } from "@/stores/app-store";
 import { useLayoutStore } from "@/stores/layout-store";
 import { measureNode } from "@/ui/measure";
 import { setWalkthroughPoint, useWalkthroughTarget } from "@/features/tutorial/targets";
@@ -415,6 +415,19 @@ function useEased(target: number, reducedMotion: boolean): number {
   return value;
 }
 
+
+/**
+ * What the mountain last had on screen, kept outside the component because
+ * Act, Note and Merge are "stage" flows (operationDepth): they take a screen
+ * of their own and the map UNMOUNTS behind them. Without this, coming back
+ * re-initialised every climb ref to the answered state, so the ascent was
+ * never "earned" — you returned to a mountain that had already moved, which
+ * is the snap you see instead of a climb. Deliberately module-level and not
+ * persisted: a fresh load should open settled, never replay yesterday.
+ */
+let shownClimb: { sig: string; dist: number } | null = null;
+/** The rope he had hold of when the map went away, so he climbs from it. */
+let lastGripRope: string | null = null;
 
 export function LifeTimeline() {
   const branches = useAppStore((s) => s.branches);
@@ -814,7 +827,12 @@ export function LifeTimeline() {
    * only an answer moves it, and then it GLIDES: the cliff edge above comes
    * down into frame and settles under his feet, and the rock, its texture,
    * the ropes and the sky travel with it. */
-  const climbSV = useSharedValue(climbDist);
+  /** A climb that landed while a stage screen held the map: resume from where
+   * the mountain was, so the ascent still plays on the way back. */
+  const resumed = useRef(
+    shownClimb && shownClimb.sig !== climbSig ? shownClimb : null,
+  ).current;
+  const climbSV = useSharedValue(resumed ? resumed.dist : climbDist);
   // One world clock: the wave, the weather, the scenery and the summit's ropes
   // all share a single continuous animation instead of four identical ramps —
   // and sharing it is what lets the climber swing in step with his rope.
@@ -833,15 +851,50 @@ export function LifeTimeline() {
     );
     return () => cancelAnimation(worldClock);
   }, [reducedMotion, worldClock]);
-  const climbSigRef = useRef(climbSig);
-  const climbDistRef = useRef(climbDist);
+  const climbSigRef = useRef(resumed ? resumed.sig : climbSig);
+  const climbDistRef = useRef(resumed ? resumed.dist : climbDist);
   const retireTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * The climb is the answer's reward, and it should not play out behind the
+   * sheet that was used to give it. While a panel is open the climb waits —
+   * the refs are left untouched, so when the panel closes this effect runs
+   * again with the same numbers and the ascent is still "earned". Integrating
+   * and letting go close their panel at once, so for them nothing waits.
+   */
+  /**
+   * The rope a panel is currently about — whichever panel. Every step of a
+   * decision (the peek, the choices, Act, Note, the merge) carries the same
+   * branch, and while any of them is up that rope is the one he belongs on.
+   */
+  const operationBranchId =
+    operation.kind === "quick-touch" ||
+    operation.kind === "quick-act" ||
+    operation.kind === "quick-merge" ||
+    operation.kind === "quick-note" ||
+    operation.kind === "understanding"
+      ? operation.branchId
+      : null;
+  /**
+   * The map is not on screen: Act, Note and the merge take a screen of their
+   * own (operationDepth "stage"/"focused"). That — not "a panel is open" — is
+   * the reason a climb has to wait: nobody can watch an ascent that is
+   * happening behind another screen. A quick tray leaves the mountain in
+   * view, so letting a rope rest climbs at once, as it should.
+   */
+  const mapHidden =
+    operationDepth(operation) === "stage" || operationDepth(operation) === "focused";
+  /** An answer has landed but its climb has not started yet: the effect below
+   * leaves `climbDistRef` alone while it waits, so the two disagreeing IS the
+   * fact that a climb is owed. */
+  const climbOwed = vertical && mapHidden && climbDist !== climbDistRef.current;
   useEffect(() => {
     if (!vertical) return;
+    if (mapHidden) return;
     const fromDist = climbDistRef.current;
     const fromSig = climbSigRef.current;
     climbDistRef.current = climbDist;
     climbSigRef.current = climbSig;
+    shownClimb = { sig: climbSig, dist: climbDist };
     if (climbDist === fromDist) return;
     const rise = climbDist - fromDist;
     // Only a change in the ROPES is a climb. Everything else that moves this
@@ -875,7 +928,7 @@ export function LifeTimeline() {
     // He climbs in place for exactly as long as the mountain moves.
     mascotRef.current?.climbInPlace(dur);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable
-  }, [vertical, climbDist, climbSig, reducedMotion]);
+  }, [vertical, climbDist, climbSig, reducedMotion, mapHidden]);
   useEffect(
     () => () => {
       if (retireTimerRef.current !== null) clearTimeout(retireTimerRef.current);
@@ -1692,6 +1745,9 @@ export function LifeTimeline() {
         g.angle === undefined || Math.cos(g.angle + rotRef.current) > 0.25,
       /** The chalk sweep turns the face to every rope in turn — including the
        * ones round the back, which is the whole point of it. */
+      // An answer is in and its climb is still waiting on the panel: he keeps
+      // the rope's column until the mountain actually moves.
+      holdPlace: climbOwed || !!operationBranchId,
       sweepTurn: (id) => turnToRef.current(id, true, true),
       /** His station at a rope brought to the front, backed off it so the
        * chalk has an arc to fly — never so far back that he crosses the route. */
@@ -1842,6 +1898,25 @@ export function LifeTimeline() {
     mascotRef.current?.shinUp(shinSteps * SHIN_PX);
   }, [shinSteps]);
 
+  /** Remember the rope in his hands, so a stage screen cannot lose it. */
+  useEffect(() => {
+    if (gripId) lastGripRope = gripId;
+  }, [gripId]);
+
+  /**
+   * Back from a stage screen with a climb still to play: put him on the rope
+   * he was holding before the ascent starts, so it is climbed from the column
+   * he was standing on rather than from the route.
+   */
+  const resumedRope = useRef(resumed ? lastGripRope : null).current;
+  useEffect(() => {
+    if (!vertical || !resumedRope) return;
+    const g = layoutRef.current.geometries.find((x) => x.branchId === resumedRope);
+    if (!g) return;
+    mascotRef.current?.focusBranch(resumedRope);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on the way back
+  }, [vertical, resumedRope]);
+
   /** His hands stay on the rope for every frame of a turn (see GripRide). */
   const gripRide = useMemo<GripRide | null>(() => {
     if (!gripId || !gripGeo || gripGeo.angle === undefined || !gripGeo.radius) return null;
@@ -1862,7 +1937,6 @@ export function LifeTimeline() {
    * anywhere on the visible face stays exactly where it is, so the map never
    * shifts under a finger that is already on it.
    */
-  const operationBranchId = operation.kind === "quick-touch" ? operation.branchId : null;
   const operationBranchRef = useRef(operationBranchId);
   operationBranchRef.current = operationBranchId;
   useEffect(() => {
@@ -1878,8 +1952,11 @@ export function LifeTimeline() {
     // without this he walks to where the rope was hiding and stays there.
     const tm = setTimeout(() => mascotRef.current?.focusBranch(operationBranchId), ms + 40);
     return () => clearTimeout(tm);
+    // Re-asserted on every step of the decision, not just when the rope
+    // changes: each panel that opens over the map dropped his focus, and a
+    // climber who has let go is a climber the map is free to send home.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable
-  }, [vertical, operationBranchId]);
+  }, [vertical, operationBranchId, operation.kind]);
 
   /** On the summit the ROPE does the asking, so the prompt is decided here:
    * it also silences Pip's own bubble while it is up — two pills saying

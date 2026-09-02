@@ -396,7 +396,13 @@ export function Mascot({
       {/* Only the sprite swings — speech should not pendulum, so the bubble
           above stays outside this group. Costs nothing when `sway` is null:
           the prop reads a constant 0 and never changes. */}
-      <AnimatedG animatedProps={swayProps}>
+      {/* `nativeID` renders as a plain `id` on web — an attribute, not an
+          accessibility role, so none of the react-native-svg button landmine.
+          It gives the checks one unambiguous handle on the climber HIMSELF:
+          "a group with many direct rects" also matches controls inside a
+          sheet, and the outer group's box is mostly his speech bubble — both
+          made measurements of where he stands read as noise. */}
+      <AnimatedG animatedProps={swayProps} {...({ nativeID: "pip" } as object)}>
       {/* Plain G on purpose: any accessibility role on an SVG group makes
           react-native-svg (web) emit an HTML <button> inside the <svg>,
           which renders nothing — Pip vanishes entirely. */}

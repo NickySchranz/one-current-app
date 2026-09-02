@@ -307,6 +307,10 @@ export function useMascot(
     /** Summit: whether a rope is on the visible side of the mountain. Patrol
      * only ever visits ropes the user can see. */
     ringVisible?: (g: BranchGeometry) => boolean;
+    /** Summit: an answer has landed and its climb has not played yet. He
+     * holds the column he is standing on until it does — the route is where
+     * he returns when the rock arrives, not where he is teleported to. */
+    holdPlace?: boolean;
     /** Summit sweep: bring this rope round to the front now, and say how many
      * ms that will take (0 if it is already facing). */
     sweepTurn?: (branchId: string) => number;
@@ -330,6 +334,8 @@ export function useMascot(
   ringXRef.current = opts?.ringX;
   const ringVisibleRef = useRef(opts?.ringVisible);
   ringVisibleRef.current = opts?.ringVisible;
+  const holdPlaceRef = useRef(opts?.holdPlace ?? false);
+  holdPlaceRef.current = opts?.holdPlace ?? false;
   const sweepTurnRef = useRef(opts?.sweepTurn);
   sweepTurnRef.current = opts?.sweepTurn;
   const sweepStandXRef = useRef(opts?.sweepStandX);
@@ -640,6 +646,12 @@ export function useMascot(
       // On the summit his place is the Now line, always — he has no other
       // resting spot to be away from, so he is always "chilling" there and
       // any drift (a stage resize, a first layout) is corrected at once.
+      // NOT while he is climbing, though: answering a rope rebuilds the
+      // geometry, and if his focus has been dropped by then this arm would
+      // teleport him from the rope's column onto the route and climb from
+      // there. He climbs where he was standing; the route is where he
+      // RETURNS, once the rock has arrived (see the end of climbInPlace).
+      if (verticalRef.current && (climbingRef.current || holdPlaceRef.current)) return;
       if (!chillingRef.current && !verticalRef.current) return;
       const tx = nowXRef.current - PX * 12 - 10;
       const ty = nowYRef.current - PX * 10;
@@ -1111,6 +1123,8 @@ export function useMascot(
   const rise = useSharedValue(0);
   /** The shin's own gait handle. NOT rafRef: that one owns travel. */
   const gaitRafRef = useRef<number | null>(null);
+  /** True while the mountain is sliding under him (see climbInPlace). */
+  const climbingRef = useRef(false);
   const stopGait = () => {
     if (gaitRafRef.current !== null) {
       cancelAnimationFrame(gaitRafRef.current);
@@ -1206,8 +1220,10 @@ export function useMascot(
     clearTimer();
     fadeBubble(0, 120);
     setFrame('CLIMB_A');
+    climbingRef.current = true;
     if (stillRef.current) {
       timerRef.current = setTimeout(() => {
+        climbingRef.current = false;
         setFrame('IDLE_A');
         scheduleJump(2200);
       }, Math.min(600, ms));
@@ -1223,6 +1239,7 @@ export function useMascot(
         rafRef.current = requestAnimationFrame(beat);
       } else {
         setFrame('LAND_A');
+        climbingRef.current = false;
         timerRef.current = setTimeout(() => {
           // Back to the route once the rock has arrived: he answered from the
           // rope's column, and the summit — when it comes — is on the route.

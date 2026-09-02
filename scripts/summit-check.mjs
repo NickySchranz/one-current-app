@@ -1167,6 +1167,93 @@ const readBranches = (pg) =>
   await p5.close();
 }
 
+// ── 11. an answer given on a screen of its own climbs on the way back ──
+{
+  const p6 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  p6.on("pageerror", (e) => errors.push(e.message));
+  await p6.addInitScript(() => {
+    localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+    localStorage.setItem("one-current-tutorial-v1", "done");
+    localStorage.setItem("one-current-pro", "1");
+    localStorage.setItem("one-current-theme", "summit");
+  });
+  await p6.goto("http://localhost:4179/", { waitUntil: "networkidle" });
+  await p6.waitForTimeout(1500);
+  await p6.getByRole("button", { name: "More" }).first().click();
+  await p6.waitForTimeout(500);
+  await p6.getByRole("button", { name: "Load example threads" }).click();
+  await p6.waitForTimeout(900);
+  await p6.reload({ waitUntil: "networkidle" });
+  await p6.waitForTimeout(2600);
+
+  const rope11 = await ropeIn(p6);
+  if (rope11) {
+    await p6.mouse.click(rope11.x, rope11.y);
+    await p6.waitForTimeout(2200);
+    const held = await pipBox(p6);
+    // Act is a "stage" flow: it takes a screen of its own and the map is not
+    // on it. The climb must play on the way BACK, from the rope's own column
+    // — not be revealed already done with him standing on the route.
+    if (held) await p6.mouse.click(held.x, held.y);
+    await p6.waitForTimeout(1100);
+    await p6.getByText("What does this rope need from you now?", { exact: false }).first().click();
+    await p6.waitForTimeout(600);
+    await p6.getByRole("button", { name: /^Act\b/ }).last().click();
+    await p6.waitForTimeout(700);
+    await p6.getByLabel("The smallest honest step").fill("one line");
+    await p6.waitForTimeout(200);
+    await p6.getByRole("button", { name: "Next" }).first().click();
+    await p6.waitForTimeout(500);
+    // record the mountain and the climber from the moment the answer lands
+    await p6.evaluate(() => {
+      window.__back = [];
+      const t0 = performance.now();
+      const read = () => {
+        const cap = [...document.querySelectorAll('path[fill="#ffffff"]')].find(
+          (el) => el.getAttribute("opacity") === "0.65",
+        );
+        const g = document.getElementById("pip");
+        window.__back.push({
+          cap: cap ? Math.round(cap.getBoundingClientRect().top) : null,
+          pip: g ? Math.round(g.getBoundingClientRect().left + g.getBoundingClientRect().width / 2) : null,
+        });
+        if (performance.now() - t0 < 4000) requestAnimationFrame(read);
+      };
+      requestAnimationFrame(read);
+    });
+    await p6.getByRole("button", { name: "Place it on today" }).click();
+    await p6.waitForTimeout(4300);
+    const back = await p6.evaluate(() => window.__back);
+    const caps = back.map((r) => r.cap).filter((v) => v !== null);
+    const travel = caps.length > 1 ? Math.max(...caps) - Math.min(...caps) : 0;
+    check(
+      travel > 200,
+      `an answer given on its own screen climbs on the way back (${Math.round(travel)}px, ${caps.length} frames)`,
+    );
+    // and he is on the rope's column for it, not on the route
+    const cols11 = await ropeColumns(p6);
+    const pip11 = await pipBox(p6);
+    const onColumn =
+      !!pip11 && (cols11.some((x) => Math.abs(x - pip11.cx) < 40) || await p6
+        .evaluate(() => {
+          // his rope has coiled by now: its ledge marks the column he climbed
+          const ledges = [...document.querySelectorAll('circle[fill="transparent"]')]
+            .filter((c) => Math.abs(Number(c.getAttribute("r")) - 22) < 3)
+            .map((c) => {
+              const m = c.getScreenCTM();
+              return m.a * Number(c.getAttribute("cx")) + m.c * Number(c.getAttribute("cy")) + m.e;
+            });
+          const g = document.getElementById("pip");
+          if (!g) return false;
+          const r = g.getBoundingClientRect();
+          return ledges.some((x) => Math.abs(x - (r.left + r.width / 2)) < 40);
+        }));
+    check(onColumn, `and he climbs it from the rope's own column (him ${pip11?.x})`);
+  }
+  await p6.screenshot({ path: "/tmp/summit-11-stageclimb.png" });
+  await p6.close();
+}
+
 await browser.close();
 server.close();
 
