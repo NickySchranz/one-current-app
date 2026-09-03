@@ -1014,15 +1014,17 @@ export type CelebrationSpec = {
   motion: "rise" | "fall" | "drift";
   count: number;
   twinkle?: boolean;
-  /** Resolve the particle palette from theme tokens. */
   palette: (c: { shimmer: string; accent: string; danger: string }) => string[];
 };
 
+/** Riverbed — the default look — is deliberately not in the table below, so
+ * this is what it celebrates with. (An audit told me every theme was keyed
+ * and this was dead; it is not, and deleting it took the default theme's
+ * celebration with it.) */
 const DEFAULT_CELEBRATION: CelebrationSpec = {
   shape: "dot",
-  motion: "drift",
+  motion: "rise",
   count: 16,
-  twinkle: true,
   palette: (c) => [c.shimmer, c.accent],
 };
 

@@ -325,15 +325,23 @@ const OWNER_KEY = "one-current-owner";
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 // Super bonk: dealing with threads charges the meter; at 100 Pip can sweep
-// every open timeline in one glorious run. Values are easy to tune.
-const CHARGE_ACT = 20;
-const CHARGE_REST = 15;
-const CHARGE_INTEGRATE = 25;
-const CHARGE_BURN = 25;
-const CHARGE_HANDOFF = 20;
-const CHARGE_BONK = 3;
+// every open timeline in one glorious run.
+//
+// Retuned upward. At the old rates a day of answering three threads earned
+// ~35, so the most elaborate sequence in the app arrived about every third
+// day — rarely enough that it needed a debug button to be testable at all,
+// and rare enough that most people would never see the four phrases and the
+// ring-order sweep written for it. A day where you answer four or five
+// threads now reaches it, which also ties it to the thing worth rewarding:
+// finishing the day, not grinding the pill.
+const CHARGE_ACT = 30;
+const CHARGE_REST = 25;
+const CHARGE_INTEGRATE = 35;
+const CHARGE_BURN = 35;
+const CHARGE_HANDOFF = 30;
+const CHARGE_BONK = 5;
 /** A collected token is a real bite of the meter. */
-const CHARGE_COIN = 10;
+const CHARGE_COIN = 15;
 /** Chance a genuine loudness drop shakes a token loose. */
 const COIN_CHANCE_DIAL = 0.5;
 /** Chance a charging bonk also drops a token. */

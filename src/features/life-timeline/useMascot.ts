@@ -255,16 +255,13 @@ function easeInOut(t: number): number {
   return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 }
 
-// One greeting per app session, across remounts (the timeline unmounts and
-// remounts around the creation screen) and across hook instances.
-let greetedThisSession = false;
-
-// ─── Mascot type selection ────────────────────────────────────────────────────
-
-function pickMascotType(): MascotType {
-  const types: MascotType[] = ['chronicler', 'wisp', 'wanderer'];
-  return types[Math.floor(Math.random() * types.length)];
-}
+/**
+ * The day he last said hello — module-level so it survives the remounts around
+ * the creation screen and every hook instance. It was a boolean ("greeted this
+ * session"), which meant three of his four greetings were unreachable to
+ * anyone who leaves the app open: a greeting belongs to the day.
+ */
+let greetedOn = "";
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
@@ -1305,9 +1302,10 @@ export function useMascot(
       setArrivedIdState(best.id); // he starts the session standing at it
     }
 
-    // Greet on first appearance
-    if (!greetedThisSession) {
-      greetedThisSession = true;
+    // Greet once a day, on first appearance
+    const today = new Date().toISOString().slice(0, 10);
+    if (greetedOn !== today) {
+      greetedOn = today;
       timerRef.current = setTimeout(() => {
         setBubbleText(randomFrom(lang.greet));
         fadeBubble(1, 250);

@@ -1671,6 +1671,23 @@ export function LifeTimeline() {
       if (crossing) setCelebration((k) => k + 1);
     }
   }, [calmProgress, reducedMotion]);
+  /**
+   * The day's spectacle also fires when the MOUNTAIN says the day is done.
+   * `calmProgress` counts a pending step as calm while `dayComplete` counts
+   * only an answer, so the two can disagree about whether the day finished —
+   * and the thirteen per-theme bursts are authored for exactly this moment.
+   */
+  const celebratedRef = useRef(false);
+  useEffect(() => {
+    if (!dayComplete) {
+      celebratedRef.current = false;
+      return;
+    }
+    if (celebratedRef.current || reducedMotion) return;
+    celebratedRef.current = true;
+    setCelebration((k) => k + 1);
+    setBloom((b) => ({ key: b.key + 1, count: 12 }));
+  }, [dayComplete, reducedMotion]);
   useEffect(() => {
     if (celebration === 0) return;
     const id = setTimeout(() => setCelebration(0), 3200);
@@ -2051,7 +2068,25 @@ export function LifeTimeline() {
   // fetches — a super bonk can rain several at once while he sweeps.
   const [coinFlash, setCoinFlash] = useState(0);
   const [flights, setFlights] = useState<{ key: number; branchId: string; x0: number; y0: number }[]>([]);
-  const [chargePops, setChargePops] = useState<number[]>([]);
+  /**
+   * The little numbers that fly into the meter. They used to fire only when a
+   * token landed, hardcoded to "+10" — so integrating (25), burning (25),
+   * acting (20), handing off (20), resting (15) and chalking (3) all fed the
+   * meter in complete silence, and the meter itself carries no number. Now
+   * anything that adds charge says how much.
+   */
+  const [chargePops, setChargePops] = useState<{ key: number; amount: number }[]>([]);
+  const chargeWasRef = useRef<number | null>(null);
+  useEffect(() => {
+    const was = chargeWasRef.current;
+    chargeWasRef.current = bonkCharge;
+    // Only a gain, and never the reset a full sweep leaves behind.
+    if (was === null || bonkCharge <= was) return;
+    const key = Date.now();
+    const amount = bonkCharge - was;
+    setChargePops((p) => [...p, { key, amount }]);
+    setTimeout(() => setChargePops((p) => p.filter((x) => x.key !== key)), 950);
+  }, [bonkCharge]);
   const scheduledCoinsRef = useRef(new Set<number>());
   const coinTimersRef = useRef(new Map<number, ReturnType<typeof setTimeout>>());
   const lastCheerRef = useRef(0);
@@ -2061,11 +2096,12 @@ export function LifeTimeline() {
     setFlights((f) => f.filter((x) => x.key !== key));
     useAppStore.getState().collectCoin(key);
     setCoinFlash((k) => k + 1);
-    setChargePops((p) => [...p, key]);
-    setTimeout(() => setChargePops((p) => p.filter((k) => k !== key)), 950);
-    // Pip cheers a landing when he is free — a sweep never gets bubble spam.
+
+    // Pip cheers a landing when he is free. The gap was 3s, which swallowed
+    // almost every cheer of a six-token sweep; short enough now that a rain
+    // of tokens is a run of cheers, long enough that it is not spam.
     const now = Date.now();
-    if (now - lastCheerRef.current > 3000 && mascotRef.current?.visible) {
+    if (now - lastCheerRef.current > 1100 && mascotRef.current?.visible) {
       lastCheerRef.current = now;
       mascotRef.current.showReaction(randomFrom(mascotRef.current.phrases.coinGrab));
     }
@@ -2135,7 +2171,10 @@ export function LifeTimeline() {
   useEffect(() => {
     if (!reclaimKey || !showMascot) return;
     if (answered && answered.branchId === reclaim?.branchId) return;
-    const pool = (reclaim?.feelings?.length ?? 0) >= 3 ? mascot.phrases.mergeDeep : mascot.phrases.merge;
+    // One thing carried back is enough for the warmer pool. Three required the
+    // optional sections of the understand panel to have been filled in first,
+    // which made four authored lines all but unreachable.
+    const pool = (reclaim?.feelings?.length ?? 0) >= 1 ? mascot.phrases.mergeDeep : mascot.phrases.merge;
     setTimeout(() => mascotReactionRef.current?.(randomFrom(pool)), 600);
   }, [reclaimKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -3106,12 +3145,12 @@ export function LifeTimeline() {
                 theme={theme}
               />
             ))}
-            {chargePops.map((k, i) => (
+            {chargePops.map((p, i) => (
               <ChargePop
-                key={k}
+                key={p.key}
                 right={(showFab ? 92 : 8) + 12 + (i % 3) * 16}
                 bottom={44}
-                label="+10"
+                label={`+${p.amount}`}
                 color={mix(tk.shimmer, "#000000", 22)}
               />
             ))}
