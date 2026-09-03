@@ -224,7 +224,7 @@ export function tp(x: number, y: number, timeLen: number): { x: number; y: numbe
  * coordinate pair (x, y) becomes (y, timeLen − x). Same token grammar as
  * path-sample's parser.
  */
-export function transposePath(d: string, timeLen: number): string {
+export function transposePath(d: string, timeLen: number, dx = 0): string {
   const tokens = d.match(/[MLC]|-?\d*\.?\d+(?:e-?\d+)?/gi) ?? [];
   let out = "";
   let i = 0;
@@ -235,7 +235,7 @@ export function transposePath(d: string, timeLen: number): string {
     for (let p = 0; p < pairs; p++) {
       const x = parseFloat(tokens[i++]);
       const y = parseFloat(tokens[i++]);
-      out += ` ${y} ${round1(timeLen - x)}`;
+      out += ` ${round1(y + dx)} ${round1(timeLen - x)}`;
     }
   }
   return out;
@@ -354,8 +354,21 @@ export function buildSummitLayout(
     pinnedBranchIds: opts.pinnedBranchIds,
   });
 
-  const routeX = base.mainY;
-  const bandX = base.bandY;
+  /**
+   * Where the route stands. A FIXED share of the stage — never `base.mainY`,
+   * which is the lane band's centre and therefore grows with the number of
+   * lanes. On this map that dragged the whole mountain rightwards as threads
+   * accumulated, and once `faceHalfFor` hit its floor the rock's right edge
+   * went with it: at eighteen threads on a phone the route had moved 200 →
+   * 328 and the rock had widened 427 → 491, hiding the flank under the date
+   * rail again. The mountain is the mountain; more threads mean more of the
+   * ring to turn through, not a bigger rock.
+   */
+  const routeX = Math.round(0.5 * opts.stageWidth);
+  /** Everything transposed carries the same shift, so the lanes, the merge
+   * points and the route keep their places relative to each other. */
+  const dx = routeX - base.mainY;
+  const bandX = base.bandY + dx;
   /** How far the rock reaches to the right (its edge is in frame) and to the
    * left (off the screen — only one side shows an edge). */
   const faceHalf = faceHalfFor(opts.stageWidth, routeX);
@@ -545,18 +558,18 @@ export function buildSummitLayout(
     const p = tp(g.labelX, g.labelY, timeLen);
     return {
       ...g,
-      path: transposePath(g.path, timeLen),
-      forkX: fork.x,
+      path: transposePath(g.path, timeLen, dx),
+      forkX: fork.x + dx,
       forkY: fork.y,
-      endX: end.x,
+      endX: end.x + dx,
       endY: end.y,
-      laneX: g.laneY,
-      labelX: p.x,
+      laneX: g.laneY + dx,
+      labelX: p.x + dx,
       labelY: p.y,
       labelAnchor: "middle",
       momentPoints: g.momentPoints.map((m) => {
         const q = tp(m.x, m.y, timeLen);
-        return { ...m, x: q.x, y: q.y };
+        return { ...m, x: q.x + dx, y: q.y };
       }),
     };
   });

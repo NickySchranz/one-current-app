@@ -441,8 +441,8 @@ await page.close();
   const nowWithSheet = await nowLabelY();
   const capWithFocus = await capBox();
   // A tray inset would compress the time axis and shift Now by tens of px.
-  // The 1px allowance is the same pinned-chip coupling the check below names:
-  // arming a rope changes topInset, which nudges nowScreenY sub-pixel.
+  // The 1px allowance is a sub-pixel round: arming a rope raises its pinned
+  // chip, which nudges topInset and so nowScreenY by a fraction.
   check(
     nowBeforeSheet !== null &&
       nowWithSheet !== null &&
@@ -452,21 +452,18 @@ await page.close();
   /**
    * The route must never LEAN toward a focused rope: routeX places the rock,
    * its texture, the summit dashes and every rope column, so a lean drags the
-   * whole mountain sideways — TENS of px, which is what this catches.
+   * whole mountain sideways.
    *
-   * The 8px allowance is a smaller, understood coupling, not a lean: focusing
-   * a rope pins it, which nudges the lane packing, which moves routeX by a
-   * few px. The rock's left flank is measured off routeX (`faceLeftFor`) so
-   * it scales with that move, while the "Now" label sits a constant offset
-   * from it — so the gap between them changes by a few px without the
-   * mountain having moved against the ropes at all. Worth fixing at the
-   * source (lane packing should not depend on what is focused); until then
-   * this is the honest bound, and it was measured at 4-6px.
+   * Strict again (it was relaxed to 5 then 8px while two couplings were still
+   * in play): routeX is a fixed share of the stage now, so lane packing
+   * cannot move it, and the rock is sampled on a grid of DEPTH below the peak,
+   * so a pixel of movement in the time frame cannot re-shape it either. The
+   * measurement has been exactly 0 since.
    */
   check(
     capBeforeFocus !== null &&
       capWithFocus !== null &&
-      Math.abs(capWithFocus.offset - capBeforeFocus.offset) <= 8,
+      Math.abs(capWithFocus.offset - capBeforeFocus.offset) <= 2,
     `the mountain never leans toward a focused rope (offset ${capBeforeFocus?.offset} → ${capWithFocus?.offset})`,
   );
   const closedBefore = await closedCurveY();
@@ -570,8 +567,22 @@ await page.close();
     topAfter !== null && nowY !== null && Math.abs(topAfter - nowY) < 90,
     `the last climb brings the summit down to him (cap top ${Math.round(topAfter ?? 0)}, Now ${nowY})`,
   );
+  // Once the whole day is answered the ropes come BACK — the face stops being
+  // a workbench and becomes the record of the climb, every rope ending at the
+  // cliff edge it was climbed to. (It used to assert the opposite: nothing
+  // hanging at all. During the day a topped-out rope does still leave, which
+  // §6's earlier "the answered rope stays on the face while he climbs it"
+  // and the retirement checks cover.)
   const hanging = await ropeCount();
-  check(hanging === 0, "no rope still hangs after top-out (all coiled on their ledges)");
+  const ledgeTops = (await coilYs()).length;
+  check(
+    hanging > 0,
+    `the day's ropes are shown again once it is done (${hanging} on the face)`,
+  );
+  check(
+    ledgeTops > 0,
+    `and each ends on the cliff edge it was climbed to (${ledgeTops} ledges)`,
+  );
   // a rung is a screen-jump, so the conquered ledges trail off below the
   // frame — what must hold is that they exist, on the rock, in climb order
   // The mountain shows ONE edge, on the right, with sky (and the ranges
@@ -1278,6 +1289,83 @@ const readBranches = (pg) =>
   }
   await p6.screenshot({ path: "/tmp/summit-11-stageclimb.png" });
   await p6.close();
+}
+
+// ── 12. the mountain is the mountain: its width owes nothing to the count ──
+{
+  /** The rock's drawn bounds and the route, for one thread count. */
+  const rockFor = async (n) => {
+    const pg = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    pg.on("pageerror", (e) => errors.push(e.message));
+    await pg.addInitScript(() => {
+      localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+      localStorage.setItem("one-current-tutorial-v1", "done");
+      localStorage.setItem("one-current-pro", "1");
+      localStorage.setItem("one-current-theme", "summit");
+    });
+    await pg.goto("http://localhost:4179/", { waitUntil: "networkidle" });
+    await pg.waitForTimeout(1300);
+    await pg.getByRole("button", { name: "More" }).first().click();
+    await pg.waitForTimeout(400);
+    await pg.getByRole("button", { name: "Load example threads" }).click();
+    await pg.waitForTimeout(800);
+    await pg.evaluate((N) => {
+      const key = "one-current/table/branches";
+      const rows = JSON.parse(localStorage.getItem(key) ?? "[]");
+      const open = rows.filter(
+        (b) => b.status !== "merged" && b.status !== "converted-to-project" && !b.mergeDate,
+      );
+      const seed = open[0];
+      const kept = rows.filter((b) => !open.includes(b));
+      const made = Array.from({ length: N }, (_, i) => ({
+        ...JSON.parse(JSON.stringify(seed)),
+        id: `wide-${i}`,
+        title: `Thread ${i}`,
+        lastDecisionOn: undefined,
+        leftOn: undefined,
+      }));
+      localStorage.setItem(key, JSON.stringify([...kept, ...made]));
+    }, n);
+    await pg.reload({ waitUntil: "networkidle" });
+    await pg.waitForTimeout(2500);
+    const out = await pg.evaluate(() => {
+      let body = null;
+      for (const el of document.querySelectorAll("path")) {
+        const f = el.getAttribute("fill");
+        if (!f || f === "none" || f === "transparent") continue;
+        const r = el.getBoundingClientRect();
+        if (r.height < 300) continue;
+        if (!body || r.width > body.w)
+          body = { l: Math.round(r.left), r: Math.round(r.right), w: Math.round(r.width) };
+      }
+      const nowEl = [...document.querySelectorAll("text")].find((t) => t.textContent === "Now");
+      const dots = document.querySelectorAll('[aria-label="Turn the mountain to this rope"]');
+      const pill = dots.length ? dots[0].parentElement?.getBoundingClientRect() : null;
+      return {
+        body,
+        route: nowEl ? Math.round(nowEl.getBoundingClientRect().right + 22) : null,
+        pillW: pill ? Math.round(pill.width) : null,
+      };
+    });
+    await pg.close();
+    return out;
+  };
+  const few = await rockFor(3);
+  const many = await rockFor(20);
+  check(
+    !!few.body &&
+      !!many.body &&
+      Math.abs(few.body.w - many.body.w) <= 6 &&
+      Math.abs(few.body.r - many.body.r) <= 6 &&
+      few.route === many.route,
+    `the mountain's width owes nothing to the thread count (3: ${few.body?.w}px @route ${few.route}, 20: ${many.body?.w}px @route ${many.route})`,
+  );
+  // …and the marks that stand for them stay inside the frame, clear of the
+  // Chalk! pill, however many there are.
+  check(
+    few.pillW !== null && many.pillW !== null && many.pillW <= 200,
+    `the ring's marks stay bounded (3: ${few.pillW}px, 20: ${many.pillW}px)`,
+  );
 }
 
 await browser.close();

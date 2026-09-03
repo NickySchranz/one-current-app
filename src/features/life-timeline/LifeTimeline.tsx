@@ -791,6 +791,17 @@ export function LifeTimeline() {
    * rope arriving/leaving); a change in `climbDist` with the same signature is
    * the stage measuring itself, and must never animate. */
   const climbSig = vertical ? `${handledCount}/${activeLines.length}` : "";
+  /**
+   * Every open thread has its answer for today AND the last climb has landed
+   * (retirement is what marks that). Waiting for the landing matters: keyed
+   * on the answer alone, the day's other ropes sprang back onto the face the
+   * instant you answered the last one, mid-climb.
+   */
+  const dayComplete =
+    vertical &&
+    handledCount > 0 &&
+    handledCount === activeLines.length &&
+    activeLines.every((b) => retiredIds.includes(b.id));
 
   /**
    * Where a rope can actually be SEEN and handled. On the summit a rope's
@@ -2685,6 +2696,7 @@ export function LifeTimeline() {
                     // Summit shares the world's clock with the climber so he
                     // swings in step with the rope he is holding.
                     clock={vertical ? worldClock : null}
+                    dayComplete={dayComplete}
                     // round the back of the mountain: not there to be tapped
                     interactive={
                       !vertical ||
@@ -3320,7 +3332,50 @@ export function LifeTimeline() {
             facing you filled. It is always there, so it is always visible that
             there are more threads than the face is showing — and tapping a
             mark turns that one to the front. */}
-        {vertical && ropeAngles.length > 0 && (
+        {vertical && ropeAngles.length > 0 && (() => {
+          /**
+           * The marks have to fit. One per rope at a fixed size grew the pill
+           * without bound — 26 threads spanned a phone edge to edge, over the
+           * map and into the Chalk! pill. So the gap closes up first, then the
+           * marks themselves shrink, and only if even that will not do does it
+           * show a WINDOW of the ring centred on the rope facing you, with the
+           * count of what is off each end. Turning scrolls that window, so the
+           * ring still reads as a ring.
+           */
+          // Room for the marks, keeping clear of the rail on one side and the
+          // Chalk! pill on the other (it is centred, so both sides count).
+          const room = Math.max(110, size.width - 2 * (SUMMIT_RAIL_W + 98));
+          const n = ropeAngles.length;
+          const fits = (d: number, g: number, count: number) =>
+            count * d + Math.max(0, count - 1) * g + 22 <= room;
+          let dot = 6;
+          let gap = 7;
+          for (const g of [7, 4, 2]) {
+            gap = g;
+            if (fits(dot, gap, n)) break;
+          }
+          if (!fits(dot, gap, n)) dot = 4;
+          let shown = ropeAngles;
+          let hiddenBefore = 0;
+          let hiddenAfter = 0;
+          if (!fits(dot, gap, n)) {
+            // the two "·N" counts take room of their own
+            const room4 = Math.max(1, Math.floor((room - 52 + gap) / (dot + gap)));
+            // centre the window on whichever rope is facing the viewer
+            let front = 0;
+            for (let i = 1; i < n; i++) {
+              if (
+                Math.cos(ropeAngles[i].angle + rotRef.current) >
+                Math.cos(ropeAngles[front].angle + rotRef.current)
+              )
+                front = i;
+            }
+            const start = Math.max(0, Math.min(n - room4, front - Math.floor(room4 / 2)));
+            shown = ropeAngles.slice(start, start + room4);
+            hiddenBefore = start;
+            hiddenAfter = n - start - room4;
+          }
+          return (
           <View
             style={{
               position: "absolute",
@@ -3335,14 +3390,19 @@ export function LifeTimeline() {
               style={{
                 flexDirection: "row",
                 alignItems: "center",
-                gap: 7,
+                gap,
                 paddingVertical: 7,
                 paddingHorizontal: 11,
                 borderRadius: 999,
                 backgroundColor: alpha(tk.bg, 0.82),
               }}
             >
-              {ropeAngles.map((r) => {
+              {hiddenBefore > 0 && (
+                <T style={{ fontSize: 9, color: tk.inkSoft, marginRight: 1 }}>
+                  {`${hiddenBefore}·`}
+                </T>
+              )}
+              {shown.map((r) => {
                 const facing = Math.cos(r.angle + rotRef.current);
                 const front = facing > 0.55;
                 const b = byId.get(r.id);
@@ -3362,8 +3422,8 @@ export function LifeTimeline() {
                   >
                     <View
                       style={{
-                        width: front ? 9 : 6,
-                        height: front ? 9 : 6,
+                        width: front ? dot + 3 : dot,
+                        height: front ? dot + 3 : dot,
                         borderRadius: 999,
                         backgroundColor: colour,
                         opacity: front ? 1 : facing > -0.2 ? 0.5 : 0.28,
@@ -3372,9 +3432,15 @@ export function LifeTimeline() {
                   </Pressable>
                 );
               })}
+              {hiddenAfter > 0 && (
+                <T style={{ fontSize: 9, color: tk.inkSoft, marginLeft: 1 }}>
+                  {`·${hiddenAfter}`}
+                </T>
+              )}
             </View>
           </View>
-        )}
+          );
+        })()}
 
         {/* One round +, unmistakable and wordless, floating on the water. */}
         {showFab && (

@@ -74,22 +74,27 @@ function flank(
   rot: number,
 ): { x: number; y: number }[] {
   const pts: { x: number; y: number }[] = [];
-  // Sampled on an ABSOLUTE altitude grid (not `span / steps`): when the drawn
-  // band changes, the vertices must land on the same altitudes as before or
-  // the whole silhouette re-shapes itself in one frame.
+  // Sampled on a grid of DEPTH BELOW THE PEAK, not of absolute y: when the
+  // drawn band changes the vertices still land on the same depths, and — the
+  // reason it is depth and not y — the whole silhouette then translates with
+  // the peak instead of re-shaping when it moves. On an absolute grid a
+  // single pixel of movement in `peakY` (chrome nudging the time frame) could
+  // add or drop a grid row at the top and swing the outline ~14px sideways,
+  // which read as the mountain leaning when a rope took focus.
   const GRID = 46;
-  const first = Math.ceil(fromY / GRID) * GRID;
-  for (let y = first; y < toY; y += GRID) {
-    const hw = mountainHalfWidth(y - peakY, faceHalf, scale);
-    // seeded by ALTITUDE, so the same rock keeps the same edge for ever…
-    const k = Math.round(y / GRID);
+  const first = Math.ceil((fromY - peakY) / GRID) * GRID;
+  for (let d = first; peakY + d < toY; d += GRID) {
+    const y = peakY + d;
+    const hw = mountainHalfWidth(d, faceHalf, scale);
+    // seeded by DEPTH, so the same rock keeps the same edge for ever…
+    const k = Math.round(d / GRID);
     const jy = (seeded(k, salt + 1) - 0.5) * 16;
     // …and shaped by the rock's surface at the angle now facing this edge, so
     // turning the mountain turns its outline with it
     const edgeAngle = rot + (side === 1 ? Math.PI / 2 : -Math.PI / 2);
     const jx =
       (seeded(k, salt) - 0.5) * Math.min(10, hw * 0.08) +
-      surfaceBulge(edgeAngle + k * 0.21, y) * Math.min(26, hw * 0.09);
+      surfaceBulge(edgeAngle + k * 0.21, d) * Math.min(26, hw * 0.09);
     pts.push({
       x: Math.round(routeX + side * (hw + jx)),
       y: Math.round(y + jy),

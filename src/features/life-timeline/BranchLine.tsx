@@ -113,6 +113,9 @@ type Props = {
   /** Summit: the world's seconds, shared with the climber so he swings in
    * step with the rope he is holding. Null elsewhere (local clock). */
   clock?: SharedValue<number> | null;
+  /** Summit: every open thread has its answer for today. The day's ropes are
+   * all shown again then, each ending at the ledge it was climbed to. */
+  dayComplete?: boolean;
 };
 
 /** Cheap stable hash → [0, 2π): every rope sways on its own phase. */
@@ -175,6 +178,7 @@ export const BranchLine = memo(function BranchLine({
   climbOffset = null,
   interactive = true,
   clock = null,
+  dayComplete = false,
 }: Props) {
   const vertical = orientation === "vertical";
   const t = useT();
@@ -397,7 +401,11 @@ export const BranchLine = memo(function BranchLine({
   // standing on that ledge — `g.ropeGone`, held back by LifeTimeline until
   // his climb lands. Until then the answered rope still hangs, now visibly
   // fixed to its cliff edge, and he climbs it.
-  if (vertical && (resting || acted) && g.ropeGone && !g.endsOnMain) {
+  // Once the whole day is answered the ropes come BACK: the face stops being
+  // a workbench and becomes the record of the climb, every rope running up to
+  // the cliff edge it was climbed to. During the day a topped-out rope still
+  // leaves, so what is left on the face is only what still wants answering.
+  if (vertical && (resting || acted) && g.ropeGone && !g.endsOnMain && !dayComplete) {
     return (
       <AnimatedG
         animatedProps={groupProps}
@@ -569,6 +577,11 @@ export const BranchLine = memo(function BranchLine({
             {/* the anchor: a little cliff ledge on the face, the rope tied
                 over its lip */}
             <CliffLedge x={g.endX} y={g.endY} tk={tk} />
+            {g.ropeGone ? (
+              // A rope shown again once the day is done: its coil rests on
+              // the ledge it was climbed to, at the top of the rope itself.
+              <CoiledRope x={g.endX} y={g.endY - 9} color={color} bg={tk.bg} onPress={select} />
+            ) : (
             <Circle
               cx={g.endX}
               cy={g.endY - 4}
@@ -577,6 +590,7 @@ export const BranchLine = memo(function BranchLine({
               opacity={endpointStaticOpacity}
               onPress={select}
             />
+            )}
           </AnimatedG>
         ) : Creature && !acted && !resting ? (
           <Creature
