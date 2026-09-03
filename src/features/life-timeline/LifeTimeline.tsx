@@ -2300,7 +2300,7 @@ export function LifeTimeline() {
                       routeX={sm.routeX}
                       faceHalf={sm.faceHalf}
                       width={svgWidth}
-                      timeLen={sm.timeLen}
+                      timeLen={sm.rockLen}
                       bandAnchor={-climbDist * 0.2}
                       rate={0.2}
                       salt={41}
@@ -2314,7 +2314,7 @@ export function LifeTimeline() {
                       routeX={sm.routeX}
                       faceHalf={sm.faceHalf}
                       width={svgWidth}
-                      timeLen={sm.timeLen}
+                      timeLen={sm.rockLen}
                       bandAnchor={-climbDist * 0.36}
                       rate={0.36}
                       salt={53}
@@ -2398,7 +2398,7 @@ export function LifeTimeline() {
                     peakY={peakY}
                     faceHalf={sm.faceHalf}
                     faceLeft={sm.faceLeft}
-                    timeLen={sm.timeLen}
+                    timeLen={sm.rockLen}
                     // the rock has to reach below the viewport at every offset
                     depth={900 + climbDist}
                     // this layer is translated DOWN by the climb, so the
@@ -2417,7 +2417,7 @@ export function LifeTimeline() {
                     bandTop={-climbDist - 2.6 * sm.timeLen}
                     bandBottom={-climbDist + 2.6 * sm.timeLen}
                     bottomY={sm.timeLen + 900 + climbDist}
-                    timeLen={sm.timeLen}
+                    timeLen={sm.rockLen}
                     rot={rockRot}
                     tk={tk}
                   />
@@ -2439,7 +2439,7 @@ export function LifeTimeline() {
                     current={summitCurrent}
                     routeX={sm.routeX}
                     nowScreenY={sm.nowScreenY}
-                    timeLen={sm.timeLen}
+                    timeLen={sm.rockLen}
                     tk={tk}
                     calmProgress={calmProgress}
                     depth={900}
@@ -2691,7 +2691,7 @@ export function LifeTimeline() {
                       g.angle === undefined ||
                       Math.cos(g.angle + rotRef.current) > -0.05
                     }
-                    timeLen={sm?.timeLen ?? 0}
+                    timeLen={sm?.rockLen ?? 0}
                     wave={vertical ? null : calmCurrent.wave}
                     // No wave on the summit: the route is straight and still,
                     // so the dots that sit on it must be too (they compute

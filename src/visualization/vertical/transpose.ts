@@ -142,12 +142,18 @@ export function ringOffset(angle: number, rot: number, radius: number): number {
  */
 export function faceHalfFor(stageWidth: number, routeX: number): number {
   const room = stageWidth - SUMMIT_RAIL_W - routeX;
-  // The sky it leaves used to be 0.13 of the stage. That put the rock's right
-  // flank — and so the ring's right LIMB, where ropes bunch as they come
-  // round — well inside the frame, where the bunching is the thing you look
-  // at. A narrower margin still leaves the distant ranges room and pushes
-  // that limb toward the edge, which is where the left one already is.
-  return Math.max(60, Math.round(room - Math.max(26, 0.09 * stageWidth)));
+  // A share of the stage alone is too little sky on a phone: 0.09 of 390px is
+  // 35, the drawn flank overshoots its nominal width by ~15 (jitter and the
+  // surface bulge), and the 28px date rail sits over the rest — which left
+  // about 20px between the mountain's edge and the rail. Not enough to read
+  // as a mountainSIDE, and nowhere for the distant ranges to show at all.
+  // Hence a floor in real pixels, with the same share once there is room.
+  // When the route sits far right (the lane band's centre drifts that way on
+  // a busy day) the room runs out. Then the RIGHT flank gives way rather
+  // than the sky: a narrower shoulder still reads as a mountainside, an edge
+  // hidden under the date rail does not. The left flank is unaffected — it
+  // measures itself against `faceLeftFor`, and still fills the screen.
+  return Math.max(40, Math.round(room - Math.max(64, 0.13 * stageWidth)));
 }
 
 /**
@@ -172,6 +178,9 @@ export type SummitLayout = TimelineLayout & {
   orientation: "vertical";
   /** Screen x of the vertical route (the transposed main line). */
   routeX: number;
+  /** The yardstick the rock's own shape is measured in — the window, not the
+   * canvas, so chrome cannot reshape the mountain (see `rockLen`). */
+  rockLen: number;
   /** Screen x anchor of the lane band (routeX equals it unless the route leans). */
   bandX: number;
   /** Screen y of Now — near the top; the ledge sits here. */
@@ -380,6 +389,14 @@ export function buildSummitLayout(
     .map((g) => g.branchId);
   const seedOrder = daySeedOrder(openOrder, now);
   const ladder = summitLadder(opts.ladderHeight ?? timeLen, openOrder.length);
+  /**
+   * The yardstick the ROCK is measured in. Deliberately the window's height
+   * (bucketed, like the ladder's) and not the canvas's `timeLen`: chrome —
+   * a thread's pinned chip appearing, a tray's inset easing — nudges timeLen,
+   * and anything shaped by it then shifts with them. That is how focusing a
+   * rope came to slide the mountain sideways against the timeline.
+   */
+  const rockLen = Math.max(240, opts.ladderHeight ?? timeLen);
   // Fallback rung order for climbed ropes the caller has no record of
   // (mid-day reload): the day-seeded order, offset past the known ranks.
   const known = Object.values(opts.climbRanks ?? {});
@@ -419,7 +436,7 @@ export function buildSummitLayout(
    * both sides — the widest that fits, evenly. The rock's left flank hides
    * the offset: there is no visible edge over there to measure it against.
    */
-  const rightBound = routeX + Math.max(46, mountainHalfWidth(nowScreenY - peakYRest, faceHalf, timeLen) - 34);
+  const rightBound = routeX + Math.max(46, mountainHalfWidth(nowScreenY - peakYRest, faceHalf, rockLen) - 34);
   const leftBound = 26;
   const ringCx = Math.round((leftBound + rightBound) / 2);
   const faceRadius = Math.max(46, Math.round((rightBound - leftBound) / 2));
@@ -439,7 +456,7 @@ export function buildSummitLayout(
    * route's, where the rock is widest. Deep rungs never bind, but a shallow
    * one would hang its ledge in the sky. */
   const reachAt = (depth: number) =>
-    Math.min(faceRadius, Math.max(46, mountainHalfWidth(depth, faceHalf, timeLen) - 30));
+    Math.min(faceRadius, Math.max(46, mountainHalfWidth(depth, faceHalf, rockLen) - 30));
   const angleOf = (id: string) => {
     const i = columnOrder.indexOf(id);
     if (i < 0) return 0;
@@ -549,6 +566,7 @@ export function buildSummitLayout(
     geometries,
     orientation: "vertical",
     routeX,
+    rockLen,
     bandX,
     nowScreenY,
     timeLen,

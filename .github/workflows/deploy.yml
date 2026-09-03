@@ -25,6 +25,14 @@ jobs:
         run: npx expo export --platform web
         env:
           EXPO_PUBLIC_API_URL: https://api.onecurrentapp.com
+          # Ships the Testing card in More → Settings (Pro unlock, time skew,
+          # fill the charge, always drop tokens). Asked for deliberately so
+          # the deployed build can be exercised the way the local one is.
+          # Note what it means: anyone who opens the site can unlock Pro for
+          # THEIR OWN browser and move the app's clock. Nothing leaves the
+          # device and no other account is affected, but the Pro gates stop
+          # being gates. Drop this line to close them again.
+          EXPO_PUBLIC_SHOW_TESTING: "1"
       - run: node scripts/inject-head.mjs dist/index.html
       - name: Deploy
         run: npx wrangler pages deploy dist --project-name=one-current-app
