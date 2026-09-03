@@ -202,6 +202,41 @@ check(
   await page.getByText("Still water. Every open thread is a koi nosing at Now — feed it a decision and the pond settles.").isVisible(),
 );
 
+// The testing unlock has to win over the SERVER's word, or it cannot unlock
+// anything for a signed-in free account — which is every real account until
+// payments exist. It used to sit behind that answer, and a Pro theme was
+// stepped back on every /me.
+{
+  const p2 = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+  p2.on("pageerror", (e) => errors.push(e.message));
+  await p2.route("**/v1/me", (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "u1", email: "t@onecurrentapp.com", name: "T",
+        roles: [], plan: "free", createdAt: new Date().toISOString(),
+      }),
+    }),
+  );
+  await p2.addInitScript(() => {
+    localStorage.setItem("one-current-auth", JSON.stringify({ email: "t@onecurrentapp.com" }));
+    localStorage.setItem("one-current-tutorial-v1", "done");
+    localStorage.setItem("one-current-tokens", JSON.stringify({ access: "a", refresh: "r" }));
+    localStorage.setItem("one-current-pro", "1");
+    localStorage.setItem("one-current-theme", "summit");
+  });
+  await p2.goto("http://localhost:4181/", { waitUntil: "networkidle" });
+  await p2.waitForTimeout(2600);
+  const onSummit = await p2.evaluate(() =>
+    [...document.querySelectorAll('path[fill="#ffffff"]')].some(
+      (el) => el.getAttribute("opacity") === "0.65",
+    ),
+  );
+  check("the testing unlock holds a Pro theme for a signed-in FREE account", onSummit);
+  await p2.close();
+}
+
 const relevant = errors.filter((e) => !e.includes("useNativeDriver"));
 check("no console errors", relevant.length === 0, relevant.join(" | "));
 

@@ -460,7 +460,9 @@ async function planPatch(
   serverPro: boolean | null,
   s: { isPro: boolean; theme: ThemeId },
 ): Promise<{ apiOnline: true; serverPro: boolean | null; theme: ThemeId }> {
-  const pro = serverPro ?? (SHOW_TESTING && s.isPro);
+  // The same question the gates ask (see selectEffectivePro) — asked any
+  // other way here and a /me would step a testing unlock straight back.
+  const pro = selectEffectivePro({ isPro: s.isPro, serverPro });
   let theme = s.theme;
   if (pro) {
     const saved = await AsyncStorage.getItem(THEME_KEY).catch(() => null);
@@ -1288,10 +1290,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 }));
 
-/** Pro as enforced: the server's word when it has spoken. The local flag only
- * counts in testing builds — production Pro comes from a real subscription. */
+/**
+ * Pro as enforced. Production Pro comes from a real subscription, so it is
+ * the server's word — but in a TESTING build the local toggle overrides it,
+ * because that is the whole point of the toggle: it used to sit behind the
+ * server's answer (`serverPro ?? …`), which meant a signed-in free account
+ * could not unlock anything with it. Pro themes were even stepped back on
+ * every /me, undoing the unlock. The toggle can only ever grant, never
+ * revoke, and only where SHOW_TESTING is compiled in.
+ */
 export const selectEffectivePro = (s: { isPro: boolean; serverPro: boolean | null }): boolean =>
-  s.serverPro ?? (SHOW_TESTING && s.isPro);
+  (SHOW_TESTING && s.isPro) || (s.serverPro ?? false);
 
 export function matchesStatusFilter(
   b: PsychologicalBranch,
