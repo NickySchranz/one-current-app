@@ -1294,15 +1294,16 @@ const readBranches = (pg) =>
 // ── 12. the mountain is the mountain: its width owes nothing to the count ──
 {
   /** The rock's drawn bounds and the route, for one thread count. */
-  const rockFor = async (n) => {
+  const rockFor = async (n, charged = false) => {
     const pg = await browser.newPage({ viewport: { width: 390, height: 844 } });
     pg.on("pageerror", (e) => errors.push(e.message));
-    await pg.addInitScript(() => {
+    await pg.addInitScript((full) => {
       localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
       localStorage.setItem("one-current-tutorial-v1", "done");
       localStorage.setItem("one-current-pro", "1");
       localStorage.setItem("one-current-theme", "summit");
-    });
+      if (full) localStorage.setItem("one-current-bonk-charge", "100");
+    }, charged);
     await pg.goto("http://localhost:4179/", { waitUntil: "networkidle" });
     await pg.waitForTimeout(1300);
     await pg.getByRole("button", { name: "More" }).first().click();
@@ -1340,11 +1341,20 @@ const readBranches = (pg) =>
       }
       const nowEl = [...document.querySelectorAll("text")].find((t) => t.textContent === "Now");
       const dots = document.querySelectorAll('[aria-label="Turn the mountain to this rope"]');
-      const pill = dots.length ? dots[0].parentElement?.getBoundingClientRect() : null;
+      const marks = dots.length ? dots[0].parentElement?.getBoundingClientRect() : null;
+      // the Chalk! / FULL SEND! bar, whichever is showing
+      const bar = [...document.querySelectorAll('[role="button"]')].find((b) => {
+        const t = (b.textContent ?? "").trim();
+        return t === "Chalk!" || t === "FULL SEND!";
+      });
+      const barBox = bar ? bar.getBoundingClientRect() : null;
       return {
         body,
         route: nowEl ? Math.round(nowEl.getBoundingClientRect().right + 22) : null,
-        pillW: pill ? Math.round(pill.width) : null,
+        marksW: marks ? Math.round(marks.width) : null,
+        marksR: marks ? Math.round(marks.right) : null,
+        barL: barBox ? Math.round(barBox.left) : null,
+        barText: bar ? (bar.textContent ?? "").trim() : null,
       };
     });
     await pg.close();
@@ -1360,12 +1370,135 @@ const readBranches = (pg) =>
       few.route === many.route,
     `the mountain's width owes nothing to the thread count (3: ${few.body?.w}px @route ${few.route}, 20: ${many.body?.w}px @route ${many.route})`,
   );
-  // …and the marks that stand for them stay inside the frame, clear of the
-  // Chalk! pill, however many there are.
+  // …and the marks that stand for them stay clear of the pill, however many
+  // there are and whichever word the pill is showing. "FULL SEND!" is 60px
+  // wider than "Chalk!", and the marks used to be centred on the whole stage
+  // and simply covered by it (the pill's zIndex is higher).
+  const clear = (m) =>
+    m.marksR !== null && m.barL !== null && m.marksR <= m.barL;
   check(
-    few.pillW !== null && many.pillW !== null && many.pillW <= 200,
-    `the ring's marks stay bounded (3: ${few.pillW}px, 20: ${many.pillW}px)`,
+    clear(few) && clear(many),
+    `the ring's marks stay clear of the ${many.barText} pill ` +
+      `(3: marks to ${few.marksR} vs pill at ${few.barL}; 20: ${many.marksR} vs ${many.barL})`,
   );
+  // and the same with the meter full, which is when the pill is at its widest
+  const full = await rockFor(20, true);
+  check(
+    clear(full) && full.barText === "FULL SEND!",
+    `and clear of it with the meter full (marks to ${full.marksR} vs pill at ${full.barL}, "${full.barText}")`,
+  );
+}
+
+// ── 13. the names are readable: full, on the stage, never on top of each other ──
+{
+  const p7 = await browser.newPage({ viewport: { width: 1280, height: 844 } });
+  p7.on("pageerror", (e) => errors.push(e.message));
+  await p7.addInitScript(() => {
+    localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@example.com" }));
+    localStorage.setItem("one-current-tutorial-v1", "done");
+    localStorage.setItem("one-current-pro", "1");
+    localStorage.setItem("one-current-theme", "summit");
+  });
+  await p7.goto("http://localhost:4179/", { waitUntil: "networkidle" });
+  await p7.waitForTimeout(1300);
+  await p7.getByRole("button", { name: "More" }).first().click();
+  await p7.waitForTimeout(400);
+  await p7.getByRole("button", { name: "Load example threads" }).click();
+  await p7.waitForTimeout(800);
+  // a dozen threads with real-length titles: the state that used to print an
+  // illegible block of nine truncated names four rows deep
+  await p7.evaluate(() => {
+    const key = "one-current/table/branches";
+    const rows = JSON.parse(localStorage.getItem(key) ?? "[]");
+    const open = rows.filter(
+      (b) => b.status !== "merged" && b.status !== "converted-to-project" && !b.mergeDate,
+    );
+    const seed = open[0];
+    const kept = rows.filter((b) => !open.includes(b));
+    const titles = [
+      "My sleep is a mess again", "The rent increase letter",
+      "Jonas and the unanswered message", "Everyone seems further along than me",
+      "Waiting for the scan results", "The argument with my father",
+      "How things ended with Ana", "Should we have moved here at all",
+      "The exam I failed at twenty", "The little bakery idea",
+      "Money and the house", "That conversation I keep avoiding",
+    ];
+    const made = titles.map((t, i) => ({
+      ...JSON.parse(JSON.stringify(seed)),
+      id: `nm-${i}`, title: t, lastDecisionOn: undefined, leftOn: undefined,
+    }));
+    localStorage.setItem(key, JSON.stringify([...kept, ...made]));
+  });
+  await p7.reload({ waitUntil: "networkidle" });
+  await p7.waitForTimeout(2600);
+
+  /** Every rope name currently drawn: the filled twin only, with its box. */
+  const namesOf = (pg) =>
+    pg.evaluate(() => {
+      const out = [];
+      for (const el of document.querySelectorAll("text")) {
+        const t = (el.textContent ?? "").trim();
+        if (!t || el.style.fontSize !== "12.5px" || el.getAttribute("stroke")) continue;
+        let o = 1;
+        for (let n = el; n && n.tagName !== "svg"; n = n.parentElement)
+          o *= Number(getComputedStyle(n).opacity);
+        const r = el.getBoundingClientRect();
+        out.push({
+          t, o: Math.round(o * 100) / 100,
+          l: Math.round(r.left), r: Math.round(r.right), y: Math.round(r.top),
+        });
+      }
+      return out.sort((a, b) => a.l - b.l);
+    });
+
+  let worstOverlap = 0, offStage = 0, shortened = 0, faint = 0, most = 0;
+  for (let turn = 0; turn < 8; turn++) {
+    const names = await namesOf(p7);
+    most = Math.max(most, names.length);
+    for (const n of names) {
+      if (n.t.endsWith("\u2026")) shortened++;
+      if (n.l < 0 || n.r > 1280) offStage++;
+      if (n.o < 0.5) faint++;
+    }
+    for (let i = 1; i < names.length; i++)
+      if (Math.abs(names[i].y - names[i - 1].y) < 4)
+        worstOverlap = Math.max(worstOverlap, names[i - 1].r - names[i].l);
+    await p7.mouse.move(1160, 620);
+    await p7.mouse.down();
+    for (let k = 1; k <= 8; k++) await p7.mouse.move(1160 - k * 58, 620);
+    await p7.mouse.up();
+    await p7.waitForTimeout(500);
+  }
+  check(most > 0, `the map names the ropes facing you (up to ${most} at once)`);
+  check(worstOverlap <= 0, `no two names share a row and touch (worst ${worstOverlap}px)`);
+  check(offStage === 0, `no name is drawn off the stage (${offStage} instances over 8 turns)`);
+  check(
+    shortened === 0,
+    `and none has to be shortened where there is room (${shortened} instances)`,
+  );
+  check(faint === 0, `no name is drawn too faint to read (${faint} below 0.5 opacity)`);
+  // A rope round the back is not named at all — it used to be, at 0.27 opacity.
+  const back = await p7.evaluate(() => {
+    let ropes = 0;
+    for (const el of document.querySelectorAll('path[stroke="transparent"]')) {
+      const len = el.getTotalLength();
+      if (len < 80) continue;
+      const a = el.getPointAtLength(0), b = el.getPointAtLength(len);
+      if (Math.abs(len - Math.abs(b.y - a.y)) > 3) continue;
+      ropes++;
+    }
+    return ropes;
+  });
+  const shown = (await namesOf(p7)).length;
+  check(shown < back, `the ropes round the back go unnamed (${shown} names for ${back} ropes)`);
+  // the day's record has left the canvas
+  const record = await p7.evaluate(() =>
+    [...document.querySelectorAll("text")].some((el) => el.style.fontSize === "11px" &&
+      /coiled|resting/.test(el.textContent ?? "")),
+  );
+  check(!record, "the day's record is no longer printed over the mountain");
+  await p7.screenshot({ path: "/tmp/summit-13-names.png" });
+  await p7.close();
 }
 
 await browser.close();

@@ -265,7 +265,7 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
             </View>
             <T
               style={{
-                fontSize: 9.6,
+                fontSize: 11,
                 color: tk.inkFaint,
                 transform: [{ rotate: open ? "180deg" : "0deg" }],
               }}

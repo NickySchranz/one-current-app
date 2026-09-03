@@ -290,10 +290,6 @@ function RingG({
   return <AnimatedOptionG animatedProps={props}>{children}</AnimatedOptionG>;
 }
 
-/** Where the day's record starts below Now: clear of the five rows of rope
- * names that live between Now and it (see LADDER_* in transpose.ts). */
-const SUMMIT_RECORD_TOP = 140;
-
 const GRAB_PROMPTS = [
   "Grab on!",
   "Take hold!",
@@ -319,9 +315,14 @@ function GrabPrompt({
   onPress,
   tk,
   reducedMotion,
+  stageW,
 }: {
   x: number;
   y: number;
+  /** The stage's width: the pill is centred on `x` and has to stay inside it.
+   * Rope names are held in; this was not, and "This one's swaying — grab on."
+   * is 232px wide — at the leftmost column 91px of it hung off the screen. */
+  stageW: number;
   text: string;
   onPress: () => void;
   tk: ReturnType<typeof useTheme>;
@@ -343,8 +344,12 @@ function GrabPrompt({
   }));
   const w = Math.max(64, Math.ceil(estTextWidth(text, tk.fontBody, 11.5)) + 24);
   const h = 26;
+  // Held inside the stage, while the tail keeps pointing at the rope: the
+  // group carries the clamped centre and the tail is drawn back at the offset.
+  const cx = Math.max(w / 2 + 8, Math.min(stageW - w / 2 - 8, x));
+  const tail = x - cx;
   return (
-    <G x={x} y={y}>
+    <G x={cx} y={y}>
       <AnimatedOptionG animatedProps={animatedProps}>
         <G onPress={onPress}>
           <Rect x={-w / 2 - 6} y={-h / 2 - 6} width={w + 12} height={h + 18} fill="transparent" />
@@ -358,8 +363,12 @@ function GrabPrompt({
             stroke={alpha(tk.accentInk, 0.4)}
             strokeWidth={1}
           />
-          {/* the tail points down at the rope's grab zone */}
-          <Path d={`M -5 ${h / 2 - 1} L 0 ${h / 2 + 7} L 5 ${h / 2 - 1} Z`} fill={tk.accent} />
+          {/* the tail points down at the rope's grab zone, wherever the pill
+              itself had to sit to stay on screen */}
+          <Path
+            d={`M ${tail - 5} ${h / 2 - 1} L ${tail} ${h / 2 + 7} L ${tail + 5} ${h / 2 - 1} Z`}
+            fill={tk.accent}
+          />
           <SvgText
             x={0}
             y={4}
@@ -1917,6 +1926,47 @@ export function LifeTimeline() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on the way back
   }, [vertical, resumedRope]);
 
+  /**
+   * Which ropes are named, on which row, and how much width each name may
+   * take. The stage has to decide this, not the geometry: it is the only place
+   * that knows the TURN, and a rope's name is only worth drawing when the rope
+   * is actually facing the viewer.
+   *
+   * Three measured facts drive it. A name is 12.5px and a real thread title
+   * runs 150–250px, while the two ropes at the front of the ring are only
+   * ~62px apart at twelve threads — so several full names on one row is not
+   * geometrically possible, and the old fixed 22-character cut made every name
+   * unreadable to buy room it did not need. Instead: only facing ropes are
+   * named, they are ordered by where they are ON SCREEN, neighbours alternate
+   * between two rows, and each name is given the space actually free beside it
+   * — a full title whenever it fits, a shortened one only when crowded.
+   */
+  const nameRows = useMemo(() => {
+    const out = new Map<string, { row: number; maxW: number }>();
+    if (!vertical || !sm) return out;
+    const facing = layout.geometries
+      .filter((g) => g.reachesNow && g.inWindow && g.angle !== undefined && !g.coiled)
+      .map((g) => ({ id: g.branchId, x: ringXRef.current(g), g }))
+      // comfortably facing, the same threshold the ring's marks call "front"
+      .filter((r) => Math.cos((r.g.angle as number) + rotRef.current) > 0.55)
+      .sort((a, b) => a.x - b.x);
+    for (let i = 0; i < facing.length; i++) {
+      const row = i % 2;
+      // Room to the nearest name that shares this row — i ± 2 — and to the
+      // frame. Half of it each side, since names are centred on their column.
+      const prev = facing[i - 2];
+      const next = facing[i + 2];
+      const left = prev ? (facing[i].x - prev.x) / 2 : facing[i].x - 8;
+      const right = next ? (next.x - facing[i].x) / 2 : sm.routeX + sm.faceHalf - facing[i].x;
+      out.set(facing[i].id, {
+        row,
+        maxW: Math.max(56, Math.min(left, right) * 2 - 10),
+      });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rotTick is the turn
+  }, [vertical, sm, layout.geometries, rotTick]);
+
   /** His hands stay on the rope for every frame of a turn (see GripRide). */
   const gripRide = useMemo<GripRide | null>(() => {
     if (!gripId || !gripGeo || gripGeo.angle === undefined || !gripGeo.radius) return null;
@@ -2554,54 +2604,6 @@ export function LifeTimeline() {
 
               {/* summit's day record: the decisions carved into the face just
                   below the ledge. Tapping them opens the actions panel. */}
-              {/* the day's record, carved into the face BELOW the rope-name
-                  ladder (five rows of names sit between Now and here) — and
-                  only where the rock is wide enough to hold it; on a phone the
-                  Actions tab carries the same list */}
-              {vertical &&
-                sm &&
-                futureItems.length > 0 &&
-                sm.faceHalf >= 200 &&
-                sm.timeLen - sm.nowScreenY > 260 && (
-                <G onPress={guarded(() => setOperation({ kind: "viewing-actions" }))}>
-                  <Rect
-                    x={sm.routeX + 4}
-                    y={sm.nowScreenY + SUMMIT_RECORD_TOP - 18}
-                    width={Math.min(190, sm.faceHalf - 14)}
-                    height={futureItems.length * 16 + 18}
-                    fill="transparent"
-                  />
-                  {futureItems.map((it, i) => {
-                    const y = sm.nowScreenY + SUMMIT_RECORD_TOP + i * 16;
-                    return (
-                      <DayRow
-                        key={it.id}
-                        arriving={!!it.ownerId && it.ownerId === arrivedFor && !it.done}
-                        reducedMotion={reducedMotion}
-                      >
-                        <Circle
-                          cx={sm.routeX + 30}
-                          cy={y - 4}
-                          r={3}
-                          fill={it.color}
-                          opacity={it.done ? 0.35 : 0.55}
-                        />
-                        <SvgText
-                          x={sm.routeX + 38}
-                          y={y}
-                          fontSize={11}
-                          fontFamily={tk.fontBody}
-                          letterSpacing={0.11}
-                          fill={it.done ? tk.inkFaint : tk.inkSoft}
-                        >
-                          {it.label}
-                        </SvgText>
-                      </DayRow>
-                    );
-                  })}
-                </G>
-              )}
-
               {/* every decision gathers around the main line past Now — a calm
                   record of the day. Tapping it opens the actions panel. */}
               {!vertical && futureItems.length > 0 && layout.fullWidth - layout.nowX > 40 && (
@@ -2697,6 +2699,11 @@ export function LifeTimeline() {
                     // swings in step with the rope he is holding.
                     clock={vertical ? worldClock : null}
                     dayComplete={dayComplete}
+                    // Only a rope facing the viewer earns a name, and the
+                    // stage says how much room it has (see `nameRows`).
+                    named={!vertical || nameRows.has(g.branchId) || !!g.coiled}
+                    nameRow={nameRows.get(g.branchId)?.row ?? 0}
+                    nameMaxW={nameRows.get(g.branchId)?.maxW ?? 999}
                     // round the back of the mountain: not there to be tapped
                     interactive={
                       !vertical ||
@@ -2972,6 +2979,7 @@ export function LifeTimeline() {
                 <GrabPrompt
                   key={grabPrompt.id}
                   x={grabPrompt.g.endX}
+                  stageW={size.width}
                   // above the grab band — not the dangling end, which hangs
                   // far below the screen once he has climbed, and high
                   // enough to clear the climber hanging there
@@ -3316,8 +3324,11 @@ export function LifeTimeline() {
                     fontSize={8.5}
                     fontFamily={tk.fontBody}
                     fontWeight={tick.major ? "700" : "400"}
-                    fill={tick.major ? tk.accent : tk.inkFaint}
-                    opacity={tick.major ? 0.9 : 0.65}
+                    // inkFaint at 0.65 measured 1.61:1 on this palette — below
+                    // any legibility floor. The minor ticks are the ones you
+                    // actually read a date off.
+                    fill={tick.major ? tk.accent : tk.inkSoft}
+                    opacity={tick.major ? 0.95 : 0.85}
                   >
                     {label}
                   </SvgText>
@@ -3342,9 +3353,15 @@ export function LifeTimeline() {
            * count of what is off each end. Turning scrolls that window, so the
            * ring still reads as a ring.
            */
-          // Room for the marks, keeping clear of the rail on one side and the
-          // Chalk! pill on the other (it is centred, so both sides count).
-          const room = Math.max(110, size.width - 2 * (SUMMIT_RAIL_W + 98));
+          /**
+           * Room for the marks. They no longer centre on the stage: the pill
+           * sits bottom-right and `"FULL SEND!"` is 163px wide against the
+           * 102px the old symmetric gutter was measured from, so the marks
+           * were being covered by it (pill zIndex 10 over their 6) exactly
+           * when the meter filled. They centre in what is left beside it.
+           */
+          const pillRoom = (showFab ? 92 : 8) + (bonkCharge >= 100 ? 172 : 108);
+          const room = Math.max(110, size.width - pillRoom - 16);
           const n = ropeAngles.length;
           const fits = (d: number, g: number, count: number) =>
             count * d + Math.max(0, count - 1) * g + 22 <= room;
@@ -3380,7 +3397,7 @@ export function LifeTimeline() {
             style={{
               position: "absolute",
               left: 0,
-              right: 0,
+              right: pillRoom,
               bottom: 10,
               alignItems: "center",
               zIndex: 6,
@@ -3456,7 +3473,9 @@ export function LifeTimeline() {
           }) => [
             {
               position: "absolute",
-              right: 16,
+              // Clear of the summit's date rail AND of the 52px fast-scrub
+              // strip beside it, which the FAB used to sit inside.
+              right: vertical ? SUMMIT_RAIL_W + 28 : 16,
               bottom: 20,
               zIndex: 20,
               width: 46,
@@ -3693,7 +3712,18 @@ export function LifeTimeline() {
 
         {awayFromNow && (
           // summit's date rail owns the right edge: the button steps left of it
-          <View style={{ position: "absolute", top: 12, right: vertical ? SUMMIT_RAIL_W + 14 : 14.4, zIndex: 5 }}>
+          <View
+            style={{
+              position: "absolute",
+              // On a narrow stage this and the wholeness chip share the top
+              // band with 2px between them (1px in Spanish) — so here it
+              // steps below the chip, whose measured height topInset already
+              // carries.
+              top: compact ? Math.max(12, topInset) : 12,
+              right: vertical ? SUMMIT_RAIL_W + 14 : 14.4,
+              zIndex: 5,
+            }}
+          >
             <Button
               label={`⇥ ${t("Return to Now")}`}
               onPress={returnToNow}

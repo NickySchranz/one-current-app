@@ -174,7 +174,10 @@ export function FaceTexture({
         const reach = Math.sin(theta) >= 0 ? hwR : hwL;
         return routeX + Math.sin(theta) * reach;
       };
-      for (let k = 0; k < 2; k++) {
+      // One seam and one grit mark per altitude, not two and three: the rock
+      // has to read as rock UNDER the names, and at the old density the
+      // speckle competed with 12.5px text for the same few hundred pixels.
+      for (let k = 0; k < 1; k++) {
         const j = i + k;
         const cx = span(seeded(j, 71));
         const yy = Math.round(y + (seeded(j, 72) - 0.5) * 26);
@@ -187,7 +190,7 @@ export function FaceTexture({
         const tilt = Math.round((seeded(j, 74) - 0.5) * 14);
         seams += `M ${Math.round(cx)} ${yy} l ${len} ${tilt} `;
       }
-      for (let k = 0; k < 3; k++) {
+      for (let k = 0; k < 1; k++) {
         const j = i + 3 + k;
         const cx = Math.round(span(seeded(j, 75)));
         const yy = Math.round(y + seeded(j, 76) * step);

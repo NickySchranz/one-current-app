@@ -296,13 +296,22 @@ export type SummitLayoutOptions = {
   retiredIds?: readonly string[];
 };
 
-/** Vertical rhythm of the label ladder below the Now ledge. Five rows, so a
- * busy day's names step past each other instead of printing on top of each
- * other — and the row is chosen by COLUMN order (see `labelRow`), not by the
- * order threads happen to be stored in, so neighbours never share a row. */
+/**
+ * Where a waiting rope's name sits below the Now ledge, and how far apart two
+ * rows are when the stage decides to use a second one.
+ *
+ * There used to be five rows here, picked by `ordinal % 5`, and a docstring
+ * claiming that kept neighbours apart "by COLUMN order (see `labelRow`)".
+ * There is no `labelRow` anywhere, and ordinal is ring ORDER, not ring
+ * POSITION: `sin` is symmetric about 90°, so two ordinals whose angles sum to
+ * 180° share a column exactly. At twelve threads that printed ordinals 0 and 5
+ * pixel-on-pixel, and 6 and 11 likewise. Rows cannot be decided here at all —
+ * only the stage knows where a rope currently IS, because it holds the turn.
+ * So every waiting name gets the base row and `LifeTimeline` moves the ones it
+ * has to (see `nameRows`).
+ */
 const LADDER_BASE = 12;
-const LADDER_STEP = 17;
-const LADDER_ROWS = 5;
+export const LADDER_STEP = 17;
 
 /**
  * Pure composition of the summit scene: the untouched horizontal builder runs
@@ -514,7 +523,6 @@ export function buildSummitLayout(
       // the Now line (which is where he takes hold of it) and keeps going, so
       // no rope end is ever seen swinging about mid-climb
       const dangleY = Math.round(nowScreenY + 620 + seeded(seedBase, 62) * 120);
-      const ordinal = columnOrder.indexOf(g.branchId);
       const runSpan = Math.max(1, base.nowX - g.forkX);
       return {
         ...g,
@@ -528,15 +536,14 @@ export function buildSummitLayout(
         angle,
         radius,
         ringCx,
-        // Names are centred on their column and ~140px wide, so a column near
-        // an edge would push its name off the screen: hold it inside the stage.
-        labelX: Math.max(74, Math.min(opts.stageWidth - 74, ax)),
-        // A conquered rope names itself under its own cliff edge; a waiting
-        // one names itself in the band just below the climber, laddered so
-        // neighbouring columns never collide.
-        labelY: coiled
-          ? Math.round(ay) + 24
-          : openLabelY + LADDER_BASE + (Math.max(0, ordinal) % LADDER_ROWS) * LADDER_STEP,
+        // The rope's own column, unclamped. Holding the name inside the stage
+        // has to happen where the TURN is known — clamping here and adding the
+        // turn afterwards is what sent 520 label instances off the stage over
+        // a full revolution.
+        labelX: ax,
+        // A conquered rope names itself under its own cliff edge; a waiting one
+        // in the band just below the climber. One row: the stage staggers.
+        labelY: coiled ? Math.round(ay) + 24 : openLabelY + LADDER_BASE,
         labelAnchor: "middle",
         coiled,
         ropeGone: coiled && retired.has(g.branchId),

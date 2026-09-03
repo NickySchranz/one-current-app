@@ -31,6 +31,8 @@ import { Ghost } from "./Ghost";
 import { Pomeranian } from "./Pomeranian";
 import { calmWaveOffset, useBranchStrokes, type WaveHandles } from "./useSquiggle";
 import { CliffLedge, CoiledRope } from "./SummitScene";
+import { estTextWidth } from "./Mascot";
+import { LADDER_STEP } from "@/visualization/vertical/transpose";
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -116,7 +118,30 @@ type Props = {
   /** Summit: every open thread has its answer for today. The day's ropes are
    * all shown again then, each ending at the ledge it was climbed to. */
   dayComplete?: boolean;
+  /** Summit: is this rope facing the viewer enough to be worth naming? */
+  named?: boolean;
+  /** Summit: which of the two name rows this one takes (see `nameRows`). */
+  nameRow?: number;
+  /** Summit: px the name may take before it has to be shortened. */
+  nameMaxW?: number;
 };
+
+/**
+ * The longest prefix of `text` that fits `maxW`, with an ellipsis if it had to
+ * cut. Measured with the same estimator the speech bubble wraps by, so a name
+ * and a bubble agree about how wide a string is.
+ */
+function fitText(text: string, maxW: number, fontBody: string): string {
+  if (estTextWidth(text, fontBody, 12.5) <= maxW) return text;
+  let lo = 1;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (estTextWidth(text.slice(0, mid) + "…", fontBody, 12.5) <= maxW) lo = mid;
+    else hi = mid - 1;
+  }
+  return text.slice(0, lo).trimEnd() + "…";
+}
 
 /** Cheap stable hash → [0, 2π): every rope sways on its own phase. */
 export function phaseFromId(id: string): number {
@@ -179,6 +204,9 @@ export const BranchLine = memo(function BranchLine({
   interactive = true,
   clock = null,
   dayComplete = false,
+  named = true,
+  nameRow = 0,
+  nameMaxW = 999,
 }: Props) {
   const vertical = orientation === "vertical";
   const t = useT();
@@ -374,16 +402,28 @@ export const BranchLine = memo(function BranchLine({
   if (!g.inWindow) return null;
 
   const color = branchColor(branch, theme, emphasized ? "raised" : g.style.saturation);
-  // Rope labels ladder above narrow columns: they earn less room than lanes.
-  const maxChars = vertical ? 22 : 34;
-  const label =
-    branch.title.length > maxChars ? branch.title.slice(0, maxChars - 2) + "…" : branch.title;
   const Creature = CREATURES[theme];
-  const labelText =
-    label +
-    (branch.recurrenceCount > 0 ? t(" · returned") : "") +
-    (acted ? t(" · decided today") : "");
+  /**
+   * The name. On the summit the stage hands down the room this one actually
+   * has (see `nameRows`), so a title is cut only when a neighbour is close —
+   * a fixed 22-character cut used to make every name on the mountain
+   * unreadable, and the names are the content. Elsewhere the old cap stands.
+   */
+  const label = vertical
+    ? fitText(branch.title, nameMaxW, tk.fontBody ?? "")
+    : branch.title.length > 34
+      ? branch.title.slice(0, 32) + "…"
+      : branch.title;
+  // The map says what a thread IS; the check mark and the coil already say it
+  // has been answered, and the panels carry both suffixes in full. On the
+  // summit they added up to 190px to an already-cut name.
+  const labelText = vertical
+    ? label
+    : label +
+      (branch.recurrenceCount > 0 ? t(" · returned") : "") +
+      (acted ? t(" · decided today") : "");
   const labelX = vertical ? g.labelX : g.reachesNow ? g.endX - 12 : g.labelX;
+  const labelY = vertical && !g.coiled ? g.labelY + nameRow * LADDER_STEP : g.labelY;
   const labelAnchor = vertical
     ? (g.labelAnchor ?? ("middle" as const))
     : g.reachesNow
@@ -659,11 +699,11 @@ export const BranchLine = memo(function BranchLine({
           it has been answered; a left line's label returns tomorrow.
           paint-order: stroke isn't supported here, so a stroked twin sits
           behind the filled text to keep it readable over other lines. */}
-      {g.labelVisible && !resting && !isClosed(branch) && (
+      {g.labelVisible && !resting && !isClosed(branch) && (!vertical || named) && (
         <AnimatedG animatedProps={marksRide}>
           <SvgText
             x={labelX}
-            y={g.labelY}
+            y={labelY}
             textAnchor={labelAnchor}
             fontSize={12.5}
             fontWeight={focused ? "700" : "600"}
@@ -677,12 +717,15 @@ export const BranchLine = memo(function BranchLine({
           </SvgText>
           <SvgText
             x={labelX}
-            y={g.labelY}
+            y={labelY}
             textAnchor={labelAnchor}
             fontSize={12.5}
             fontWeight={focused ? "700" : "600"}
             fontFamily={tk.fontBody}
-            fill={color}
+            // Ink, not the thread's own pale colour: three opacity
+            // multipliers already stack on this text and a coloured name
+            // bottomed out near 1.3:1 against the rock.
+            fill={vertical ? tk.ink : color}
             onPress={select}
           >
             {labelText}
