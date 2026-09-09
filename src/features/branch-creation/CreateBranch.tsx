@@ -2,12 +2,11 @@ import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { useAppStore } from "@/stores/app-store";
 import { useT } from "@/i18n/i18n";
-import type { ForkPeriodChoice, Loudness } from "@/domain/branches/types";
+import { UNKNOWN_KIND, type ForkPeriodChoice, type Loudness } from "@/domain/branches/types";
 import { resolveForkDate } from "@/domain/branches/logic";
 import { ANXIETIES, suggestLockedFeelings } from "@/domain/feelings/logic";
 import { FeelingPicker } from "@/features/branch-touch/FeelingPicker";
 import { StepFrame, StepTransition } from "@/features/branch-quick-actions/QuickFlow";
-import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
 import { appNow } from "@/domain/time/clock";
 import {
   AppTextInput,
@@ -66,10 +65,6 @@ export function CreateBranch() {
   const [anxieties, setAnxieties] = useState<string[]>([]);
   const [loudness, setLoudness] = useState<number>(3);
   const [busy, setBusy] = useState(false);
-  /** The plan refused the thread: show why rather than going quiet. */
-  const [blocked, setBlocked] = useState(false);
-  /** The same question every create entry point asks before opening a form. */
-  const canOpenThread = useThreadGate();
 
   // The optimistic line: born with the form, gone if the form closes unsaved.
   // Committing clears draftBranchId first, so this cleanup then does nothing.
@@ -109,11 +104,13 @@ export function CreateBranch() {
     if (!title.trim() || !p || busy) return;
     setBusy(true);
     try {
-      // The kind is not asked up front; it can be named later, or never.
-      // What the thread draws away is derived from how it makes you feel.
+      // The kind is deliberately not asked here: someone naming what is
+      // pulling at them is in no state to also categorise it. The thread
+      // starts unknown and draws achromatic; Understand → "What kind of
+      // thing is this?" colours it in later, or never.
       const result = await requestBranch({
         title,
-        kindChoiceId: "unnamed",
+        kindChoiceId: UNKNOWN_KIND.id,
         period: p,
         loudness: loudness as Loudness,
         anxieties: anxieties.length > 0 ? anxieties : undefined,
@@ -124,12 +121,9 @@ export function CreateBranch() {
       // line draws itself in, and a small note says it has been added.
       if (result.branch) setOperation({ kind: "idle" });
     } catch {
-      // The store refuses at the free plan's limit by throwing. Unhandled,
-      // that reached nobody: the last step of the form just stopped working,
-      // with the whole thread already written out. Name the one cause the
-      // plan can be responsible for, and leave the form standing otherwise
-      // so the answers are not lost.
-      setBlocked(!canOpenThread);
+      // Nothing refuses a thread any more — open threads are not capped. An
+      // unexpected failure still must not take the answers down with it, so
+      // the form stays exactly as it was and the finish button comes back.
     } finally {
       setBusy(false);
     }
@@ -288,10 +282,6 @@ export function CreateBranch() {
           </StepFrame>
         )}
       </StepTransition>
-      <PaywallPrompt
-        reason={blocked ? "thread-limit" : null}
-        onClose={() => setBlocked(false)}
-      />
     </Panel>
   );
 }

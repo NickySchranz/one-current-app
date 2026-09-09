@@ -28,6 +28,8 @@ const THREAD_LABELS: Record<string, string> = {
   returnedCount: "how many times it came back",
   waiting: "what it is waiting on, and when to review it",
   loudness: "every loudness rating you set, with its date",
+  loudnessWas: "how loud it was at the start of the window, in a word",
+  loudnessNow: "how loud it is now, in a word",
   events: "what happened on it, day by day",
   id: "an internal reference for the thread",
 };

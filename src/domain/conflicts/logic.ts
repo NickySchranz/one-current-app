@@ -10,6 +10,10 @@ export type ConflictRule = {
   matches: (a: PsychologicalBranch, b: PsychologicalBranch) => boolean;
 };
 
+// Every predicate below is false for an unnamed ("unknown") thread — that is
+// deliberate. A thread whose kind was never named cannot be claimed to demand
+// anything, so it takes part in no rule except through `controllability`,
+// which the user sets by hand.
 const isBody = (b: PsychologicalBranch) => b.type === "body" || b.orientation === "body";
 const isWork = (b: PsychologicalBranch) =>
   b.type === "project" || b.orientation === "project" || b.orientation === "future";
@@ -133,6 +137,7 @@ export const CONFLICT_TYPE_LABELS: Record<MergeConflictType, string> = {
 /** Fallback demand text for a branch entering the present, by what it tends to ask for. */
 export function defaultDemand(branch: PsychologicalBranch): string {
   const byType: Record<BranchType, string> = {
+    unknown: "Keep asking for part of your attention.",
     event: "Resolve what happened before living continues.",
     waiting: "Keep checking until the outcome arrives.",
     projection: "Stay alert so the feared outcome cannot surprise you.",

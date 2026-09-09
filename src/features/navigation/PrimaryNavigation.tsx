@@ -8,7 +8,6 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppStore, type View as AppView } from "@/stores/app-store";
-import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
 import { useWalkthroughTarget } from "@/features/tutorial/targets";
 import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
@@ -45,8 +44,6 @@ export function PrimaryNavigation({ variant }: { variant: "header" | "bottom" })
   const t = useT();
   const tk = useTheme();
   const insets = useSafeAreaInsets();
-  const canOpenThread = useThreadGate();
-  const [paywalled, setPaywalled] = useState(false);
   // The walkthrough's pointer needs to know where these controls sit.
   const plusTarget = useWalkthroughTarget("new-thread");
   const historyTarget = useWalkthroughTarget("history-tab");
@@ -164,7 +161,7 @@ export function PrimaryNavigation({ variant }: { variant: "header" | "bottom" })
         accessibilityRole="button"
         accessibilityLabel={t("New thread")}
         onPress={() =>
-          canOpenThread ? setOperation({ kind: "creating-branch" }) : setPaywalled(true)
+          setOperation({ kind: "creating-branch" })
         }
         style={({ pressed }) => ({
           width: 50,
@@ -182,10 +179,6 @@ export function PrimaryNavigation({ variant }: { variant: "header" | "bottom" })
       </Pressable>
       {historyTab}
       {moreTab}
-      <PaywallPrompt
-        reason={paywalled ? "thread-limit" : null}
-        onClose={() => setPaywalled(false)}
-      />
     </View>
   );
 }

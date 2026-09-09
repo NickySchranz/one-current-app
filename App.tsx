@@ -20,6 +20,8 @@ import { alpha } from "@/ui/color";
 import { useKeyboard } from "@/ui/keyboard";
 import { T } from "@/ui/primitives";
 import { WalkthroughOverlay } from "@/features/tutorial/WalkthroughOverlay";
+import { ReturnCard } from "@/features/return/ReturnCard";
+import { WholenessMoment } from "@/features/life-timeline/WholenessMoment";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 
 function AppShell() {
@@ -42,6 +44,7 @@ function AppShell() {
   // over the whole screen: no header, no tab bar, just the one line with Pip
   // and the questions.
   const operation = useAppStore((s) => s.operation);
+  const tutorialStep = useAppStore((s) => s.tutorialStep);
   const creating = operation.kind === "creating-branch";
   const onStage = operationDepth(operation) === "stage";
 
@@ -187,6 +190,15 @@ function AppShell() {
       </View>
       {compactNav && !keyboard.open && <PrimaryNavigation variant="bottom" />}
       {ready && authUser && <WalkthroughOverlay />}
+      {/* The return greeting waits for the walkthrough and any open operation:
+          a first-run user has nothing to come back to, and someone mid-answer
+          is already doing the thing the card would ask for. */}
+      {ready && authUser && tutorialStep === null && view.kind === "now" && !onStage && !creating && (
+        <ReturnCard />
+      )}
+      {ready && authUser && tutorialStep === null && view.kind === "now" && !onStage && !creating && (
+        <WholenessMoment />
+      )}
     </View>
   );
 }

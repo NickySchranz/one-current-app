@@ -2,9 +2,11 @@
    down to burn never appear at any depth, and every key the builder emits has
    a plain-English label in the "what leaves the app" list shown before sending.
 
-   Run: node --experimental-strip-types scripts/share-payload-check.mjs */
-import { buildShareExport } from "../src/domain/share/build-share-export.ts";
-import { describeShareFields } from "../src/domain/share/describe-fields.ts";
+   Run: node scripts/share-payload-check.mjs */
+import { loadDomain } from "./ts-load.mjs";
+
+const { buildShareExport } = await loadDomain("share/build-share-export");
+const { describeShareFields } = await loadDomain("share/describe-fields");
 
 const results = [];
 const check = (label, ok, detail = "") =>

@@ -6,6 +6,11 @@
  * Importer tolerances: `loudness` may be empty (threads created before the
  * log existed), every optional field may be absent, and a merge or action
  * that spans several threads appears under each of them.
+ *
+ * Versioning: a NEW OPTIONAL field may be added within a version — every
+ * importer already tolerates absent optionals, so an older reader simply does
+ * not render it. Anything else (a renamed field, a changed meaning, a new
+ * required field) bumps the version on both sides.
  */
 
 export type SharedLoudnessEntry = {
@@ -109,6 +114,11 @@ export type SharedThread = {
   waiting?: SharedWaiting;
   /** Last entry before `from` as a baseline, then every change in [from, to]. */
   loudness: SharedLoudnessEntry[];
+  /** The window's loudness in words — quiet | murmuring | speaking | calling |
+   * loud — so the page names levels exactly as the person's own dial does.
+   * Absent when the thread logged nothing in the window. */
+  loudnessWas?: string;
+  loudnessNow?: string;
   /** Chronological within [from, to]. */
   events: SharedEvent[];
 };
@@ -123,4 +133,16 @@ export type ShareExport = {
   /** ISO date — the day of the export. */
   to: string;
   threads: SharedThread[];
+  /** The window at a glance, so a "since last session" page can open with it
+   * rather than recomputing from events. Derived — never a separate truth. */
+  summary?: {
+    /** Threads that started inside the window. */
+    opened: number;
+    /** Threads that integrated inside the window. */
+    integrated: number;
+    /** Feelings still held by a shared thread at the end of the window. */
+    heldThrough: string[];
+    /** Feelings released by threads that integrated inside the window. */
+    cameBack: string[];
+  };
 };

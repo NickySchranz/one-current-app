@@ -3,10 +3,9 @@ import { View } from "react-native";
 import { useTheme } from "./theme";
 import { alpha } from "./color";
 
-/** Sound-family names for the five rungs, level 1..5 — pass through t() where shown. */
-export const LOUDNESS_WORDS = ["quiet", "murmuring", "speaking", "calling", "loud"] as const;
-export const loudnessWord = (level: number) =>
-  LOUDNESS_WORDS[Math.min(5, Math.max(1, Math.round(level))) - 1];
+// The words themselves live in the domain — the share payload names levels
+// too, and a psychologist's page must read the same vocabulary as the dial.
+export { LOUDNESS_WORDS, loudnessWord } from "@/domain/branches/logic";
 
 /** The loudness dial: a thumb-sized bar — tap or drag anywhere to fill it. */
 export function LoudnessSlider({

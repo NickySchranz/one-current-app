@@ -66,4 +66,8 @@ export const shareFields: Record<string, string> = {
   "anything from threads you did not pick": "nada de los hilos que no marcaste",
   "your password, or anything from your account":
     "tu contraseña, ni nada de tu cuenta",
+  "What your psychologist will see": "Lo que va a ver tu psicólogo",
+  "Opened {opened} · Integrated {integrated}": "Abiertos {opened} · Integrados {integrated}",
+  "how loud it was at the start of the window, in a word": "qué tan duro estaba al inicio del periodo, en una palabra",
+  "how loud it is now, in a word": "qué tan duro está ahora, en una palabra",
 };

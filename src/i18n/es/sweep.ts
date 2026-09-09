@@ -36,7 +36,6 @@ export const sweep: Record<string, string> = {
   "From the beginning": "Desde el principio",
   "Review is due: {awaiting}": "Es hora de revisar: {awaiting}",
   "Nothing further is required until {date} or until: {conditions}": "No se requiere nada más hasta {date} o hasta que: {conditions}",
-  "The free current holds {n} threads": "La corriente gratuita lleva {n} hilos",
   "Companion": "Compañero",
   "Companion character": "Personaje compañero",
   "A scholarly adventurer who notes everything and wields a quill.": "Un aventurero erudito que lo anota todo y lleva una pluma.",

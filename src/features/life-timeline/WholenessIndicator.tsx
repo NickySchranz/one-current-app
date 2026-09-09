@@ -22,11 +22,13 @@ import { useAppStore } from "@/stores/app-store";
 import { useWalkthroughTarget } from "@/features/tutorial/targets";
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import { effectiveLoudness } from "@/domain/branches/logic";
-import { decidedToday, energySplit } from "@/domain/feelings/logic";
+import { decidedToday, energySplit, integrationSummary } from "@/domain/feelings/logic";
 import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
 import { alpha, mix } from "@/ui/color";
 import { Hint, shadow, T } from "@/ui/primitives";
+import { Sparkline } from "@/ui/Sparkline";
+import { DepthLock } from "@/features/paywall/DepthLock";
 
 const AnimatedG = Animated.createAnimatedComponent(G);
 const easeInOut = Easing.inOut(Easing.ease);
@@ -121,6 +123,11 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
   const setOperation = useAppStore((s) => s.setOperation);
   const nowTick = useAppStore((s) => s.nowTick);
   const reducedMotion = useAppStore((s) => s.reducedMotion);
+  const daysAway = useAppStore((s) => s.daysAway);
+  const returnGreeted = useAppStore((s) => s.returnGreeted);
+  const wholenessLog = useAppStore((s) => s.wholenessLog);
+  const recordWholeness = useAppStore((s) => s.recordWholeness);
+  const noteWholenessReached = useAppStore((s) => s.noteWholenessReached);
   const { width: screenW } = useWindowDimensions();
   const now = useMemo(() => new Date(nowTick), [nowTick]);
   const [open, setOpen] = useState(false);
@@ -128,12 +135,33 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
   // How much of you moves with your main line right now — the wholeness score.
   // Every decision (an action or "nothing can be done") raises it.
   const wholeness = energySplit(branches, now).mainShare;
+  const returnedToday = integrationSummary(branches, now).returnedToday;
   const undecided = activeLines
     .filter((b) => !decidedToday(b, now))
     .sort((a, b) => effectiveLoudness(b, now) - effectiveLoudness(a, now));
 
+  // The chip is the one place that computes this, so it is the one place that
+  // can record it. Sampled rather than reconstructed — see the store.
+  useEffect(() => {
+    recordWholeness(wholeness);
+  }, [wholeness, recordWholeness]);
+
+  // The day just closed for the first time. The store shows it once, ever.
+  const reached = activeLines.length > 0 && undecided.length === 0;
+  useEffect(() => {
+    if (reached) noteWholenessReached();
+  }, [reached, noteWholenessReached]);
+
+  // While the return card is still standing, the chip does not pass judgement
+  // on a day the user has not yet had a chance to answer. The bar stays
+  // honest — drift no longer accrues across an absence, so it reads roughly
+  // as they left it — but the words hold off.
+  const greeting = !returnGreeted && daysAway >= 2 && activeLines.length > 0;
+
   const word =
-    wholeness >= 0.85
+    greeting
+      ? t("held")
+      : wholeness >= 0.85
       ? t("whole")
       : wholeness >= 0.65
         ? t("gathered")
@@ -141,8 +169,9 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
           ? t("pulled apart")
           : t("scattered");
   const tone = wholeness >= 0.65 ? "good" : wholeness >= 0.45 ? "mid" : "low";
-  const forecast =
-    wholeness >= 0.85
+  const forecast = greeting
+    ? t("Nothing was added to them while you were away. Answer them when you are ready.")
+    : wholeness >= 0.85
       ? t("Nothing is pulling you apart. Expect a steady, present day — protect it.")
       : wholeness >= 0.65
         ? t("You may feel an occasional tug today, but the day should hold steady.")
@@ -156,12 +185,14 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
 
   // The low rungs describe the attention, never the self — the forecast's own
   // "That is the split — not you" holds for the headline too.
-  const headline =
-    wholeness >= 0.65
+  const headline = greeting
+    ? t("Your threads are where you left them.")
+    : wholeness >= 0.65
       ? t("You are {word}.", { word })
       : t("Your attention is {word}.", { word });
-  const summary =
-    (wholeness >= 0.65
+  const summary = greeting
+    ? t("Your threads are where you left them. Nothing was added while you were away.")
+    : (wholeness >= 0.65
       ? t("You are {word} — about {pct} percent of you moves with your main line.", {
           word,
           pct: Math.round(wholeness * 100),
@@ -170,13 +201,41 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
           "Your attention is {word} — about {pct} percent of you moves with your main line.",
           { word, pct: Math.round(wholeness * 100) },
         )) +
-    (activeLines.length > 0
+      (activeLines.length > 0
       ? " " +
         t("{decided} of {active} open threads already answered today.", {
-          decided: activeLines.length - undecided.length,
-          active: activeLines.length,
-        })
-      : "");
+            decided: activeLines.length - undecided.length,
+            active: activeLines.length,
+          })
+        : "");
+
+  // The fortnight behind the chip. Days with no reading stay gaps: the app
+  // was closed, which is not the same as a day that went quiet.
+  const trend = useMemo(() => {
+    const DAYS = 14;
+    const values: (number | null)[] = [];
+    for (let i = DAYS - 1; i >= 0; i--) {
+      const day = new Date(now.getTime() - i * 86400000).toISOString().slice(0, 10);
+      values.push(wholenessLog[day] ?? null);
+    }
+    const real = values.filter((v): v is number => v !== null);
+    // Two readings is a line between two points, not a trend worth naming.
+    if (real.length < 3) return null;
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    const recent = values.slice(7).filter((v): v is number => v !== null);
+    const earlier = values.slice(0, 7).filter((v): v is number => v !== null);
+    let caption = t("your last two weeks");
+    if (recent.length > 0 && earlier.length > 0) {
+      const delta = mean(recent) - mean(earlier);
+      caption =
+        delta > 0.06
+          ? t("steadier than last week")
+          : delta < -0.06
+            ? t("more pulled than last week")
+            : t("about the same as last week");
+    }
+    return { values, caption };
+  }, [wholenessLog, now, t]);
 
   // strand sway phases, echoing the CSS nth-of-type delays
   const DELAYS = [0, 2600, 1200, 2600, 0, 1200];
@@ -304,6 +363,22 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
             {forecast}
           </Hint>
 
+          {trend && (
+            <DepthLock label={t("your last two weeks")}>
+            <View style={{ gap: 4 }}>
+              <Sparkline
+                values={trend.values}
+                min={0}
+                max={1}
+                width={Math.min(320, screenW - 32) - 25.6}
+                height={30}
+                color={tk.accent}
+              />
+              <Hint style={{ margin: 0 }}>{trend.caption}</Hint>
+            </View>
+            </DepthLock>
+          )}
+
           {undecided.length > 0 ? (
             <>
               <Hint style={{ margin: 0 }}>{t("One decision would gather you most here:")}</Hint>
@@ -339,6 +414,17 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
               {activeLines.length > 0
                 ? t("Every open thread has its decision for today. Nothing more is asked of you.")
                 : t("Nothing is open right now. Your whole current is moving as one.")}
+            </Hint>
+          )}
+
+          {/* What the day's answers actually bought. The map shows the tags
+              flying home once, in the moment; this is where it stays legible
+              afterwards, in the only currency the user cares about. */}
+          {returnedToday.length > 0 && (
+            <Hint style={{ margin: 0 }}>
+              {t("Today you got back: {list}", {
+                list: returnedToday.map((f) => t(f)).join(", "),
+              })}
             </Hint>
           )}
         </View>

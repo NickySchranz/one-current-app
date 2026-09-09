@@ -129,7 +129,7 @@ const pipRenders = (page) =>
   check("card clear of halo (bonk)", await cardClearOfHalo(page));
   await page.getByRole("button", { name: "Next →" }).click();
   await page.waitForTimeout(500);
-  check("wholeness step copy", await bubble(page, "This shows how gathered you are.").isVisible().catch(() => false));
+  check("wholeness step copy", await bubble(page, "This is the whole idea, made visible.").isVisible().catch(() => false));
   check("card clear of halo (wholeness)", await cardClearOfHalo(page));
   await page.getByRole("button", { name: "Next →" }).click();
   await page.waitForTimeout(500);

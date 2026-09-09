@@ -1,7 +1,6 @@
 /** The guided walkthrough, step by step. Keys are English source strings. */
 export const tutorial: Record<string, string> = {
   "Hi! I'm Pip!": "¡Quiubo! ¡Soy Pip!",
-  "This is where your threads will live — everything that pulls at part of your attention gets a line of its own. Let's start your first one together.": "Acá van a vivir tus hilos — todo lo que jala parte de tu atención recibe su propia línea. Empecemos juntos el primero.",
   "Something on your mind right now?": "¿Algo te da vueltas en la cabeza ahorita?",
   "That's the + — tap it, and we'll give that thing its own line.": "Ese es el + — tocalo y le damos a eso su propia línea.",
   "There it is — your first thread.": "Ahí está — tu primer hilo.",
@@ -12,8 +11,6 @@ export const tutorial: Record<string, string> = {
   "Act takes one small step. Integrate brings a finished thread home. Note keeps a thought. Let it rest sets it down for now. Each one is a real answer.": "Actuar da un paso pequeño. Integrar trae a casa un hilo terminado. Nota guarda un pensamiento. Dejarlo descansar lo suelta por ahora. Cada una es una respuesta real.",
   "See the little pill by the dates?": "¿Ves la pastillita junto a las fechas?",
   "When a thread feels loud, I can give it a gentle bonk to soften it. Answers fill the meter — full, I calm everything in one run.": "Cuando un hilo se siente duro, puedo darle un golpecito suave para calmarlo. Las respuestas llenan el medidor — lleno, calmo todo en una sola carrera.",
-  "This shows how gathered you are.": "Esto muestra qué tan reunido estás.",
-  "Every open thread holds a strand of you out there. As you answer them, the strands come home.": "Cada hilo abierto sostiene una hebra tuya allá afuera. Al responderlos, las hebras vuelven a casa.",
   "History keeps each day's answers.": "Historia guarda las respuestas de cada día.",
   "Notes, steps, integrations — they stay, so you can watch yourself getting better at this.": "Notas, pasos, integraciones — ahí se quedan, para que te veas mejorando en esto.",
   "More holds the rest.": "Más guarda lo demás.",
@@ -24,4 +21,10 @@ export const tutorial: Record<string, string> = {
   "Let's go!": "¡De una!",
   "Next →": "Siguiente →",
   "Restart tour": "Reiniciar el recorrido",
+  "Everything pulling at you gets a line of its own here, so your head doesn't have to hold it. Answer each line once and the day is done — that's the whole idea. Let's start your first one together.":
+    "Todo lo que te jala tiene aquí su propia línea, para que tu cabeza no tenga que sostenerlo. Respondes cada línea una vez y el día queda listo: esa es toda la idea. Empecemos la primera juntos.",
+  "This is the whole idea, made visible.":
+    "Esta es toda la idea, hecha visible.",
+  "Every open thread holds a strand of you out there. Answer them and the strands come home — and then nothing more is asked of you today.":
+    "Cada hilo abierto sostiene una hebra tuya por allá. Respóndelos y las hebras vuelven a casa; ahí ya no se te pide nada más por hoy.",
 };

@@ -5,6 +5,8 @@ import type { ActionBranchRepresentation, IntegratedAction } from "./types";
 /** How a branch is typically represented inside one coherent present action. */
 export function suggestRepresentation(branch: PsychologicalBranch): string {
   const byType: Record<BranchType, string> = {
+    // An unnamed thread gets the most general honest suggestion there is.
+    unknown: "one small step that belongs to it",
     event: "one act of acknowledgement or repair",
     waiting: "living one committed hour without checking",
     projection: "one grounded step inside what is actually controllable",

@@ -2,22 +2,15 @@ import { useState } from "react";
 import { Modal, Pressable, View } from "react-native";
 import { selectEffectivePro, useAppStore } from "@/stores/app-store";
 import { api, hasTokens } from "@/api/client";
-import {
-  FREE_OPEN_THREAD_LIMIT,
-  canCreateThread,
-  type PaywallReason,
-} from "@/domain/entitlements/logic";
+import type { PaywallReason } from "@/domain/entitlements/logic";
 import { useT } from "@/i18n/i18n";
 import { Button, H2, Hint, rowStyles } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
 
-/** May another thread open right now? Shared by every create/reopen entry point. */
-export function useThreadGate(): boolean {
-  const branches = useAppStore((s) => s.branches);
-  const isPro = useAppStore(selectEffectivePro);
-  const draftBranchId = useAppStore((s) => s.draftBranchId);
-  return canCreateThread(branches, isPro, draftBranchId);
+/** Does this account have the long view — the curves, the trend, the totals? */
+export function useDepthGate(): boolean {
+  return useAppStore(selectEffectivePro);
 }
 
 const COPY: Record<PaywallReason, { title: string; body: string }> = {
@@ -25,9 +18,9 @@ const COPY: Record<PaywallReason, { title: string; body: string }> = {
     title: "This look is part of Pro",
     body: "The five plain looks are always free. The living themes — where the timeline itself comes alive — come with One Current Pro.",
   },
-  "thread-limit": {
-    title: "The free current holds {n} threads",
-    body: "The free plan holds {n} open threads at a time. Integrate or close one to make room — or let One Current Pro carry as many as your days do.",
+  depth: {
+    title: "Pro keeps the long view",
+    body: "How each thread has moved, how your fortnight has gone, and everything you have closed. The threads themselves, and every answer you give them, are free and always will be.",
   },
   share: {
     title: "Sharing is part of Pro",
@@ -117,8 +110,8 @@ export function PaywallPrompt({
             cursor: "auto",
           }}
         >
-          <H2 style={{ marginTop: 0 }}>{t(copy.title, { n: FREE_OPEN_THREAD_LIMIT })}</H2>
-          <Hint>{t(copy.body, { n: FREE_OPEN_THREAD_LIMIT })}</Hint>
+          <H2 style={{ marginTop: 0 }}>{t(copy.title)}</H2>
+          <Hint>{t(copy.body)}</Hint>
           {canUpgrade && (
             <View accessibilityLabel={t("Billing period")} style={rowStyles.filterRow}>
               {PERIODS.map((p) => (

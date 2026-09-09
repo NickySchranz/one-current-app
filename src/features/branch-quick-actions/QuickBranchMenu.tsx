@@ -12,7 +12,6 @@ import { effectiveLoudness, isClosed } from "@/domain/branches/logic";
 import { decidedToday } from "@/domain/feelings/logic";
 import type { Loudness } from "@/domain/branches/types";
 import { appNow } from "@/domain/time/clock";
-import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
 import {
   Button,
   CalmNote,
@@ -99,8 +98,6 @@ export function QuickBranchMenu({ branchId, startExpanded = false, dialOnly = fa
   };
   const [eased, setEased] = useState(false);
   // Reopening counts against the free open-thread limit like creating does.
-  const canOpenThread = useThreadGate();
-  const [paywalled, setPaywalled] = useState(false);
   // The sheet opens as a peek: the thread's name and its loudness dial only.
   // Pulling it up (or tapping the question) reveals the decisions. Coming
   // Back from a sub-panel reopens straight onto them.
@@ -188,14 +185,10 @@ export function QuickBranchMenu({ branchId, startExpanded = false, dialOnly = fa
           <Button
             label={t("It is back on my mind")}
             onPress={() =>
-              canOpenThread ? void reopenBranch(branchId) : setPaywalled(true)
+              void reopenBranch(branchId)
             }
           />
         </View>
-        <PaywallPrompt
-          reason={paywalled ? "thread-limit" : null}
-          onClose={() => setPaywalled(false)}
-        />
       </Panel>
     );
   }

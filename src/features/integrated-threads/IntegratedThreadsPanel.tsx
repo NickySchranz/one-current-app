@@ -10,6 +10,7 @@ import { useAppStore } from "@/stores/app-store";
 import { isClosed } from "@/domain/branches/logic";
 import { useT } from "@/i18n/i18n";
 import { Hint, Panel, T } from "@/ui/primitives";
+import { DepthLock } from "@/features/paywall/DepthLock";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
 
@@ -18,6 +19,7 @@ type Props = {
 };
 
 const TYPE_LABELS: Record<string, string> = {
+  unknown:      "Not named",
   event:        "Event",
   waiting:      "Waiting",
   projection:   "Projection",
@@ -58,6 +60,22 @@ export function IntegratedThreadsPanel({ selectedBranchId }: Props) {
     [allBranches],
   );
 
+  // What the whole record adds up to. The per-day view in History answers
+  // "what happened today"; nothing answered "has any of this worked", which
+  // is the question the walkthrough already promises History will answer.
+  const totals = useMemo(() => {
+    const returned = allBranches.filter((b) => b.recurrenceCount > 0).length;
+    const counts = new Map<string, number>();
+    for (const b of merged) {
+      for (const f of b.occupies ?? []) counts.set(f, (counts.get(f) ?? 0) + 1);
+    }
+    const feelings = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 3)
+      .map(([f]) => f);
+    return { integrated: merged.length, returned, feelings };
+  }, [allBranches, merged]);
+
   if (merged.length === 0) {
     return (
       <Panel>
@@ -74,6 +92,38 @@ export function IntegratedThreadsPanel({ selectedBranchId }: Props) {
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }}>
       <Panel style={{ gap: 6 }}>
+        <DepthLock label={t("Since you started")}>
+        <View
+          style={{
+            gap: 2,
+            paddingBottom: 10,
+            marginBottom: 4,
+            borderBottomWidth: 1,
+            borderBottomColor: alpha(tk.lineAxis, 0.55),
+          }}
+        >
+          <T style={{ fontWeight: "700" }}>{t("Since you started")}</T>
+          <Hint style={{ margin: 0 }}>
+            {totals.integrated === 1
+              ? t("{n} thread integrated", { n: totals.integrated })
+              : t("{n} threads integrated", { n: totals.integrated })}
+          </Hint>
+          {totals.returned > 0 && (
+            <Hint style={{ margin: 0 }}>
+              {totals.returned === 1
+                ? t("{n} came back and was answered again", { n: totals.returned })
+                : t("{n} came back and were answered again", { n: totals.returned })}
+            </Hint>
+          )}
+          {totals.feelings.length > 0 && (
+            <Hint style={{ margin: 0 }}>
+              {t("Most often returned to you: {list}", {
+                list: totals.feelings.map((f) => t(f)).join(", "),
+              })}
+            </Hint>
+          )}
+        </View>
+        </DepthLock>
         <Hint style={{ marginBottom: 4 }}>
           {t("Tap a thread to see where it rejoined your main line.")}
         </Hint>

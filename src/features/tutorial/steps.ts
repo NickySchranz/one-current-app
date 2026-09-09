@@ -54,7 +54,7 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
     id: "welcome",
     text: "Hi! I'm Pip!",
     subtext:
-      "This is where your threads will live — everything that pulls at part of your attention gets a line of its own. Let's start your first one together.",
+      "Everything pulling at you gets a line of its own here, so your head doesn't have to hold it. Answer each line once and the day is done — that's the whole idea. Let's start your first one together.",
     frame: "REACT",
     advance: "next",
   },
@@ -103,9 +103,9 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
   },
   {
     id: "wholeness",
-    text: "This shows how gathered you are.",
+    text: "This is the whole idea, made visible.",
     subtext:
-      "Every open thread holds a strand of you out there. As you answer them, the strands come home.",
+      "Every open thread holds a strand of you out there. Answer them and the strands come home — and then nothing more is asked of you today.",
     frame: "INSPECT_B",
     target: "wholeness",
     advance: "next",

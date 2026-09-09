@@ -1,8 +1,10 @@
 import { newId } from "../ids";
+import { presentDaysSince } from "../time/presence";
 import {
   BRANCH_KIND_CHOICES,
   CLOSED_STATUSES,
   OPEN_STATUSES,
+  UNKNOWN_KIND,
   type BranchStatus,
   type ForkPeriodChoice,
   type PsychologicalBranch,
@@ -52,8 +54,13 @@ export type CreateBranchInput = {
 };
 
 export function createBranch(input: CreateBranchInput, now: Date = new Date()): PsychologicalBranch {
-  const kind =
-    BRANCH_KIND_CHOICES.find((k) => k.id === input.kindChoiceId) ?? BRANCH_KIND_CHOICES[0];
+  // An id that matches nothing means the kind was never named — the creation
+  // flow deliberately does not ask. The thread then carries "unknown"
+  // honestly, instead of silently becoming a past event: falling back to
+  // BRANCH_KIND_CHOICES[0] typed every thread in the app "event"/"past",
+  // which made every conflict rule unreachable and flattened the map to one
+  // hue. Naming it later is what colours the line.
+  const kind = BRANCH_KIND_CHOICES.find((k) => k.id === input.kindChoiceId) ?? UNKNOWN_KIND;
   const { forkDate, forkLabel } = resolveForkDate(input.period, now);
   const nowIso = now.toISOString();
   return {
@@ -62,6 +69,7 @@ export function createBranch(input: CreateBranchInput, now: Date = new Date()): 
     description: input.description,
     type: kind.type,
     orientation: kind.orientation,
+    kindChoiceId: kind.id === UNKNOWN_KIND.id ? undefined : kind.id,
     status: "active",
     forkDate,
     forkLabel,
@@ -99,6 +107,11 @@ export function branchEndDate(branch: PsychologicalBranch, now: Date = new Date(
   return isoDate(now);
 }
 
+/** Sound-family names for the five rungs, level 1..5 — pass through t() where shown. */
+export const LOUDNESS_WORDS = ["quiet", "murmuring", "speaking", "calling", "loud"] as const;
+export const loudnessWord = (level: number) =>
+  LOUDNESS_WORDS[Math.min(5, Math.max(1, Math.round(level))) - 1];
+
 /** Any honest decision about a branch — acting, noting, or deliberately leaving it — loosens its loudness a little. */
 export function easeLoudness(loudness: Loudness): Loudness {
   return Math.max(1, loudness - 1) as Loudness;
@@ -122,8 +135,9 @@ export function trackLoudness(
 }
 
 /**
- * Whole days since the branch was last given attention: a decision, or setting
- * its loudness dial by hand (creation counts as the first decision).
+ * Days the branch has gone unanswered **while the user was here to answer it**.
+ * A decision, or setting the dial by hand, resets it (creation counts as the
+ * first decision). Days the app was closed do not count — see ../time/presence.
  */
 export function daysSinceDecision(branch: PsychologicalBranch, now: Date = new Date()): number {
   // ISO dates compare lexically: the later of the two anchors wins;
@@ -131,7 +145,7 @@ export function daysSinceDecision(branch: PsychologicalBranch, now: Date = new D
   const anchors = [branch.lastDecisionOn, branch.loudnessSetOn].filter((d): d is string => !!d);
   const ref =
     anchors.length > 0 ? anchors.sort()[anchors.length - 1] : branch.firstCreatedAt.slice(0, 10);
-  return Math.max(0, Math.floor((now.getTime() - Date.parse(ref)) / DAY));
+  return presentDaysSince(ref, isoDate(now));
 }
 
 /**
@@ -144,6 +158,40 @@ export function effectiveLoudness(branch: PsychologicalBranch, now: Date = new D
   if (isClosed(branch) || branch.status === "waiting-with-boundaries") return branch.loudness;
   const drift = daysSinceDecision(branch, now);
   return Math.min(5, branch.loudness + drift) as Loudness;
+}
+
+/**
+ * The branch's stored loudness on each of the last `days` days, oldest first —
+ * a step series read straight out of `loudnessLog`, which until now was
+ * recorded on every change and shown to nobody but the psychologist.
+ *
+ * Deliberately the STORED value, not the effective one: the drift is a
+ * statement about today, and folding it into history would draw a rising curve
+ * for a thread nobody touched. `null` means the thread did not exist yet.
+ */
+export function loudnessSeries(
+  branch: PsychologicalBranch,
+  days: number,
+  now: Date = new Date(),
+): (number | null)[] {
+  const log = [...(branch.loudnessLog ?? [])].sort((a, b) => a.at.localeCompare(b.at));
+  const born = branch.firstCreatedAt.slice(0, 10);
+  const out: (number | null)[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const day = isoDate(new Date(now.getTime() - i * DAY));
+    if (day < born) {
+      out.push(null);
+      continue;
+    }
+    let value: number | null = null;
+    for (const entry of log) {
+      if (entry.at.slice(0, 10) <= day) value = entry.loudness;
+      else break;
+    }
+    // Logged after this day but the thread already existed: its opening level.
+    out.push(value ?? log[0]?.loudness ?? branch.loudness);
+  }
+  return out;
 }
 
 /** Merging reduces the branch's active loudness; the residue stays honest, not zero by decree. */

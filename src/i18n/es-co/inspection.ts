@@ -167,4 +167,20 @@ export const inspection: Record<string, string> = {
   "Add to {label}": "Agregar a {label}",
   "Add your own…": "Agrega lo tuyo…",
   "Add": "Agregar",
+  "I am waiting for something": "Estoy esperando algo",
+  "I am afraid of a future outcome": "Me da miedo algo que puede pasar",
+  "I am attached to a future version of myself": "Estoy apegado a una versión futura de mí mismo",
+  "I am attached to a past version of myself": "Estoy apegado a una versión pasada de mí mismo",
+  "A relationship remains active in my mind": "Una relación sigue dando vueltas en mi cabeza",
+  "Something outside my control is consuming me": "Algo que no controlo me está consumiendo",
+  "My body is affecting everything": "Mi cuerpo está afectando todo",
+  "An idea needs to become a real project": "Una idea necesita volverse un proyecto de verdad",
+  "What kind of thing is this?": "¿Qué tipo de cosa es esto?",
+  "Naming it colours its line on the map, and lets the map notice when two threads are pulling in opposite directions.": "Nombrarlo le da color a su línea en el mapa, y deja que el mapa se dé cuenta cuándo dos hilos jalan para lados opuestos.",
+  "Tap a different one if it fits better.": "Toca otro si le queda mejor.",
+  "Leaving this unanswered is fine.": "Puedes dejarlo sin responder.",
+  "While this stays open, {a} is less available to you.":
+    "Mientras esto siga abierto, {a} está menos disponible para ti.",
+  "While this stays open, {a} and {b} are less available to you.":
+    "Mientras esto siga abierto, {a} y {b} están menos disponibles para ti.",
 };

@@ -5,6 +5,9 @@ import { api, ApiOfflineError, hasTokens } from "@/api/client";
 import { db } from "@/db/database";
 import { appNow } from "@/domain/time/clock";
 import { buildShareExport } from "@/domain/share/build-share-export";
+import type { ShareExport } from "@/domain/share/types";
+import { branchColor } from "@/visualization/branch-lines/style";
+import { Sparkline } from "@/ui/Sparkline";
 import { describeShareFields, SHARE_NEVER_INCLUDES } from "@/domain/share/describe-fields";
 import { PaywallPrompt } from "@/features/paywall/PaywallPrompt";
 import { MyShares } from "@/features/settings/MyShares";
@@ -37,6 +40,9 @@ export function ShareWithPsychologist() {
   const isPro = useAppStore(selectEffectivePro);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /** The exact payload, so the person can see the page before anyone else does. */
+  const [sharePreview, setSharePreview] = useState<ShareExport | null>(null);
+  const themeId = useAppStore((s) => s.theme);
   const [since, setSince] = useState<SinceChoice>("month");
   const [practitionerEmail, setPractitionerEmail] = useState("");
   const [emailErr, setEmailErr] = useState("");
@@ -68,6 +74,7 @@ export function ShareWithPsychologist() {
   useEffect(() => {
     if (selected.size === 0) {
       setFields(null);
+      setSharePreview(null);
       return;
     }
     let live = true;
@@ -82,7 +89,10 @@ export function ShareWithPsychologist() {
         from,
         now: appNow(),
       });
-      if (live) setFields(describeShareFields(preview));
+      if (live) {
+        setFields(describeShareFields(preview));
+        setSharePreview(preview);
+      }
     })();
     return () => {
       live = false;
@@ -234,6 +244,68 @@ export function ShareWithPsychologist() {
                 )}
               </View>
             )}
+            {/* The same shape the psychologist's page draws, and the same
+                shape the person has been looking at on their own threads —
+                so "this one" means one thing in the room. Shown before the
+                field list: what it looks like matters more than what it is
+                called. */}
+            {sharePreview && sharePreview.threads.length > 0 && (
+              <View
+                accessibilityLabel={t("What your psychologist will see")}
+                style={{
+                  marginTop: 12,
+                  padding: 10,
+                  gap: 8,
+                  borderWidth: 1,
+                  borderColor: alpha(tk.lineAxis, 0.55),
+                  borderRadius: 8,
+                }}
+              >
+                <T style={{ fontWeight: "600" }}>{t("What your psychologist will see")}</T>
+                {sharePreview.threads.map((th) => {
+                  const source = branches.find((b) => b.id === th.id);
+                  return (
+                    <View
+                      key={th.id}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+                    >
+                      <T style={{ flex: 1, fontSize: 13.6 }} numberOfLines={1}>
+                        {th.title}
+                      </T>
+                      {th.loudness.length > 1 && (
+                        <Sparkline
+                          values={th.loudness.map((e) => e.loudness)}
+                          min={1}
+                          max={5}
+                          width={64}
+                          height={20}
+                          color={source ? branchColor(source, themeId) : tk.accent}
+                          endpoints={false}
+                        />
+                      )}
+                      <Hint style={{ margin: 0, minWidth: 96, textAlign: "right" }}>
+                        {th.integratedOn
+                          ? t("integrated")
+                          : th.loudnessWas && th.loudnessNow && th.loudnessWas !== th.loudnessNow
+                            ? `${t(th.loudnessWas)} → ${t(th.loudnessNow)}`
+                            : th.loudnessNow
+                              ? t(th.loudnessNow)
+                              : ""}
+                      </Hint>
+                    </View>
+                  );
+                })}
+                {sharePreview.summary && (
+                  <Hint style={{ margin: 0 }}>
+                    {t("Opened {opened} · Integrated {integrated}", {
+                      opened: sharePreview.summary.opened,
+                      integrated: sharePreview.summary.integrated,
+                    })}
+                  </Hint>
+                )}
+              </View>
+            )}
+
             {fields && (
               <View
                 accessibilityLabel={t("What leaves the app")}

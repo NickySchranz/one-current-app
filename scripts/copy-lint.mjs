@@ -41,6 +41,20 @@ const ALLOW = [/who you are and who you should be/i];
 // Keys reached through variables (t(loudnessWord(v)), t(verb), t(copy.title)…)
 // that the t("literal") regex can never see. Each entry must stay translated.
 const DYNAMIC_KEYS = [
+  // BRANCH_KIND_CHOICES labels (src/domain/branches/types.ts) — rendered as
+  // t(k.label) by the kind picker in BranchView.
+  "Something happened",
+  "I am waiting for something",
+  "I am afraid of a future outcome",
+  "I am attached to a future version of myself",
+  "I am attached to a past version of myself",
+  "A relationship remains active in my mind",
+  "Something outside my control is consuming me",
+  "My body is affecting everything",
+  "An idea needs to become a real project",
+  // TYPE_LABELS (src/features/integrated-threads/IntegratedThreadsPanel.tsx)
+  "Not named", "Event", "Waiting", "Projection", "Identity", "Relationship",
+  "Body", "Project",
   // LOUDNESS_WORDS (src/ui/LoudnessSlider.tsx)
   "quiet", "murmuring", "speaking", "calling", "loud",
   // bonk verbs + super state (src/features/life-timeline/LifeTimeline.tsx)
@@ -49,10 +63,10 @@ const DYNAMIC_KEYS = [
   // paywall COPY table (src/features/paywall/PaywallPrompt.tsx) — titles AND
   // bodies render via t(copy.title)/t(copy.body)
   "This look is part of Pro",
-  "The free current holds {n} threads",
   "Sharing is part of Pro",
+  "Pro keeps the long view",
+  "How each thread has moved, how your fortnight has gone, and everything you have closed. The threads themselves, and every answer you give them, are free and always will be.",
   "The five plain looks are always free. The living themes — where the timeline itself comes alive — come with One Current Pro.",
-  "The free plan holds {n} open threads at a time. Integrate or close one to make room — or let One Current Pro carry as many as your days do.",
   "Creating a file for your psychologist comes with One Current Pro. Everything else about your data stays yours, on this device, either way.",
   // summit's rope prompts (GRAB_PROMPTS in LifeTimeline.tsx): picked from an
   // array, so the t("...") regex can't see them.

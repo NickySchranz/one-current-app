@@ -11,8 +11,9 @@ import {
   createBranch,
   easeLoudness,
   trackLoudness,
-  type CreateBranchInput, effectiveLoudness, isClosed } from "@/domain/branches/logic";
+  type CreateBranchInput, effectiveLoudness, isClosed, isOpen } from "@/domain/branches/logic";
 import { advanceSkew, appNow, getSkewMs, setRate, setSkewMs } from "@/domain/time/clock";
+import { daysAwayBefore, setPresentDays, withDay } from "@/domain/time/presence";
 import { addMomentToBranch, createMoment, type CreateMomentInput } from "@/domain/moments/logic";
 import { detectRecurrence, recordRecurrence } from "@/domain/branches/recurrence";
 import { applyMergeToBranch, createMerge, type CreateMergeInput } from "@/domain/merges/logic";
@@ -21,7 +22,7 @@ import { heldFeelings } from "@/domain/feelings/logic";
 import { newId } from "@/domain/ids";
 import { repo } from "@/db/repository";
 import { api, loadTokens, ApiAuthError, type ApiUser } from "@/api/client";
-import { canCreateThread, isProTheme } from "@/domain/entitlements/logic";
+import { isProTheme } from "@/domain/entitlements/logic";
 import { NEXT_AFTER, type TutorialEvent, type WalkthroughStepId } from "@/features/tutorial/steps";
 import { panWindow, weekWindow, type TimeWindow } from "@/visualization/zoom/time-scale";
 import { isThemeId, type ThemeId } from "@/visualization/theme";
@@ -177,6 +178,19 @@ type AppState = {
   timeSkewMs: number;
   /** App-milliseconds per real millisecond (Testing only; 1 = real time). */
   timeRate: number;
+  /** ISO days the app has been opened, ascending — loudness only drifts on these. */
+  presentDays: string[];
+  /** How long the app went unopened before today. 0 for a daily user. */
+  daysAway: number;
+  /** True once the return card has been answered or set aside this session. */
+  returnGreeted: boolean;
+  /** Wholeness by ISO day. Sampled, never back-computed: replaying old days
+   * from today's branch state would draw a curve that never happened. */
+  wholenessLog: Record<string, number>;
+  /** Whether the user has ever reached — and been shown — a fully answered day. */
+  firstWholenessSeen: boolean;
+  /** True while that moment is on screen. Transient; never persisted. */
+  showWholenessMoment: boolean;
 
   init(): Promise<void>;
   /** Re-read the clock so everything derived from "now" follows it. */
@@ -202,6 +216,20 @@ type AppState = {
   /** The form closed without saving: the optimistic line vanishes. */
   cancelDraftBranch(): void;
   updateBranch(id: string, patch: Partial<PsychologicalBranch>): Promise<void>;
+  /** Record today as a day the user was here, and work out how long they were away. */
+  notePresence(): Promise<void>;
+  /** Set the return card aside without answering it. */
+  greetReturn(): void;
+  /** Note today's wholeness. Called as the chip computes it; last write wins,
+   * so the stored reading is the day's most recent, not its first. */
+  recordWholeness(share: number): void;
+  /** Every open thread now has its answer for today. Shows the moment once, ever. */
+  noteWholenessReached(): void;
+  dismissWholenessMoment(): void;
+  /** "Still true": re-anchor every open thread at the level it was left, so an
+   * absence costs nothing. Not a decision — it changes no loudness, it only
+   * says the dial is still right. */
+  holdOpenThreads(): Promise<void>;
   /** Set the loudness dial by hand: re-anchors the daily drift, so what you set is what is felt today. */
   dialLoudness(id: string, level: Loudness): Promise<void>;
   deleteBranch(id: string): Promise<void>;
@@ -347,6 +375,14 @@ const COIN_CHANCE_DIAL = 0.5;
 /** Chance a charging bonk also drops a token. */
 const COIN_CHANCE_BONK = 0.35;
 const COIN_ALWAYS_KEY = "one-current-coin-always";
+/** ISO days the app was opened. Loudness drift counts these and nothing else. */
+const PRESENCE_KEY = "one-current-present-days";
+/** Set once the user has reached a fully answered day and been shown it. */
+const FIRST_WHOLENESS_KEY = "one-current-first-wholeness";
+/** One wholeness reading per day, so the trend is measured rather than reconstructed. */
+const WHOLENESS_KEY = "one-current-wholeness-log";
+/** Readings older than this are dropped; the trend only ever shows a fortnight. */
+const WHOLENESS_KEEP_DAYS = 30;
 /** At most this many tokens in the air at once (a super bonk can rain them). */
 const MAX_COINS = 6;
 let coinKeyCounter = 0;
@@ -404,6 +440,7 @@ async function loadSettings(): Promise<{
   coinAlways: boolean;
   ownerEmail: string | null;
   tutorialDone: boolean;
+  firstWholenessSeen: boolean;
 }> {
   let theme = defaultTheme();
   let language: "en" | "es" | "es-CO" = "en";
@@ -415,8 +452,9 @@ async function loadSettings(): Promise<{
   let coinAlways = false;
   let ownerEmail: string | null = null;
   let tutorialDone = false;
+  let firstWholenessSeen = false;
   try {
-    const [savedTheme, savedLanguage, savedPro, savedAuth, reduceMotion, savedMascot, savedCharge, savedCoinAlways, savedOwner, savedTutorial] = await Promise.all([
+    const [savedTheme, savedLanguage, savedPro, savedAuth, reduceMotion, savedMascot, savedCharge, savedCoinAlways, savedOwner, savedTutorial, savedWholeness] = await Promise.all([
       AsyncStorage.getItem(THEME_KEY),
       AsyncStorage.getItem(LANGUAGE_KEY),
       AsyncStorage.getItem(PRO_KEY),
@@ -427,6 +465,7 @@ async function loadSettings(): Promise<{
       AsyncStorage.getItem(COIN_ALWAYS_KEY),
       AsyncStorage.getItem(OWNER_KEY),
       AsyncStorage.getItem(TUTORIAL_KEY),
+      AsyncStorage.getItem(FIRST_WHOLENESS_KEY),
     ]);
     const parsedCharge = Number(savedCharge);
     if (Number.isFinite(parsedCharge)) bonkCharge = Math.max(0, Math.min(100, parsedCharge));
@@ -435,6 +474,7 @@ async function loadSettings(): Promise<{
     authUser = parseAuthUser(savedAuth);
     ownerEmail = savedOwner ? normalizeEmail(savedOwner) : null;
     tutorialDone = savedTutorial === "done";
+    firstWholenessSeen = savedWholeness === "seen";
     if (savedTheme && isThemeId(savedTheme) && (isPro || !isProTheme(savedTheme)))
       theme = savedTheme;
     if (savedLanguage === "es" || savedLanguage === "es-CO" || savedLanguage === "en")
@@ -448,7 +488,7 @@ async function loadSettings(): Promise<{
   } catch {
     // storage unavailable; defaults apply
   }
-  return { theme, language, reducedMotion, isPro, authUser, mascotType, bonkCharge, coinAlways, ownerEmail, tutorialDone };
+  return { theme, language, reducedMotion, isPro, authUser, mascotType, bonkCharge, coinAlways, ownerEmail, tutorialDone, firstWholenessSeen };
 }
 
 /** Disk-level account wipe, shared by init()'s backstop and the store action.
@@ -508,6 +548,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   nowTick: appNow().getTime(),
   timeSkewMs: 0,
   timeRate: 1,
+  presentDays: [],
+  daysAway: 0,
+  returnGreeted: false,
+  wholenessLog: {},
+  firstWholenessSeen: true,
+  showWholenessMoment: false,
 
   async init() {
     let [data, settings] = await Promise.all([repo.loadAll(), loadSettings()]);
@@ -532,6 +578,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         startWalkthrough = true;
       }
     }
+    // BEFORE `ready`, not after: the wholeness chip records a reading as soon
+    // as it renders, and if it got there first it would persist a log of one
+    // day over the stored history — wiping the trend on every startup.
+    await get().notePresence();
     const draft = data.drafts[0];
     set({
       ready: true,
@@ -595,6 +645,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           : s.window;
       return { nowTick: nowMs, timeSkewMs: getSkewMs(), window };
     });
+    // Crossing midnight — or jumping the Testing clock over one — makes today
+    // a new present day, and can open a gap worth greeting.
+    if (!get().presentDays.includes(todayIso())) void get().notePresence();
   },
   fastForward: (ms) => {
     advanceSkew(ms);
@@ -679,15 +732,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async createBranchNow(input) {
     const draftId = get().draftBranchId;
-    // Backstop only: every entry point checks this before opening the form —
-    // and it must ask the SAME question they do. `isPro` is the local testing
-    // flag; the enforced answer is the server's when it has spoken. Reading
-    // the raw flag here meant a real subscriber (serverPro true, isPro false)
-    // was waved through the gate and then refused at the commit, and since
-    // the refusal is a throw behind `void createNow()` the final button in
-    // the create form simply did nothing.
-    if (!canCreateThread(get().branches, selectEffectivePro(get()), draftId))
-      throw new Error("Free plan holds ten open threads at a time.");
+    // No cap here, and none upstream: an open thread is the app's core
+    // primitive, and someone with an eleventh thing pulling at them is
+    // exactly the person this is for. Pro sells the long view, not permission.
     const branch = createBranch(input, appNow());
     // The optimistic line becomes the real one: same id, so the line the user
     // has been watching (and its colour) simply stays — and its id remains in
@@ -724,6 +771,80 @@ export const useAppStore = create<AppState>((set, get) => ({
       }),
     }));
     if (next) await repo.saveBranch(next);
+  },
+
+  async notePresence() {
+    const today = todayIso();
+    if (get().presentDays.includes(today)) return;
+    let stored: string[] = [];
+    try {
+      const raw = await AsyncStorage.getItem(PRESENCE_KEY);
+      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) stored = parsed.filter((d): d is string => typeof d === "string");
+    } catch {
+      // storage unavailable, or a log we can't read: today starts a fresh one
+    }
+    // Measure the gap BEFORE today joins the log, or it always reads zero.
+    setPresentDays(stored);
+    const daysAway = daysAwayBefore(today);
+    const presentDays = withDay(stored, today);
+    setPresentDays(presentDays);
+    AsyncStorage.setItem(PRESENCE_KEY, JSON.stringify(presentDays)).catch(() => {});
+    let wholenessLog: Record<string, number> = {};
+    try {
+      const raw = await AsyncStorage.getItem(WHOLENESS_KEY);
+      const parsed: unknown = raw ? JSON.parse(raw) : {};
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        for (const [day, value] of Object.entries(parsed as Record<string, unknown>)) {
+          if (typeof value === "number" && Number.isFinite(value)) wholenessLog[day] = value;
+        }
+      }
+    } catch {
+      // unreadable log: the trend simply starts again from today
+      wholenessLog = {};
+    }
+    // A single day's gap is just yesterday-into-today; nothing to remark on.
+    set({ presentDays, daysAway, returnGreeted: daysAway < 2, wholenessLog });
+  },
+
+  greetReturn: () => set({ returnGreeted: true }),
+
+  noteWholenessReached() {
+    if (get().firstWholenessSeen || get().showWholenessMoment) return;
+    set({ firstWholenessSeen: true, showWholenessMoment: true });
+    AsyncStorage.setItem(FIRST_WHOLENESS_KEY, "seen").catch(() => {});
+  },
+
+  dismissWholenessMoment: () => set({ showWholenessMoment: false }),
+
+  recordWholeness(share) {
+    const today = todayIso();
+    const rounded = Math.round(share * 1000) / 1000;
+    if (get().wholenessLog[today] === rounded) return;
+    const cutoff = new Date(appNow().getTime() - WHOLENESS_KEEP_DAYS * 86400000)
+      .toISOString()
+      .slice(0, 10);
+    const wholenessLog: Record<string, number> = { [today]: rounded };
+    for (const [day, value] of Object.entries(get().wholenessLog)) {
+      if (day >= cutoff && day !== today) wholenessLog[day] = value;
+    }
+    set({ wholenessLog });
+    AsyncStorage.setItem(WHOLENESS_KEY, JSON.stringify(wholenessLog)).catch(() => {});
+  },
+
+  async holdOpenThreads() {
+    const today = todayIso();
+    // Re-anchoring only: the stored loudness is untouched, so this asserts
+    // "the dial is still right", not "I dealt with it". lastDecisionOn stays
+    // put — the day's real answers are still ahead of the user.
+    const held = get().branches.filter((b) => isOpen(b) && b.loudnessSetOn !== today);
+    const next = held.map((b) => ({ ...b, loudnessSetOn: today }));
+    await Promise.all(next.map((b) => repo.saveBranch(b)));
+    const byId = new Map(next.map((b) => [b.id, b]));
+    set((s) => ({
+      branches: s.branches.map((b) => byId.get(b.id) ?? b),
+      returnGreeted: true,
+    }));
   },
 
   async dialLoudness(id, level) {
@@ -1247,9 +1368,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const next = NEXT_AFTER[step];
     if (!next) return;
-    if (next === "point-plus" && !canCreateThread(get().branches, selectEffectivePro(get()), get().draftBranchId)) {
-      // Full timeline (a restart on a lived-in account): meet an existing
-      // thread instead of pointing at a + that would open the paywall.
+    // A restart on a lived-in account: rather than send the user to create
+    // yet another thread, introduce one they already have.
+    if (next === "point-plus" && get().branches.some((b) => !isClosed(b))) {
       const open = get().branches.filter((b) => !isClosed(b));
       const newest = open[open.length - 1];
       set(

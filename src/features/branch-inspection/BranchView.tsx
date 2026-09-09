@@ -2,8 +2,17 @@ import React, { useMemo, useState } from "react";
 import { Pressable, Text, View, useWindowDimensions } from "react-native";
 import { useAppStore } from "@/stores/app-store";
 import { DIFF_CHANGE_OPTIONS, RECLAIMABLE_QUALITIES, type DiffChangeId } from "@/domain/branches/diff";
-import type { Controllability, PsychologicalBranch } from "@/domain/branches/types";
-import { ANXIETIES, suggestLockedFeelings } from "@/domain/feelings/logic";
+import {
+  BRANCH_KIND_CHOICES,
+  type Controllability,
+  type PsychologicalBranch,
+} from "@/domain/branches/types";
+import { ANXIETIES, heldFeelings, suggestLockedFeelings } from "@/domain/feelings/logic";
+import { loudnessSeries } from "@/domain/branches/logic";
+import { branchColor } from "@/visualization/branch-lines/style";
+import { Sparkline } from "@/ui/Sparkline";
+import { DepthLock } from "@/features/paywall/DepthLock";
+import { loudnessWord } from "@/ui/LoudnessSlider";
 import { describeBranch } from "@/visualization/a11y/describe";
 import { useT } from "@/i18n/i18n";
 import { appNow } from "@/domain/time/clock";
@@ -222,6 +231,21 @@ export function BranchView({ branchId }: Props) {
     backgroundColor: th.bg,
     ...(twoCol ? { flex: 1 } : null),
   } as const;
+  // A single reading is a dot, not a story — the curve waits until the thread
+  // has actually moved or actually lasted.
+  const themeId = useAppStore((s) => s.theme);
+  const held = heldFeelings(branch, appNow());
+  const series = useMemo(() => {
+    const DAYS = 30;
+    const values = loudnessSeries(branch, DAYS, appNow());
+    const real = values.filter((v): v is number => v !== null);
+    if (real.length < 2) return null;
+    const first = real[0];
+    const last = real[real.length - 1];
+    if (first === last && real.length < 4) return null;
+    return { values, first, last, span: real.length };
+  }, [branch]);
+
   const compareAnchorStyle = {
     marginBottom: 8,
     fontSize: 13.1,
@@ -246,6 +270,54 @@ export function BranchView({ branchId }: Props) {
         {describeBranch(branch, t)}
       </T>
 
+      {/* Naming the kind is never asked at creation — this is the moment the
+          user chose to look closely, which is the only moment they can answer
+          it well. An unnamed thread draws achromatic on the map; naming it
+          resolves the line to its colour, so the map fills in over time. */}
+      <View style={{ marginBottom: 14.4 }}>
+        <Prompt>{t("What kind of thing is this?")}</Prompt>
+        <Hint>
+          {branch.type === "unknown"
+            ? t(
+                "Naming it colours its line on the map, and lets the map notice when two threads are pulling in opposite directions.",
+              )
+            : t("Tap a different one if it fits better.")}
+        </Hint>
+        <View style={rowStyles.tagRow} accessibilityLabel={t("What kind of thing is this?")}>
+          {BRANCH_KIND_CHOICES.map((k) => (
+            <Tag
+              key={k.id}
+              label={t(k.label)}
+              quality={branch.kindChoiceId === k.id}
+              pressed={branch.kindChoiceId === k.id}
+              onPress={() =>
+                void updateBranch(branch.id, {
+                  type: k.type,
+                  orientation: k.orientation,
+                  kindChoiceId: k.id,
+                })
+              }
+            />
+          ))}
+        </View>
+        {branch.type === "unknown" && (
+          <Hint style={{ marginBottom: 0 }}>{t("Leaving this unanswered is fine.")}</Hint>
+        )}
+        {/* The most persuasive sentence the app can say about why answering a
+            thread is worth anything — and it was already being computed for
+            the wholeness maths without ever being said out loud. */}
+        {held.length > 0 && (
+          <Hint style={{ marginBottom: 0 }}>
+            {held.length === 1
+              ? t("While this stays open, {a} is less available to you.", { a: t(held[0]) })
+              : t("While this stays open, {a} and {b} are less available to you.", {
+                  a: held.slice(0, -1).map((f) => t(f)).join(", "),
+                  b: t(held[held.length - 1]),
+                })}
+          </Hint>
+        )}
+      </View>
+
       <View style={{ marginBottom: 14.4 }}>
         <TagListEditor
           label={t("What from this still belongs to you now?")}
@@ -255,6 +327,36 @@ export function BranchView({ branchId }: Props) {
           variant="quality"
         />
       </View>
+
+      {/* The curve the psychologist's export has always carried and the person
+          living it never saw. Stored levels, not today's drift: a thread
+          nobody touched must not draw itself a rising line. */}
+      {series && (
+        <DepthLock label={t("How loud this thread has been")}>
+        <View style={{ marginBottom: 14.4, gap: 4 }}>
+          <Sparkline
+            values={series.values}
+            min={1}
+            max={5}
+            width={Math.min(320, width - 72)}
+            height={38}
+            color={branchColor(branch, themeId)}
+            baseline={series.first}
+          />
+          <Hint style={{ margin: 0 }}>
+            {series.first === series.last
+              ? t("holding at {level} for {n} days", {
+                  level: t(loudnessWord(series.last)),
+                  n: series.span,
+                })
+              : t("was {before} · now {after}", {
+                  before: t(loudnessWord(series.first)),
+                  after: t(loudnessWord(series.last)),
+                })}
+          </Hint>
+        </View>
+        </DepthLock>
+      )}
 
       <OptionalDetails summary={t("Compare where it began with Now (optional)")}>
         <Hint>

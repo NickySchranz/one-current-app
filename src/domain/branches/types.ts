@@ -7,7 +7,9 @@ export type BranchOrientation =
   | "outside-control"
   | "identity"
   | "body"
-  | "project";
+  | "project"
+  /** Never named. What a thread carries until the user says what it is. */
+  | "unknown";
 
 export type BranchType =
   | "event"
@@ -16,7 +18,9 @@ export type BranchType =
   | "identity"
   | "relationship"
   | "body"
-  | "project";
+  | "project"
+  /** Never named. What a thread carries until the user says what it is. */
+  | "unknown";
 
 export type BranchStatus =
   | "active"
@@ -53,6 +57,11 @@ export type PsychologicalBranch = {
   description?: string;
   type: BranchType;
   orientation: BranchOrientation;
+  /** Which BRANCH_KIND_CHOICES framing the user picked, once they have named
+   * one. Two choices ("I am waiting for something" / "Something outside my
+   * control is consuming me") share the same type+orientation, so the picker
+   * needs the id to know which one is selected. Absent = never named. */
+  kindChoiceId?: string;
   status: BranchStatus;
   /** ISO date at which the branch forked from the main line. */
   forkDate: string;
@@ -124,6 +133,20 @@ export const BRANCH_KIND_CHOICES: BranchKindChoice[] = [
   { id: "body", label: "My body is affecting everything", type: "body", orientation: "body" },
   { id: "project-idea", label: "An idea needs to become a real project", type: "project", orientation: "project" },
 ];
+
+/**
+ * What every thread is until its kind is named. Deliberately NOT in
+ * BRANCH_KIND_CHOICES: the creation flow never asks (asking someone in
+ * distress to categorise their distress is the wrong moment), so this is
+ * where a thread starts. Naming it later — Understand → "What kind of thing
+ * is this?" — is what colours its line and lets conflict detection see it.
+ */
+export const UNKNOWN_KIND: BranchKindChoice = {
+  id: "unknown",
+  label: "Not named yet",
+  type: "unknown",
+  orientation: "unknown",
+};
 
 /** Statuses whose line still reaches Now as a separate process. */
 export const OPEN_STATUSES: BranchStatus[] = [

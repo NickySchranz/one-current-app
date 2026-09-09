@@ -15,4 +15,12 @@ export const wholeness: Record<string, string> = {
   "pulling hardest right now": "es lo que más te jala en este momento",
   "Every open thread has its decision for today. Nothing more is asked of you.": "Cada hilo abierto ya tiene su decisión de hoy. No se te pide nada más.",
   "Nothing is open right now. Your whole current is moving as one.": "No hay nada abierto en este momento. Toda tu corriente avanza como una sola.",
+  "Today you got back: {list}":
+    "Hoy recuperaste: {list}",
+  "That's it.":
+    "Eso es todo.",
+  "Everything open has its answer for today. Nothing more is asked of you. I'll be here tomorrow.":
+    "Todo lo abierto tiene su respuesta por hoy. No se te pide nada más. Mañana estoy aquí.",
+  "Thank you, Pip":
+    "Gracias, Pip",
 };

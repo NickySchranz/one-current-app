@@ -1,3 +1,4 @@
+import { isClosed, loudnessWord } from "../branches/logic";
 import type { IntegratedAction } from "../actions/types";
 import type { PsychologicalBranch } from "../branches/types";
 import type { BranchMerge } from "../merges/types";
@@ -45,15 +46,26 @@ export function buildShareExport(input: {
   const selected = input.selectedIds
     .map((id) => input.branches.find((b) => b.id === id))
     .filter((b): b is PsychologicalBranch => !!b);
+  const threads = selected.map((b) =>
+    shareThread(b, input.actions, input.merges, input.waiting ?? [], input.from, to),
+  );
+  const inWindow = (on?: string) => !!on && on >= input.from && on <= to;
+  const uniq = (xs: string[]) => [...new Set(xs)].sort();
   return {
     app: "one-current-share",
     version: 1,
     exportedAt: now.toISOString(),
     from: input.from,
     to,
-    threads: selected.map((b) =>
-      shareThread(b, input.actions, input.merges, input.waiting ?? [], input.from, to),
-    ),
+    threads,
+    summary: {
+      opened: selected.filter((b) => inWindow(day(b.firstCreatedAt))).length,
+      integrated: selected.filter((b) => inWindow(b.mergeDate)).length,
+      heldThrough: uniq(selected.filter((b) => !isClosed(b)).flatMap((b) => b.occupies ?? [])),
+      cameBack: uniq(
+        selected.filter((b) => inWindow(b.mergeDate)).flatMap((b) => b.occupies ?? []),
+      ),
+    },
   };
 }
 
@@ -182,6 +194,8 @@ function shareThread(
     returnedCount: branch.recurrenceCount > 0 ? branch.recurrenceCount : undefined,
     waiting: shareWaiting(branch, waiting),
     loudness,
+    loudnessWas: loudness.length > 0 ? loudnessWord(loudness[0].loudness) : undefined,
+    loudnessNow: loudness.length > 0 ? loudnessWord(loudness[loudness.length - 1].loudness) : undefined,
     events,
   };
 }

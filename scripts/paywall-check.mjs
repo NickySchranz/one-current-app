@@ -1,6 +1,9 @@
-/* Paywall checks: at ten open threads the + asks to upgrade, Pro themes are
-   locked but visible, the share file is Pro-only — and the testing unlock in
-   Settings opens all three, while turning it off steps a Pro theme back. */
+/* Paywall checks for the free/Pro split: open threads are NEVER gated (an
+   eleventh thing pulling at you is the moment this app is for), Pro themes are
+   locked but visible, the share file is Pro-only, and the long view — the
+   fortnight trend and the other depth readouts — is Pro but still drawn, dimmed,
+   behind its pill. The testing unlock opens all three, and turning it off steps
+   a Pro theme back. */
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
@@ -69,6 +72,13 @@ localStorage.setItem("one-current-tutorial-v1", "done");
     recurrenceCount: 0,
   }));
   localStorage.setItem("one-current/table/branches", JSON.stringify(branches));
+  // Five past readings so the fortnight trend renders (it needs three).
+  const log = {};
+  for (let i = 1; i <= 5; i++) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    log[d] = 0.4 + i * 0.05;
+  }
+  localStorage.setItem("one-current-wholeness-log", JSON.stringify(log));
   const original = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function () {
     if (this.download) {
@@ -86,16 +96,37 @@ localStorage.setItem("one-current-tutorial-v1", "done");
 await page.goto("http://localhost:4181/");
 await page.waitForTimeout(1800);
 
-// 1. the eleventh thread meets the paywall, not the create form
+// 1. an eleventh thread is not gated, at any number. Someone with eleven
+// things on their mind is exactly who this is for; refusing them there was
+// the one paywall that could land on a bad day.
 await page.getByLabel("New thread").first().click();
 await page.waitForTimeout(600);
 check(
-  "create gated at ten open threads",
-  await page.getByText("Ten threads is the free current").isVisible(),
+  "eleventh thread opens the form, not a paywall",
+  (await page.getByLabel("Name the thread").count()) > 0,
 );
 check(
-  "create form did not open",
-  (await page.getByLabel("Name the thread").count()) === 0,
+  "no upgrade prompt on create",
+  (await page.getByRole("button", { name: "Not now" }).count()) === 0,
+);
+await page.keyboard.press("Escape");
+await page.waitForTimeout(200);
+await page.keyboard.press("Escape");
+await page.getByLabel("Name the thread").waitFor({ state: "detached", timeout: 5000 });
+await page.waitForTimeout(400);
+
+// 1b. what IS gated: the long view. It stays drawn behind its pill — the
+// shape is the argument for buying it.
+const chip = page.getByRole("button", { name: /moves with your main line/ }).first();
+await chip.click();
+await page.waitForTimeout(400);
+const trendLock = page.getByRole("button", { name: "your last two weeks · Pro" });
+check("the fortnight trend is locked but present", (await trendLock.count()) === 1);
+await trendLock.click();
+await page.waitForTimeout(500);
+check(
+  "the long view opens the upgrade prompt",
+  await page.getByText("Pro keeps the long view").isVisible(),
 );
 await page.getByRole("button", { name: "Not now" }).click();
 await page.waitForTimeout(400);
@@ -158,17 +189,13 @@ const share = JSON.parse(await page.evaluate(() => window.__captured));
 check("share file produced with Pro", share.threads?.length === 1);
 await page.getByRole("button", { name: "Now" }).first().click();
 await page.waitForTimeout(600);
-await page.getByLabel("New thread").first().click();
-await page.waitForTimeout(600);
+await page.getByRole("button", { name: /moves with your main line/ }).first().click();
+await page.waitForTimeout(400);
 check(
-  "eleventh thread allowed with Pro",
-  (await page.getByLabel("Name the thread").count()) > 0,
+  "the long view is unlocked with Pro",
+  (await page.getByRole("button", { name: "your last two weeks · Pro" }).count()) === 0,
 );
-// First Escape only blurs the focused title field; the second sets the tray down.
 await page.keyboard.press("Escape");
-await page.waitForTimeout(200);
-await page.keyboard.press("Escape");
-await page.getByLabel("Name the thread").waitFor({ state: "detached", timeout: 5000 });
 await page.waitForTimeout(400);
 
 // 5. losing Pro steps the Pro theme back to the default

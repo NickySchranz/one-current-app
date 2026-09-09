@@ -38,7 +38,6 @@ import { effectiveLoudness, isClosed, mostActivated } from "@/domain/branches/lo
 import { decidedToday, energySplit, handledToday } from "@/domain/feelings/logic";
 import type { PsychologicalBranch, Loudness } from "@/domain/branches/types";
 import { BranchLine, lineTrembles, phaseFromId } from "./BranchLine";
-import { PaywallPrompt, useThreadGate } from "@/features/paywall/PaywallPrompt";
 import { TimelineHelp } from "@/features/timeline-help/TimelineHelp";
 import { WholenessIndicator } from "./WholenessIndicator";
 import { branchColor, restingToday } from "@/visualization/branch-lines/style";
@@ -453,8 +452,6 @@ export function LifeTimeline() {
   const operation = useAppStore((s) => s.operation);
   const reclaim = useAppStore((s) => s.reclaim);
   const clearReclaim = useAppStore((s) => s.clearReclaim);
-  const canOpenThread = useThreadGate();
-  const [paywalled, setPaywalled] = useState(false);
   const born = useAppStore((s) => s.born);
   const clearBorn = useAppStore((s) => s.clearBorn);
   const added = useAppStore((s) => s.added);
@@ -2171,11 +2168,21 @@ export function LifeTimeline() {
   useEffect(() => {
     if (!reclaimKey || !showMascot) return;
     if (answered && answered.branchId === reclaim?.branchId) return;
-    // One thing carried back is enough for the warmer pool. Three required the
-    // optional sections of the understand panel to have been filled in first,
-    // which made four authored lines all but unreachable.
-    const pool = (reclaim?.feelings?.length ?? 0) >= 1 ? mascot.phrases.mergeDeep : mascot.phrases.merge;
-    setTimeout(() => mascotReactionRef.current?.(randomFrom(pool)), 600);
+    // The tags are already flying home; Pip names them as they land. Saying
+    // "calm and sleep came back to you" is the app's whole claim stated at the
+    // one moment it is demonstrably true — a generic warm phrase here wastes
+    // it. Only when nothing was named does an authored line stand in.
+    const names = reclaim?.feelings ?? [];
+    const said =
+      names.length === 1
+        ? t("{a} came back to you.", { a: t(names[0]) })
+        : names.length > 1
+          ? t("{a} and {b} came back to you.", {
+              a: names.slice(0, -1).map((f) => t(f)).join(", "),
+              b: t(names[names.length - 1]),
+            })
+          : randomFrom(mascot.phrases.merge);
+    setTimeout(() => mascotReactionRef.current?.(said), 600);
   }, [reclaimKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fire mascot reaction on new branch (born event)
@@ -3505,7 +3512,7 @@ export function LifeTimeline() {
           accessibilityRole="button"
           accessibilityLabel={t("New thread")}
           onPress={() =>
-            canOpenThread ? setOperation({ kind: "creating-branch" }) : setPaywalled(true)
+            setOperation({ kind: "creating-branch" })
           }
           style={({ pressed, hovered }: PressableStateCallbackType & {
             hovered?: boolean;
@@ -3532,11 +3539,6 @@ export function LifeTimeline() {
           <T style={{ color: tk.accentInk, fontSize: 24, lineHeight: 28 }}>+</T>
         </Pressable>
         )}
-
-        <PaywallPrompt
-          reason={paywalled ? "thread-limit" : null}
-          onClose={() => setPaywalled(false)}
-        />
 
         <TimelineHelp />
 

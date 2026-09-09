@@ -1,3 +1,4 @@
+import { mix } from "@/ui/color";
 /**
  * Pixel-art frames for "Pip" — your timeline buddy.
  *
@@ -402,3 +403,29 @@ export const CHARACTER_FRAMES: Record<MascotType, Record<FrameName, Pixel[]>> = 
 };
 
 export const FRAMES = CHARACTER_FRAMES;
+
+/**
+ * The pixel palette Pip is drawn with, tinted to the active theme's accent.
+ * Shared by every card that shows him outside the map (the walkthrough, the
+ * return card) so they cannot drift apart.
+ */
+export function resolvePalette(accent: string): Record<ColorKey, string> {
+  return {
+    D: "#1a1a1a",
+    A: accent,
+    Ad: mix(accent, "#000000", 65),
+    Ah: mix(accent, "#ffffff", 55),
+    S: "#f5c38c",
+    Sd: "#c4864e",
+    Ss: "#fde6be",
+    W: "#ffffff",
+    P: "#1a1a1a",
+    R: "#e8836a",
+    G: "#f0c040",
+    Gd: "#b88620",
+    Bl: "#3a6ad4",
+    Bd: "#1a3fa0",
+    Bh: "#6e96f5",
+    Sh2: "rgba(0,0,0,0.18)",
+  };
+}

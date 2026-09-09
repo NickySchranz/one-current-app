@@ -13,8 +13,7 @@ import { T } from "@/ui/primitives";
 import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
 import { mix } from "@/ui/color";
-import type { ColorKey } from "@/features/life-timeline/mascot-frames";
-import { CHARACTER_FRAMES, PX } from "@/features/life-timeline/mascot-frames";
+import { CHARACTER_FRAMES, PX, resolvePalette } from "@/features/life-timeline/mascot-frames";
 import { WALKTHROUGH_STEPS, walkthroughIndex, walkthroughStep } from "./steps";
 import { measureWalkthroughTarget, type TargetRect } from "./targets";
 
@@ -23,27 +22,6 @@ const HALO_PAD = 10;
 /** A point target (a spot on the SVG canvas) gets a circle this wide. */
 const POINT_HALO = 44;
 const CARD_MAX_W = 420;
-
-function resolvePalette(accent: string): Record<ColorKey, string> {
-  return {
-    D: "#1a1a1a",
-    A: accent,
-    Ad: mix(accent, "#000000", 65),
-    Ah: mix(accent, "#ffffff", 55),
-    S: "#f5c38c",
-    Sd: "#c4864e",
-    Ss: "#fde6be",
-    W: "#ffffff",
-    P: "#1a1a1a",
-    R: "#e8836a",
-    G: "#f0c040",
-    Gd: "#b88620",
-    Bl: "#3a6ad4",
-    Bd: "#1a3fa0",
-    Bh: "#6e96f5",
-    Sh2: "rgba(0,0,0,0.18)",
-  };
-}
 
 /** The soft pulsing ring that rests on the step's target. */
 function Halo({ rect, reduced, accent }: { rect: TargetRect; reduced: boolean; accent: string }) {

@@ -69,6 +69,7 @@ export function applyResting(style: LineStyle): LineStyle {
  * but branches of the same type share a hue family.
  */
 const TYPE_HUE: Record<PsychologicalBranch["type"], number> = {
+  unknown: 215, // hue unused — an unnamed thread draws achromatic (see branchColor)
   event: 215, // slate blue
   waiting: 190, // calm teal
   projection: 260, // dusk violet
@@ -84,13 +85,28 @@ function hash(text: string): number {
   return Math.abs(h);
 }
 
+/**
+ * A thread whose kind was never named draws as a pencil line: complete and
+ * legible, but visibly not yet coloured in. Achromatic rather than grey-dead —
+ * a few points of saturation keep it alive next to the coloured lines. Naming
+ * the kind (Understand → "What kind of thing is this?") resolves it to its
+ * hue, so the map colours in as the user comes to understand their threads.
+ */
+const UNKNOWN_SATURATION = 7;
+
 export function branchColor(
   branch: Pick<PsychologicalBranch, "id" | "type">,
   theme: ThemeId,
   saturation: LineStyle["saturation"] = "normal",
 ): string {
+  const named = branch.type !== "unknown";
   const hue = (TYPE_HUE[branch.type] + (hash(branch.id) % 24) - 12 + 360) % 360;
-  const sat = saturation === "raised" ? 46 : saturation === "muted" ? 18 : 32;
+  const full = saturation === "raised" ? 46 : saturation === "muted" ? 18 : 32;
+  // The unnamed line still answers to emphasis and muting, just within a much
+  // narrower band, so status and resting stay readable without colour.
+  const sat = named
+    ? full
+    : Math.round((UNKNOWN_SATURATION * full) / 32);
   const lig = themeMode(theme) === "dark" ? 68 : 42;
   return `hsl(${hue} ${sat}% ${lig}%)`;
 }
