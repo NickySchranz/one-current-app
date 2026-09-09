@@ -35,7 +35,13 @@ jobs:
           # still get the Testing card: `EXPO_PUBLIC_SHOW_TESTING=1 npm run web`.
       - run: node scripts/inject-head.mjs dist/index.html
       - name: Deploy
-        run: npx wrangler pages deploy dist --project-name=one-current-app
+        # --branch is REQUIRED here, not optional. actions/checkout leaves a
+        # detached HEAD, so wrangler cannot infer the branch and every upload
+        # lands as a PREVIEW deployment on a hash-prefixed pages.dev URL —
+        # the run goes green while app.onecurrentapp.com keeps serving an old
+        # build. Pages only promotes a deployment whose branch matches the
+        # project's production branch.
+        run: npx wrangler pages deploy dist --project-name=one-current-app --branch=main
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
