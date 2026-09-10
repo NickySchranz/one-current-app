@@ -4,11 +4,12 @@
  */
 
 import { View } from "react-native";
-import Svg, { G, Rect } from "react-native-svg";
+import Svg, { G, Path } from "react-native-svg";
 import { useMemo, useState, useEffect, useRef } from "react";
 import type { ThemeTokens } from "@/ui/theme";
 import { mix } from "@/ui/color";
 import type { ColorKey, FrameName, MascotType, Pixel } from "./mascot-frames";
+import { spritePaths } from "./sprite-path";
 import { CHARACTER_FRAMES, PX } from "./mascot-frames";
 
 // ─── Wellness ────────────────────────────────────────────────────────────────
@@ -87,15 +88,9 @@ export function HistoryMascot({ wellness, mascotType, theme }: Props) {
     <View style={{ marginLeft: "auto" }}>
       <Svg width={spriteW} height={spriteH}>
         <G>
-          {pixels.map((p: Pixel, i: number) => (
-            <Rect
-              key={i}
-              x={p.c * HIST_PX}
-              y={p.r * HIST_PX}
-              width={HIST_PX - 0.2}
-              height={HIST_PX - 0.2}
-              fill={palette[p.k]}
-            />
+          {/* one path per colour rather than one node per pixel — see sprite-path.ts */}
+          {[...spritePaths(pixels, HIST_PX, 0.2)].map(([k, d]) => (
+            <Path key={k} d={d} fill={palette[k]} />
           ))}
         </G>
       </Svg>

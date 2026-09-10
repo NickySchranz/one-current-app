@@ -12,11 +12,12 @@ import Animated, {
   useDerivedValue,
   type SharedValue,
 } from "react-native-reanimated";
-import { G, Rect, Text as SvgText, Circle, Polygon } from "react-native-svg";
+import { G, Path, Rect, Text as SvgText, Circle, Polygon } from "react-native-svg";
 import type { ThemeTokens } from "@/ui/theme";
 import { mix } from "@/ui/color";
 import type { ColorKey, FrameName, MascotType, Pixel } from "./mascot-frames";
 import { CHARACTER_FRAMES, PX } from "./mascot-frames";
+import { spritePaths } from "./sprite-path";
 import { swayOffsetAt, type GripRide, type SwayRide } from "./useSquiggle";
 import { ringOffset } from "@/visualization/vertical/transpose";
 
@@ -45,11 +46,13 @@ function resolveColors(accent: string): Record<ColorKey, string> {
 
 // ─── Pixel grid ───────────────────────────────────────────────────────────────
 
+/** One <Path> per colour — see sprite-path.ts for why. */
 function PixelGrid({ pixels, palette }: { pixels: Pixel[]; palette: Record<ColorKey, string> }) {
+  const paths = useMemo(() => spritePaths(pixels, PX, 0.15), [pixels]);
   return (
     <>
-      {pixels.map((p, i) => (
-        <Rect key={i} x={p.c * PX} y={p.r * PX} width={PX - 0.15} height={PX - 0.15} fill={palette[p.k]} />
+      {[...paths].map(([k, d]) => (
+        <Path key={k} d={d} fill={palette[k]} />
       ))}
     </>
   );
