@@ -1,3 +1,4 @@
+import { memo } from "react";
 /**
  * A cat for the Catnap theme: each open thread ends in a small face watching
  * you from Now. A quiet thread is a drowsy cat; a louder one stares — pupils
@@ -36,7 +37,7 @@ type Props = {
   onPress?: () => void;
 };
 
-export function CatHead({ x, y, scale = 1, color, loudness = 3, onPress }: Props) {
+function CatHead__inner({ x, y, scale = 1, color, loudness = 3, onPress }: Props) {
   const g = Math.max(1, Math.min(5, loudness));
   const earFlat = (g - 1) * 6; // degrees the ears rotate outward
   const pupil = 0.3 + (g - 1) * 0.17; // pupils blow wide
@@ -79,3 +80,9 @@ export function CatHead({ x, y, scale = 1, color, loudness = 3, onPress }: Props
     </G>
   );
 }
+
+// ── Memo boundaries ───────────────────────────────────────────────────────────
+// These render inside the timeline's hot tree. Their props are primitives and
+// shared values, so a memo boundary here stops an unrelated state change in
+// LifeTimeline from re-reconciling hundreds of SVG nodes.
+export const CatHead = memo(CatHead__inner);

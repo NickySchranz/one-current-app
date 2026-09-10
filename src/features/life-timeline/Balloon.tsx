@@ -1,3 +1,4 @@
+import { memo } from "react";
 /**
  * A balloon for the Carnival theme: each open thread ends in one, tied to the
  * line at Now. The longer a thread waits, the fuller its balloon — it swells,
@@ -22,7 +23,7 @@ type Props = {
   onPress?: () => void;
 };
 
-export function Balloon({ x, y, scale = 1, color, loudness = 3, onPress }: Props) {
+function Balloon__inner({ x, y, scale = 1, color, loudness = 3, onPress }: Props) {
   const g = Math.max(1, Math.min(5, loudness));
   const grow = 1 + (g - 1) * 0.09;
   const tilt = (g - 1) * 3.5;
@@ -78,3 +79,9 @@ export function Balloon({ x, y, scale = 1, color, loudness = 3, onPress }: Props
     </G>
   );
 }
+
+// ── Memo boundaries ───────────────────────────────────────────────────────────
+// These render inside the timeline's hot tree. Their props are primitives and
+// shared values, so a memo boundary here stops an unrelated state change in
+// LifeTimeline from re-reconciling hundreds of SVG nodes.
+export const Balloon = memo(Balloon__inner);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   Pressable,
   useWindowDimensions,
@@ -119,7 +119,7 @@ type Props = {
  * as decisions are taken. Tapping it opens a small panel that says how the day
  * may feel and suggests where one decision would help most.
  */
-export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
+function WholenessIndicator__inner({ activeLines, onChipHeight }: Props) {
   const t = useT();
   const tk = useTheme();
   const chipTarget = useWalkthroughTarget("wholeness");
@@ -436,3 +436,9 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
     </View>
   );
 }
+
+// ── Memo boundaries ───────────────────────────────────────────────────────────
+// These render inside the timeline's hot tree. Their props are primitives and
+// shared values, so a memo boundary here stops an unrelated state change in
+// LifeTimeline from re-reconciling hundreds of SVG nodes.
+export const WholenessIndicator = memo(WholenessIndicator__inner);

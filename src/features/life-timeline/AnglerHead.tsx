@@ -1,3 +1,4 @@
+import { memo } from "react";
 /**
  * An anglerfish for the Abyss theme: each open thread ends in one hanging in
  * the dark at Now. The quiet ones drift with the jaw nearly closed; a louder
@@ -41,7 +42,7 @@ type Props = {
   onPress?: () => void;
 };
 
-export function AnglerHead({ x, y, scale = 1, color, loudness = 3, onPress }: Props) {
+function AnglerHead__inner({ x, y, scale = 1, color, loudness = 3, onPress }: Props) {
   const g = Math.max(1, Math.min(5, loudness));
   const glow = 0.2 + (g - 1) * 0.2;
   const gape = (g - 1) * 0.55; // the jaw drops as the thread gets louder
@@ -101,3 +102,9 @@ export function AnglerHead({ x, y, scale = 1, color, loudness = 3, onPress }: Pr
     </G>
   );
 }
+
+// ── Memo boundaries ───────────────────────────────────────────────────────────
+// These render inside the timeline's hot tree. Their props are primitives and
+// shared values, so a memo boundary here stops an unrelated state change in
+// LifeTimeline from re-reconciling hundreds of SVG nodes.
+export const AnglerHead = memo(AnglerHead__inner);

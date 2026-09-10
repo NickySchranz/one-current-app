@@ -7,7 +7,7 @@
  * accessibility roles on SVG groups (the web renderer would swallow them).
  */
 
-import { useEffect, useMemo } from "react";
+import { memo, useEffect, useMemo } from "react";
 import Animated, {
   cancelAnimation,
   useAnimatedProps,
@@ -120,7 +120,7 @@ function flank(
  * marks on the rock there is nothing to see moving. Two batched paths, built
  * once per mountain.
  */
-export function FaceTexture({
+function FaceTexture__inner({
   routeX,
   peakY,
   bottomY,
@@ -220,7 +220,7 @@ export function FaceTexture({
  * the summit nears. Parallax is the other half of "he is going up" — the rock
  * rushing past at full speed, the sky drifting behind it.
  */
-export function SkyParallax({
+function SkyParallax__inner({
   peakY,
   bottomY,
   width,
@@ -280,7 +280,7 @@ export function SkyParallax({
  * height. Deterministic and periodic in altitude, so every band of the climb
  * has ridges in it.
  */
-export function DistantCliffs({
+function DistantCliffs__inner({
   routeX,
   faceHalf,
   width,
@@ -354,7 +354,7 @@ export function DistantCliffs({
   );
 }
 
-export function MountainFace({
+function MountainFace__inner({
   routeX,
   peakY,
   faceHalf,
@@ -458,7 +458,7 @@ export function MountainFace({
  * A little cliff ledge: the shelf a rope is anchored to. The climber ends
  * an answered rope standing here; the coil rests on it until tomorrow.
  */
-export function CliffLedge({ x, y, tk }: { x: number; y: number; tk: ThemeTokens }) {
+function CliffLedge__inner({ x, y, tk }: { x: number; y: number; tk: ThemeTokens }) {
   return (
     <G pointerEvents="none">
       {/* the rock underside */}
@@ -494,7 +494,7 @@ export function CliffLedge({ x, y, tk }: { x: number; y: number; tk: ThemeTokens
  * renders, fed by useSummitCurrent, plus the faded unclimbed continuation
  * above the ledge and an arrowhead pointing at the summit.
  */
-export function SummitRoute({
+function SummitRoute__inner({
   current,
   routeX,
   nowScreenY,
@@ -591,7 +591,7 @@ export function SummitRoute({
 }
 
 /** The day's ledge: a small platform with a snow cap at the Now point. */
-export function Ledge({
+function Ledge__inner({
   routeX,
   nowScreenY,
   tk,
@@ -627,7 +627,7 @@ export function Ledge({
  * An answered rope, off the face for the day: a small coil resting at its
  * anchor, still tappable. The date compare brings the rope back tomorrow.
  */
-export function CoiledRope({
+function CoiledRope__inner({
   x,
   y,
   color,
@@ -703,7 +703,7 @@ const FRAY = "#f0e3c8";
  * visual — finalizeBurn does the removing; the caller gates reduced motion.
  * Same duration as BurnAway so the burn flow's timers need no change.
  */
-export function RopeCut({
+function RopeCut__inner({
   path,
   /** Where along the rope the cut lands (world y). Defaults to just under the
    * anchor, which is right for a short rope — but a summit rope's anchor is
@@ -829,3 +829,17 @@ export function RopeCut({
     </G>
   );
 }
+
+// ── Memo boundaries ───────────────────────────────────────────────────────────
+// These render inside the timeline's hot tree. Their props are primitives and
+// shared values, so a memo boundary here stops an unrelated state change in
+// LifeTimeline from re-reconciling hundreds of SVG nodes.
+export const FaceTexture = memo(FaceTexture__inner);
+export const SkyParallax = memo(SkyParallax__inner);
+export const DistantCliffs = memo(DistantCliffs__inner);
+export const MountainFace = memo(MountainFace__inner);
+export const CliffLedge = memo(CliffLedge__inner);
+export const SummitRoute = memo(SummitRoute__inner);
+export const Ledge = memo(Ledge__inner);
+export const CoiledRope = memo(CoiledRope__inner);
+export const RopeCut = memo(RopeCut__inner);

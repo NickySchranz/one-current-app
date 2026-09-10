@@ -22,7 +22,7 @@
  * measured bounding box in drawing units.
  */
 
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import Animated, {
   cancelAnimation,
   Easing,
@@ -128,7 +128,7 @@ type Props = {
   onPress?: () => void;
 };
 
-export function Pomeranian({
+function Pomeranian__inner({
   x,
   y,
   scale = 1,
@@ -408,3 +408,9 @@ export function Pomeranian({
     </G>
   );
 }
+
+// ── Memo boundaries ───────────────────────────────────────────────────────────
+// These render inside the timeline's hot tree. Their props are primitives and
+// shared values, so a memo boundary here stops an unrelated state change in
+// LifeTimeline from re-reconciling hundreds of SVG nodes.
+export const Pomeranian = memo(Pomeranian__inner);

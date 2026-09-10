@@ -51,7 +51,9 @@ type CreatureProps = {
   reducedMotion?: boolean;
   onPress?: () => void;
 };
-const CREATURES: Partial<Record<ThemeId, (props: CreatureProps) => React.JSX.Element>> = {
+// Creatures are memoized (see each sprite file), so this is a ComponentType
+// rather than a bare function type — memo() returns a MemoExoticComponent.
+const CREATURES: Partial<Record<ThemeId, React.ComponentType<CreatureProps>>> = {
   demonfire: DragonHead,
   koipond: KoiFish,
   carnival: Balloon,

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 import Animated, {
   cancelAnimation,
   interpolateColor,
@@ -165,7 +165,7 @@ const GLOWS: Partial<Record<ThemeId, GlowSpec | null>> = {
 const DEFAULT_GLOW: GlowSpec = { duration: 3000, easing: easeInOut, stops: breathe };
 
 /** The breathing halo behind the Now dot, in the theme's own rhythm. */
-export function NowGlow({
+function NowGlow__inner({
   cx,
   cy,
   fill,
@@ -249,7 +249,7 @@ export function useDashFlow(
 }
 
 /** `.merge-preview-target`: a breathing ring at Now while a merge is considered. */
-export function MergePreviewTarget({
+function MergePreviewTarget__inner({
   cx,
   cy,
   stroke,
@@ -295,7 +295,7 @@ export function MergePreviewTarget({
  * `.reclaim-chip` — a feeling flying home from a decided line to Now
  * (`@keyframes reclaim-fly`, 1.7s ease-in-out, staggered 0.14s apart).
  */
-export function ReclaimFly({
+function ReclaimFly__inner({
   index,
   x0,
   y0,
@@ -368,7 +368,7 @@ const CHAR = "#3a2f28";
  * is done. Purely visual — finalizeBurn does the removing. Caller gates
  * reduce motion.
  */
-export function BurnAway({ path, durationMs = 2800 }: { path: string; durationMs?: number }) {
+function BurnAway__inner({ path, durationMs = 2800 }: { path: string; durationMs?: number }) {
   const len = pathLength(path);
   const points = samplePath(path, 8);
   const progress = useSharedValue(0);
@@ -600,7 +600,7 @@ const CHALK_RIM = "#9aa7b4";
 const THROW = 0.18;
 
 /** One flying particle of an impact: shoots outward, arcs, fades. */
-export function Fleck({ x, y, angle, dist, size, color, rise, delay, t }: {
+function Fleck__inner({ x, y, angle, dist, size, color, rise, delay, t }: {
   x: number;
   y: number;
   angle: number;
@@ -625,7 +625,7 @@ export function Fleck({ x, y, angle, dist, size, color, rise, delay, t }: {
 }
 
 /** The expanding shockwave at the point of impact. */
-export function Shockwave({ x, y, color, t, scale = 1, delay = 0 }: {
+function Shockwave__inner({ x, y, color, t, scale = 1, delay = 0 }: {
   x: number;
   y: number;
   color: string;
@@ -787,7 +787,7 @@ type AttackFxProps = {
  * each strike's per-frame work exists only where it is actually drawn — the
  * chalk's worklets must not tick through a bonk on the twelve flat maps.
  */
-export function AttackFx(props: AttackFxProps) {
+function AttackFx__inner(props: AttackFxProps) {
   if (props.variant === "summit") return <ChalkFx {...props} />;
   return <StrikeFx {...props} />;
 }
@@ -1155,7 +1155,7 @@ function CelebrationRing({ x, y, delay, color }: { x: number; y: number; delay: 
  * flight of theme-true particles lifts off the whole line. Mount it once at
  * the crossing into the sacred state; unmount after ~3s.
  */
-export function CelebrationBurst({
+function CelebrationBurst__inner({
   theme,
   nowX,
   mainY,
@@ -1344,7 +1344,7 @@ function BackdropParticle({
  * behind the transparent canvas). `mood` is the wholeness score 0..1 — the
  * layer glides toward warm/bright/serene as it rises.
  */
-export function ThemeBackdrop({
+function ThemeBackdrop__inner({
   theme,
   width,
   height,
@@ -1828,7 +1828,7 @@ function SceneOrb({
  * opacity glides with the wholeness mood. Under reduced motion everything
  * renders, but perfectly still.
  */
-export function ThemeScenery({
+function ThemeScenery__inner({
   theme,
   width,
   height,
@@ -2244,7 +2244,7 @@ export const COIN_LEAD = 24;
  * (the parent swaps this for a TokenFly). Transient FX: full-rate motion
  * is intentional.
  */
-export function CoinToken({ x, y, gold, accent, theme, fade = 1, reducedMotion }: {
+function CoinToken__inner({ x, y, gold, accent, theme, fade = 1, reducedMotion }: {
   x: number;
   y: number;
   gold: string;
@@ -2336,7 +2336,7 @@ export const COIN_FLY_MS = 650;
  * overlay (like ReclaimFly); the parent unmounts it after COIN_FLY_MS and
  * banks the charge.
  */
-export function TokenFly({ x0, y0, x1, y1, gold, theme }: {
+function TokenFly__inner({ x0, y0, x1, y1, gold, theme }: {
   x0: number;
   y0: number;
   x1: number;
@@ -2383,7 +2383,7 @@ export function TokenFly({ x0, y0, x1, y1, gold, theme }: {
  * `.charge-pop` — the "+10" that hops off the bonk pill as a token lands:
  * the reward, made visible where it now lives.
  */
-export function ChargePop({ right, bottom, label, color }: {
+function ChargePop__inner({ right, bottom, label, color }: {
   right: number;
   bottom: number;
   label: string;
@@ -2411,7 +2411,7 @@ export function ChargePop({ right, bottom, label, color }: {
  * and a few flecks where the thread just "popped" into its panel. Self-
  * driving; the parent mounts it keyed and clears it on a short timer.
  */
-export function PopBurst({ x, y, color }: { x: number; y: number; color: string }) {
+function PopBurst__inner({ x, y, color }: { x: number; y: number; color: string }) {
   const t = useSharedValue(0);
   useEffect(() => {
     t.value = 0;
@@ -2438,3 +2438,22 @@ export function PopBurst({ x, y, color }: { x: number; y: number; color: string 
     </G>
   );
 }
+
+// ── Memo boundaries ───────────────────────────────────────────────────────────
+// These render inside the timeline's hot tree. Their props are primitives and
+// shared values, so a memo boundary here stops an unrelated state change in
+// LifeTimeline from re-reconciling hundreds of SVG nodes.
+export const NowGlow = memo(NowGlow__inner);
+export const MergePreviewTarget = memo(MergePreviewTarget__inner);
+export const ReclaimFly = memo(ReclaimFly__inner);
+export const BurnAway = memo(BurnAway__inner);
+export const AttackFx = memo(AttackFx__inner);
+export const CelebrationBurst = memo(CelebrationBurst__inner);
+export const ThemeBackdrop = memo(ThemeBackdrop__inner);
+export const ThemeScenery = memo(ThemeScenery__inner);
+export const CoinToken = memo(CoinToken__inner);
+export const TokenFly = memo(TokenFly__inner);
+export const ChargePop = memo(ChargePop__inner);
+export const PopBurst = memo(PopBurst__inner);
+export const Fleck = memo(Fleck__inner);
+export const Shockwave = memo(Shockwave__inner);

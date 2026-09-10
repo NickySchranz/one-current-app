@@ -3,7 +3,7 @@
  * Driven by plain JS state from useMascot (web + native compatible).
  */
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { Platform } from "react-native";
 import Animated, {
   useAnimatedProps,
@@ -297,7 +297,7 @@ const AnimatedG = Animated.createAnimatedComponent(G);
  * ±10px of hand height is under a pixel of offset. */
 const HAND_DY = PX * 7;
 
-export function Mascot({
+function Mascot__inner({
   posX, posY, frame, flip, mascotType,
   bubbleO, bubbleText, showTapHint, theme, onPress, runPhase,
   viewW = 0,
@@ -432,3 +432,9 @@ export function Mascot({
     </AnimatedG>
   );
 }
+
+// ── Memo boundaries ───────────────────────────────────────────────────────────
+// These render inside the timeline's hot tree. Their props are primitives and
+// shared values, so a memo boundary here stops an unrelated state change in
+// LifeTimeline from re-reconciling hundreds of SVG nodes.
+export const Mascot = memo(Mascot__inner);

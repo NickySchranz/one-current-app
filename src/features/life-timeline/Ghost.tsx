@@ -1,3 +1,4 @@
+import { memo } from "react";
 /**
  * A little ghost for the Gravemist theme: each open thread ends in one
  * hovering at Now. A quiet thread hums with a small round mouth; the longer
@@ -33,7 +34,7 @@ type Props = {
   onPress?: () => void;
 };
 
-export function Ghost({ x, y, scale = 1, color, loudness = 3, onPress }: Props) {
+function Ghost__inner({ x, y, scale = 1, color, loudness = 3, onPress }: Props) {
   const g = Math.max(1, Math.min(5, loudness));
   const lean = (g - 1) * 2;
   const eyeRy = 1 + (g - 1) * 0.12;
@@ -69,3 +70,9 @@ export function Ghost({ x, y, scale = 1, color, loudness = 3, onPress }: Props) 
     </G>
   );
 }
+
+// ── Memo boundaries ───────────────────────────────────────────────────────────
+// These render inside the timeline's hot tree. Their props are primitives and
+// shared values, so a memo boundary here stops an unrelated state change in
+// LifeTimeline from re-reconciling hundreds of SVG nodes.
+export const Ghost = memo(Ghost__inner);

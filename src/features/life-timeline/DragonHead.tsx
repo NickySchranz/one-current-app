@@ -1,3 +1,4 @@
+import { memo } from "react";
 /**
  * A dragon head for the Demonfire theme: each open thread ends in one, facing
  * Now — the demon you are facing. Fiercer than a mascot but still a drawing,
@@ -93,7 +94,7 @@ type Props = {
   onPress?: () => void;
 };
 
-export function DragonHead({ x, y, scale = 1, color, loudness = 3, onPress }: Props) {
+function DragonHead__inner({ x, y, scale = 1, color, loudness = 3, onPress }: Props) {
   const glow = Math.max(1, Math.min(5, loudness));
   return (
     <G transform={`translate(${x}, ${y}) scale(${scale})`} onPress={onPress}>
@@ -161,3 +162,9 @@ export function DragonHead({ x, y, scale = 1, color, loudness = 3, onPress }: Pr
     </G>
   );
 }
+
+// ── Memo boundaries ───────────────────────────────────────────────────────────
+// These render inside the timeline's hot tree. Their props are primitives and
+// shared values, so a memo boundary here stops an unrelated state change in
+// LifeTimeline from re-reconciling hundreds of SVG nodes.
+export const DragonHead = memo(DragonHead__inner);
