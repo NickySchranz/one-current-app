@@ -38,6 +38,7 @@ import { describeTimeline } from "@/visualization/a11y/describe";
 import { effectiveLoudness, isClosed, mostActivated } from "@/domain/branches/logic";
 import { decidedToday, energySplit, handledToday } from "@/domain/feelings/logic";
 import type { PsychologicalBranch, Loudness } from "@/domain/branches/types";
+import { ChargePopLayer } from "./ChargePopLayer";
 import { BranchLine, lineTrembles, phaseFromId } from "./BranchLine";
 import { TimelineHelp } from "@/features/timeline-help/TimelineHelp";
 import { WholenessIndicator } from "./WholenessIndicator";
@@ -47,7 +48,7 @@ import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
 import { alpha, mix } from "@/ui/color";
 import { Button, Hint, Prompt, shadow, T, Tag } from "@/ui/primitives";
-import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, ChargePop, CoinToken, COIN_FLY_MS, COIN_HOVER, COIN_LEAD, LungeG, MergePreviewTarget, NowGlow, PopBurst, ReclaimFly, SmokeFly, ThemeBackdrop, ThemeScenery, TokenFly, useDashFlow } from "./timeline-fx";
+import { AnimatedPath, AttackFx, attackVariantFor, BurnAway, CelebrationBurst, CoinToken, COIN_FLY_MS, COIN_HOVER, COIN_LEAD, LungeG, MergePreviewTarget, NowGlow, PopBurst, ReclaimFly, SmokeFly, ThemeBackdrop, ThemeScenery, TokenFly, useDashFlow } from "./timeline-fx";
 import { Mascot, estTextWidth } from "./Mascot";
 import { PX } from "./mascot-frames";
 import { useMascot, randomFrom } from "./useMascot";
@@ -1145,7 +1146,7 @@ export function LifeTimeline() {
       setWalkthroughPoint("thread", null);
       return;
     }
-    const g = layout.geometries.find((geo) => geo.branchId === tutorialBranchId);
+    const g = geoById.get(tutorialBranchId);
     if (!g || !g.inWindow) {
       setWalkthroughPoint("thread", null);
       return;
@@ -1173,7 +1174,7 @@ export function LifeTimeline() {
   useEffect(() => {
     let target = 0;
     if (focusedBranchId) {
-      const g = layout.geometries.find((geo) => geo.branchId === focusedBranchId);
+      const g = geoById.get(focusedBranchId);
       if (g && g.inWindow) {
         // Base-coordinate delta either way: summit's mainShift feeds the same
         // underlying builder, so the route leans toward the rope's column.
@@ -1227,7 +1228,7 @@ export function LifeTimeline() {
       // only the focused rope's column needs to come on screen sideways.
       const anchorId = focusedBranchId;
       if (!anchorId || !sm) return;
-      const g = layout.geometries.find((geo) => geo.branchId === anchorId);
+      const g = geoById.get(anchorId);
       if (!g || !g.inWindow) return;
       const maxScroll = Math.max(0, sm.laneSpan + 84 - size.width);
       const anchor = ((g.laneX ?? sm.routeX) + sm.routeX) / 2;
@@ -1243,7 +1244,7 @@ export function LifeTimeline() {
     let anchor = layout.mainY;
     let scrollCap = maxScroll;
     if (anchorId) {
-      const g = layout.geometries.find((geo) => geo.branchId === anchorId);
+      const g = geoById.get(anchorId);
       if (g && g.inWindow) {
         anchor = (g.laneY + layout.mainY) / 2;
         // A focused lane comes to rest below the pinned chip, never underneath.
@@ -1851,7 +1852,7 @@ export function LifeTimeline() {
     vertical && mascot.arrivedBranchId && mascot.arrivedBranchId === heldRopeId
       ? heldRopeId
       : null;
-  const gripGeo = gripId ? layout.geometries.find((x) => x.branchId === gripId) : undefined;
+  const gripGeo = gripId ? geoById.get(gripId) : undefined;
   const gripBranch = gripId ? branches.find((x) => x.id === gripId) : undefined;
   /** The level under his hands right now. */
   const gripLevelNow =
@@ -2034,7 +2035,7 @@ export function LifeTimeline() {
     if (!id) return null;
     const b = branches.find((x) => x.id === id);
     if (!b || isClosed(b) || handledToday(b, now)) return null;
-    const g = layout.geometries.find((x) => x.branchId === id);
+    const g = geoById.get(id);
     if (!g || !g.inWindow) return null;
     // The pill sits just above his head, so it climbs with him — hiding it
     // once he had shinned up took away the only route to a rope's decisions.
@@ -2069,6 +2070,8 @@ export function LifeTimeline() {
   // fetches — a super bonk can rain several at once while he sweeps.
   const [coinFlash, setCoinFlash] = useState(0);
   const [flights, setFlights] = useState<{ key: number; branchId: string; x0: number; y0: number }[]>([]);
+  /** Keys currently in flight, for the per-coin test inside the token map. */
+  const flightKeys = useMemo(() => new Set(flights.map((f) => f.key)), [flights]);
   /**
    * The little numbers that fly into the meter. They used to fire only when a
    * token landed, hardcoded to "+10" — so integrating (25), burning (25),
@@ -2076,18 +2079,7 @@ export function LifeTimeline() {
    * meter in complete silence, and the meter itself carries no number. Now
    * anything that adds charge says how much.
    */
-  const [chargePops, setChargePops] = useState<{ key: number; amount: number }[]>([]);
-  const chargeWasRef = useRef<number | null>(null);
-  useEffect(() => {
-    const was = chargeWasRef.current;
-    chargeWasRef.current = bonkCharge;
-    // Only a gain, and never the reset a full sweep leaves behind.
-    if (was === null || bonkCharge <= was) return;
-    const key = Date.now();
-    const amount = bonkCharge - was;
-    setChargePops((p) => [...p, { key, amount }]);
-    setTimeout(() => setChargePops((p) => p.filter((x) => x.key !== key)), 950);
-  }, [bonkCharge]);
+  // (the pops themselves live in ChargePopLayer — see the overlay below)
   const scheduledCoinsRef = useRef(new Set<number>());
   const coinTimersRef = useRef(new Map<number, ReturnType<typeof setTimeout>>());
   const lastCheerRef = useRef(0);
@@ -2797,7 +2789,7 @@ export function LifeTimeline() {
               {burn &&
                 !reducedMotion &&
                 (() => {
-                  const g = layout.geometries.find((x) => x.branchId === burn.branchId);
+                  const g = geoById.get(burn.branchId);
                   if (!g || !g.inWindow) return null;
                   return vertical ? (
                     // the rope being cut is ON the rock, so the cut travels
@@ -2814,7 +2806,7 @@ export function LifeTimeline() {
                   rope where HE holds it, at his altitude, not at the anchor */}
               {!reducedMotion &&
                 puffs.map((p) => {
-                  const g = layout.geometries.find((x) => x.branchId === p.branchId);
+                  const g = geoById.get(p.branchId);
                   if (!g || !g.inWindow) return null;
                   const strikeY = vertical
                     ? Math.max(g.endY, Math.min(g.forkY, p.fromY + PX * 10))
@@ -2844,7 +2836,7 @@ export function LifeTimeline() {
               {/* the pop at the end of a press-and-hold: the dial's arrival */}
               {holdPop &&
                 (() => {
-                  const g = layout.geometries.find((x) => x.branchId === holdPop.branchId);
+                  const g = geoById.get(holdPop.branchId);
                   if (!g || !g.inWindow) return null;
                   return (
                     <PopBurst key={holdPop.key} x={ringX(g) - 3} y={workedY(g)} color={tk.accent} />
@@ -2853,8 +2845,8 @@ export function LifeTimeline() {
 
               {/* dropped tokens, flipping over their threads until they fly */}
               {coins.map((c) => {
-                if (flights.some((f) => f.key === c.key)) return null;
-                const g = layout.geometries.find((x) => x.branchId === c.branchId);
+                if (flightKeys.has(c.key)) return null;
+                const g = geoById.get(c.branchId);
                 if (!g || !g.inWindow) return null;
                 // On the turned face a token hovers over the rope it came
                 // from, not over its un-turned column — and its flight starts
@@ -2884,7 +2876,7 @@ export function LifeTimeline() {
               {operation.kind === "confirming-merge" && (
                 <G>
                   {operation.branchIds.map((id) => {
-                    const g = layout.geometries.find((x) => x.branchId === id);
+                    const g = geoById.get(id);
                     const branch = byId.get(id);
                     if (!g || !branch || g.endsOnMain || !g.inWindow) return null;
                     // The summit variant is the same curve transposed: from
@@ -2972,7 +2964,7 @@ export function LifeTimeline() {
                   hop={vertical ? 2 : 10}
                   dx={(() => {
                     if (!hit) return 0;
-                    const g = layout.geometries.find((x) => x.branchId === hit.branchId);
+                    const g = geoById.get(hit.branchId);
                     if (!g) return 0;
                     // Toward where the rope actually IS with the face turned
                     // as it is. On the summit he plants and THROWS, so it is a
@@ -2984,7 +2976,7 @@ export function LifeTimeline() {
                     if (!hit) return 0;
                     // He never leaves his altitude on the summit.
                     if (vertical) return 0;
-                    const g = layout.geometries.find((x) => x.branchId === hit.branchId);
+                    const g = geoById.get(hit.branchId);
                     if (!g) return 0;
                     return Math.max(-44, Math.min(44, g.endY - mascot.pos.y)) * 0.85;
                   })()}
@@ -3132,41 +3124,38 @@ export function LifeTimeline() {
         </ScrollView>
 
         {/* tokens in flight to the meter, and the +10s that pop off it */}
-        {(flights.length > 0 || chargePops.length > 0) && (
-          <View
-            pointerEvents="none"
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              top: 0,
-              bottom: 0,
-              overflow: "hidden",
-              zIndex: 11,
-            }}
-          >
-            {flights.map((f) => (
-              <TokenFly
-                key={f.key}
-                x0={f.x0}
-                y0={f.y0}
-                x1={size.width - (showFab ? 92 : 8) - 44}
-                y1={size.height - 26}
-                gold={tk.shimmer}
-                theme={theme}
-              />
-            ))}
-            {chargePops.map((p, i) => (
-              <ChargePop
-                key={p.key}
-                right={(showFab ? 92 : 8) + 12 + (i % 3) * 16}
-                bottom={44}
-                label={`+${p.amount}`}
-                color={mix(tk.shimmer, "#000000", 22)}
-              />
-            ))}
-          </View>
-        )}
+        {/* Always mounted: an empty, absolutely-positioned, pointer-transparent
+            View costs nothing, and it lets the pops own their own state
+            instead of forcing this component to re-render for each one. */}
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            overflow: "hidden",
+            zIndex: 11,
+          }}
+        >
+          {flights.map((f) => (
+            <TokenFly
+              key={f.key}
+              x0={f.x0}
+              y0={f.y0}
+              x1={size.width - (showFab ? 92 : 8) - 44}
+              y1={size.height - 26}
+              gold={tk.shimmer}
+              theme={theme}
+            />
+          ))}
+          <ChargePopLayer
+            bonkCharge={bonkCharge}
+            showFab={showFab}
+            color={mix(tk.shimmer, "#000000", 22)}
+          />
+        </View>
 
         {/* topping out: the summit party — a burst around the climber and
             the banner that names the day */}
@@ -3573,7 +3562,7 @@ export function LifeTimeline() {
           const verb = VERBS[theme] ?? "Bonk!";
           // Dealing with threads charges the meter; full = SUPER BONK.
           const openTargets = activeLines
-            .map((b) => ({ b, g: layout.geometries.find((x) => x.branchId === b.id) }))
+            .map((b) => ({ b, g: geoById.get(b.id) }))
             .filter((x) => x.g && x.g.inWindow)
             // Summit: a rope answered today is coiled at its cliff ledge — it
             // is not on the face any more, so there is nothing there to chalk.
@@ -3781,7 +3770,7 @@ export function LifeTimeline() {
         {burn &&
           !reducedMotion &&
           (() => {
-            const g = layout.geometries.find((x) => x.branchId === burn.branchId);
+            const g = geoById.get(burn.branchId);
             if (!g) return null;
             const x0 = vertical
               ? Math.max(8, Math.min(g.labelX - scrollXRef.current, size.width - 80))
@@ -3840,7 +3829,7 @@ export function LifeTimeline() {
         {reclaim &&
           !reducedMotion &&
           (() => {
-            const g = layout.geometries.find((x) => x.branchId === reclaim.branchId);
+            const g = geoById.get(reclaim.branchId);
             if (!g) return null;
             const x0 = vertical
               ? Math.max(8, Math.min(g.labelX - scrollXRef.current, size.width - 60))
