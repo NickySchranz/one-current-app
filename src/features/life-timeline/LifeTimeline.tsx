@@ -652,6 +652,8 @@ export function LifeTimeline() {
   // While a thread is in focus the main line leans toward its lane so the two
   // read together; everything else stays put.
   const [shiftTarget, setShiftTarget] = useState(0);
+  /** What React has actually been told, so an unchanged lean costs nothing. */
+  const shiftTargetRef = useRef(0);
   const mainShift = useEased(shiftTarget, reducedMotion);
 
   // How split the present is: open lines pull apart, decisions gather them.
@@ -716,7 +718,12 @@ export function LifeTimeline() {
     // pending ones wait for his climb — with a backstop in case no climb
     // ever runs (mascot hidden, reduced motion, a jump interrupted).
     const handled = new Set(handledSig ? handledSig.split("|") : []);
-    setRetiredIds((prev) => prev.filter((id) => handled.has(id)));
+    setRetiredIds((prev) => {
+      const next = prev.filter((id) => handled.has(id));
+      // filter() is a new array every time, which is a new identity and so a
+      // render, even when it dropped nothing.
+      return next.length === prev.length ? prev : next;
+    });
     // Safety net only: the climb itself retires on landing (see the climb
     // effect). This catches a climb that never ran at all — mascot hidden,
     // reduced motion, an interrupted glide.
@@ -1190,7 +1197,15 @@ export function LifeTimeline() {
         if (vertical) target = 0;
       }
     }
-    setShiftTarget(target);
+    // `layout` is in this effect's deps, so this ran on EVERY pan frame — and
+    // it set the value unconditionally. React does not reliably skip a
+    // same-value update; it renders the component once more before bailing.
+    // That was a second full timeline render for every single frame of a
+    // drag, doing nothing. Only a real change is published now.
+    if (shiftTargetRef.current !== target) {
+      shiftTargetRef.current = target;
+      setShiftTarget(target);
+    }
   }, [focusedBranchId, layout, compact, vertical, sm]);
 
   // With many threads the canvas grows taller than the stage and scrolls.
@@ -2348,7 +2363,15 @@ export function LifeTimeline() {
         style={{ position: "relative", flex: 1, minHeight: 260, overflow: "hidden" }}
         onLayout={(e) => {
           const { width, height } = e.nativeEvent.layout;
-          setSize({ width: Math.max(320, width), height: Math.max(240, height) });
+          const w = Math.max(320, width);
+          const h = Math.max(240, height);
+          // A new object every time meant every layout pass re-rendered the
+          // timeline even when the stage had not actually changed size.
+          // Compared against the live state rather than a render-time ref, so
+          // two layout events before a commit cannot slip a duplicate through.
+          setSize((prev) =>
+            prev.width === w && prev.height === h ? prev : { width: w, height: h },
+          );
           if (!measured) setMeasured(true);
         }}
       >
@@ -2401,7 +2424,10 @@ export function LifeTimeline() {
           // ScrollView steals horizontally-initiated drags before the
           // responder can claim them); programmatic scrollTo still works.
           scrollEnabled={vertical ? false : !scrollLocked}
-          onLayout={(e) => setScrollH(e.nativeEvent.layout.height)}
+          onLayout={(e) => {
+            const h = e.nativeEvent.layout.height;
+            setScrollH((prev) => (prev === h ? prev : h));
+          }}
           onScroll={(e) => {
             scrollYRef.current = e.nativeEvent.contentOffset.y;
             scrollXRef.current = e.nativeEvent.contentOffset.x;
@@ -3755,7 +3781,10 @@ export function LifeTimeline() {
             come home as decisions are taken — tap it for the day's forecast */}
         <WholenessIndicator
           activeLines={activeLines}
-          onChipHeight={(h) => setTopInset(Math.max(0, Math.round(9.6 + h) + 8))}
+          onChipHeight={(h) => {
+            const next = Math.max(0, Math.round(9.6 + h) + 8);
+            setTopInset((prev) => (prev === next ? prev : next));
+          }}
         />
 
         {branches.length === 0 && (

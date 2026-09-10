@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { THEME_COPY } from "@/ui/theme-copy";
 import { es } from "./es";
@@ -41,5 +42,17 @@ export function useT(): (text: string, vars?: Record<string, string | number>) =
   const lang = useAppStore((s) => s.language);
   const theme = useAppStore((s) => s.theme);
   const overlay = THEME_COPY[theme];
-  return (text, vars) => translate(lang, overlay?.[text] ?? text, vars);
+  /**
+   * Stable across renders. This used to return a fresh closure every time,
+   * which quietly defeated memoization everywhere it reached: any component
+   * taking `t` as a prop could never bail out of a re-render, and every
+   * useMemo/useCallback listing `t` in its deps recomputed on every render of
+   * its owner. It only actually changes with the language or the theme's copy
+   * overlay, so that is what it depends on now.
+   */
+  return useCallback(
+    (text: string, vars?: Record<string, string | number>) =>
+      translate(lang, overlay?.[text] ?? text, vars),
+    [lang, overlay],
+  );
 }

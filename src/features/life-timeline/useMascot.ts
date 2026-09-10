@@ -383,6 +383,8 @@ export function useMascot(
   const posRef = useRef<MascotPos>({ x: -999, y: -999 });
   // Rendering state
   const [pos, setPos] = useState<MascotPos>({ x: -999, y: -999 });
+  /** The coords React has actually been told about. */
+  const syncedRef = useRef<MascotPos>({ x: -999, y: -999 });
   const bornRef = useRef(false);
   const [born, setBorn] = useState(false);
   const posX = useSharedValue(-999);
@@ -398,22 +400,81 @@ export function useMascot(
     posRef.current = { x, y };
     posX.value = x;
     posY.value = y;
-    if (sync) setPos({ x, y });
+    // A fresh {x,y} is a new identity every time, so an unmoved sync used to
+    // re-render the timeline anyway. Only a real move publishes.
+    if (sync && (syncedRef.current.x !== x || syncedRef.current.y !== y)) {
+      syncedRef.current = { x, y };
+      setPos({ x, y });
+    }
   };
   const placeRef = useRef(place);
   placeRef.current = place;
-  const [frame, setFrame] = useState<FrameName>('IDLE_A');
-  const [flip, setFlip] = useState(1);
+  /**
+   * Everything below is React state read by LifeTimeline, which means every
+   * write here re-renders the whole timeline — the mountain, the threads, the
+   * scenery, all of it.
+   *
+   * The state machine sets most of these on every beat without checking
+   * whether they actually changed: `setFrame('RUN_A')` at the head of each
+   * waypoint segment, `setFlip` beside it, `setInspectedIdState(null)` on
+   * every return to idle. React does not reliably skip a same-value update —
+   * it may still render the component once before bailing — so a walk across
+   * four threads was paying for a dozen full timeline renders that changed
+   * nothing on screen.
+   *
+   * These guards make an unchanged value cost nothing at all: the ref is
+   * compared first and React never hears about it. Call sites are unchanged
+   * — they still just say `setFrame('RUN_A')`.
+   */
+  const [frame, setFrameState] = useState<FrameName>('IDLE_A');
+  const frameRef = useRef<FrameName>('IDLE_A');
+  const setFrame = (f: FrameName) => {
+    if (frameRef.current === f) return;
+    frameRef.current = f;
+    setFrameState(f);
+  };
+  const [flip, setFlipState] = useState(1);
+  const flipRef = useRef(1);
+  const setFlip = (v: number) => {
+    if (flipRef.current === v) return;
+    flipRef.current = v;
+    setFlipState(v);
+  };
   const bubbleO = useSharedValue(0);
-  const [bubbleText, setBubbleText] = useState('');
-  const [inspectedIdState, setInspectedIdState] = useState<string | null>(null);
-  const [pendingIdState, setPendingIdState] = useState<string | null>(null);
-  const [arrivedIdState, setArrivedIdState] = useState<string | null>(null);
+  const [bubbleText, setBubbleTextState] = useState('');
+  const bubbleTextRef = useRef('');
+  const setBubbleText = (v: string) => {
+    if (bubbleTextRef.current === v) return;
+    bubbleTextRef.current = v;
+    setBubbleTextState(v);
+  };
+  const [inspectedIdState, setInspectedState] = useState<string | null>(null);
+  const inspectedRef2 = useRef<string | null>(null);
+  const setInspectedIdState = (v: string | null) => {
+    if (inspectedRef2.current === v) return;
+    inspectedRef2.current = v;
+    setInspectedState(v);
+  };
+  const [pendingIdState, setPendingState] = useState<string | null>(null);
+  const pendingRef2 = useRef<string | null>(null);
+  const setPendingIdState = (v: string | null) => {
+    if (pendingRef2.current === v) return;
+    pendingRef2.current = v;
+    setPendingState(v);
+  };
+  const [arrivedIdState, setArrivedState] = useState<string | null>(null);
+  const arrivedRef2 = useRef<string | null>(null);
+  const setArrivedIdState = (v: string | null) => {
+    if (arrivedRef2.current === v) return;
+    arrivedRef2.current = v;
+    setArrivedState(v);
+  };
   // Why he is standing there: his own patrol earns an offer; a user tap
   // does not (the tap already opened the panel itself).
   const arrivedViaRef = useRef<"patrol" | "user">("patrol");
   const [arrivedVia, setArrivedVia] = useState<"patrol" | "user">("patrol");
   const markArrival = (via: "patrol" | "user") => {
+    if (arrivedViaRef.current === via) return;
     arrivedViaRef.current = via;
     setArrivedVia(via);
   };
