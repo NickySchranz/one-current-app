@@ -36,6 +36,20 @@ const FORK_CLAMP = 26; // px above the fork that re-seat on the route
 
 export type StrokeMode = "slither" | "sway";
 
+/** A dash longer than any on-screen path — i.e. a solid stroke. Shared so it
+ *  keeps one identity and never counts as a changed prop. */
+const SOLID: [number, number] = [1e6, 1e6];
+/** The shimmer streak's dash — same reasoning: one identity, never rewritten. */
+const SWEEP: [number, number] = [110, 1e6];
+
+/** The same blend, callable from render (the worklet twin below is for the UI thread). */
+function lerpTableJS(table: number[], level: number): number {
+  const clamped = Math.max(0, Math.min(table.length - 1, level));
+  const lo = Math.floor(clamped);
+  const hi = Math.min(table.length - 1, lo + 1);
+  return table[lo] + (table[hi] - table[lo]) * (clamped - lo);
+}
+
 /** Linear blend between neighbouring table entries for fractional levels. */
 function lerpTable(table: number[], level: number): number {
   "worklet";
@@ -236,7 +250,34 @@ export function useBranchStrokes(opts: {
   // Two motions can compose: the loudness slither along the whole line, and
   // the main wave carrying the attached end(s) in the timeline's rhythm.
   // The slither advances at 30Hz too — dependents only fire on change.
-  const tick = useDerivedValue(() => Math.round(clock.value * 30) / 30, [clock]);
+  /**
+   * How often this line's path is actually rebuilt.
+   *
+   * Everything ran at a flat 30Hz, which a level-5 line needs and a level-2
+   * line does not: its wave turns over at 0.8Hz, so 30 samples a second is
+   * about 38 per cycle — thirty times a second spent rewriting a path string
+   * that has barely moved. A path rebuild is the single most expensive thing
+   * this file does (measured: SVG attribute writes were 17% of all CPU at
+   * idle with forty threads), and the string only reaches the renderer when
+   * it CHANGES, so a slower tick is a direct saving.
+   *
+   * The rate follows the line's own speed and never drops below ten samples
+   * per cycle, which is far inside what the eye can resolve on a wave this
+   * gentle. A loud line still gets the full rate.
+   *
+   * The summit keeps a flat 30Hz: swayOffsetAt quantizes to the same grid so
+   * the climber's hands stay on the rope he is holding, and the two must
+   * agree exactly.
+   */
+  const tickRate = useMemo(() => {
+    if (mode === "sway") return 30;
+    const hz = lerpTableJS(SPEED, level);
+    return Math.max(10, Math.min(30, Math.ceil(hz * 10)));
+  }, [mode, level]);
+  const tick = useDerivedValue(
+    () => Math.round(clock.value * tickRate) / tickRate,
+    [clock, tickRate],
+  );
   const d = useDerivedValue(() => {
     if (pts.length === 0) return basePath;
     const ampP = wave ? Math.min(1.35, wave.progressSV.value + wave.surgeSV.value) : 0;
@@ -343,7 +384,10 @@ export function useBranchStrokes(opts: {
     // must be reset explicitly — otherwise it lingers and the line renders
     // dashed once squiggling or panning makes the path longer than bornLen.
     // A dash far longer than any on-screen path is simply a solid stroke.
-    return { d: d.value, strokeDasharray: [1e6, 1e6], strokeDashoffset: 0 };
+    // SOLID is a module constant on purpose: a fresh array literal here is a
+    // new value every tick, so the renderer wrote strokeDasharray onto every
+    // line 30 times a second to set it to what it already was.
+    return { d: d.value, strokeDasharray: SOLID, strokeDashoffset: 0 };
   }, [drawing, bornLen, d]);
 
   const halo = useAnimatedProps<PathProps>(() => ({ d: d.value }), [d]);
@@ -679,7 +723,7 @@ export function useCalmCurrent(opts: {
   const shimmer = useAnimatedProps<PathProps>(
     () => ({
       d: d.value,
-      strokeDasharray: [110, 1e6],
+      strokeDasharray: SWEEP,
       strokeDashoffset: sweepOffset.value,
       opacity: sweepOpacity.value,
     }),
@@ -689,7 +733,7 @@ export function useCalmCurrent(opts: {
   const shimmerWide = useAnimatedProps<PathProps>(
     () => ({
       d: d.value,
-      strokeDasharray: [110, 1e6],
+      strokeDasharray: SWEEP,
       strokeDashoffset: sweepOffset.value,
       opacity: sweepOpacity.value,
     }),

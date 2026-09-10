@@ -114,6 +114,14 @@ type Props = {
   /** False when this line is round the back of the summit's mountain: it is
    * drawn away to nothing, so it must not answer taps either. */
   interactive?: boolean;
+  /**
+   * Drawn, but with nothing to see: a summit rope round the back of the rock.
+   * RingG has already faded it to zero, so its sway is motion behind an
+   * opaque mountain — the sampling and the per-tick path string are pure
+   * waste. It keeps its resting geometry so it is correct the instant the
+   * face turns back.
+   */
+  hidden?: boolean;
   /** Summit: the world's seconds, shared with the climber so he swings in
    * step with the rope he is holding. Null elsewhere (local clock). */
   clock?: SharedValue<number> | null;
@@ -204,6 +212,7 @@ export const BranchLine = memo(function BranchLine({
   routeWave = null,
   climbOffset = null,
   interactive = true,
+  hidden = false,
   clock = null,
   dayComplete = false,
   named = true,
@@ -256,7 +265,7 @@ export const BranchLine = memo(function BranchLine({
   // and faster the louder it is. Both ends stay anchored; a decision today
   // quiets it. The hit path keeps the true geometry and feeds the sampler.
   const loudness = Math.max(1, Math.min(5, g.loudness));
-  const trembling = lineTrembles({
+  const trembling = !hidden && lineTrembles({
     branch,
     inWindow: g.inWindow,
     level: loudness,
@@ -276,7 +285,7 @@ export const BranchLine = memo(function BranchLine({
     level: loudness,
     basePath: g.path,
     born,
-    flowing: g.inWindow && !born && g.style.animated,
+    flowing: !hidden && g.inWindow && !born && g.style.animated,
     flowDurationMs: emphasized ? 1400 : tk.flowDuration,
     reducedMotion,
     wave,
@@ -534,8 +543,19 @@ export const BranchLine = memo(function BranchLine({
           pointerEvents="none"
         />
       )}
-      <AnimatedPath
-        animatedProps={strokes.line}
+      {/*
+        Static presentation lives on the group, not on the animated node.
+
+        react-native-svg reapplies a node's WHOLE prop set whenever its
+        animated props change, so a line rewriting `d` was also rewriting its
+        stroke width, line cap, opacity and pointer-events on every tick —
+        measured at idle with forty threads, 30,000 attribute writes a second
+        of which only ~3,000 were the path itself. Presentation attributes
+        inherit in SVG, so hanging them on the parent <G> leaves the animated
+        node carrying almost nothing and the reapplication becomes cheap.
+        Identical rendering; far less work per frame.
+      */}
+      <G
         stroke={color}
         strokeWidth={
           vertical
@@ -548,7 +568,9 @@ export const BranchLine = memo(function BranchLine({
         fill="none"
         strokeLinecap="round"
         pointerEvents="none"
-      />
+      >
+        <AnimatedPath animatedProps={strokes.line} />
+      </G>
       {vertical && !born && (
         <AnimatedPath
           animatedProps={strokes.bands}
@@ -565,8 +587,7 @@ export const BranchLine = memo(function BranchLine({
       {/* subtle directional movement toward the present (the rope's twist
           ridges replace it on the summit) */}
       {!vertical && !born && g.style.animated && (
-        <AnimatedPath
-          animatedProps={strokes.flow}
+        <G
           stroke={color}
           strokeWidth={Math.max(1.5, g.thickness - 1)}
           strokeDasharray={tk.flowDash}
@@ -574,7 +595,9 @@ export const BranchLine = memo(function BranchLine({
           fill="none"
           strokeLinecap="round"
           pointerEvents="none"
-        />
+        >
+          <AnimatedPath animatedProps={strokes.flow} />
+        </G>
       )}
       </AnimatedG>
       </AnimatedG>

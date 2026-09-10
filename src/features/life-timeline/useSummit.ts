@@ -24,6 +24,11 @@ import {
 import type { PathProps } from "react-native-svg";
 import { type CalmCurrentProps, type WaveHandles } from "./useSquiggle";
 
+/** The shimmer streak's dash. A module constant so it keeps one identity: a
+ *  fresh array literal inside animated props is a new value every tick, and
+ *  the renderer then rewrites the attribute to what it already was. */
+const SWEEP: [number, number] = [110, 1e6];
+
 const MAIN_STROKE = 3.25; // must match useCalmCurrent's resting width
 
 export function useSummitCurrent(opts: {
@@ -242,7 +247,7 @@ export function useSummitCurrent(opts: {
   const shimmer = useAnimatedProps<PathProps>(
     () => ({
       d: d.value,
-      strokeDasharray: [110, 1e6],
+      strokeDasharray: SWEEP,
       strokeDashoffset: sweepOffset.value,
       opacity: sweepOpacity.value,
     }),
@@ -251,7 +256,7 @@ export function useSummitCurrent(opts: {
   const shimmerWide = useAnimatedProps<PathProps>(
     () => ({
       d: d.value,
-      strokeDasharray: [110, 1e6],
+      strokeDasharray: SWEEP,
       strokeDashoffset: sweepOffset.value,
       opacity: sweepOpacity.value,
     }),

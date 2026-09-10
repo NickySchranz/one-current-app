@@ -45,6 +45,7 @@ import { TimelineHelp } from "@/features/timeline-help/TimelineHelp";
 import { WholenessIndicator } from "./WholenessIndicator";
 import { branchColor, restingToday } from "@/visualization/branch-lines/style";
 import { mergePreviewPath } from "@/visualization/branch-lines/paths";
+import type { BranchGeometry } from "@/visualization/branch-lines/paths";
 import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
 import { alpha, mix } from "@/ui/color";
@@ -390,6 +391,10 @@ function GrabPrompt({
 
 /** Movement below this is still a tap; beyond it the gesture picks an axis. */
 const DECIDE_PX = 8;
+/** Scroll offset is rounded to this before it can cause a render. */
+const BAND_PX = 240;
+/** Kept awake this far outside the viewport, so nothing animates into view. */
+const VIS_MARGIN = 900;
 
 /**
  * Summit: how far up the rope one step of quiet carries him, and how many
@@ -595,6 +600,23 @@ export function LifeTimeline() {
   /** Summit scrolls sideways: the lane columns overflow the stage width. */
   const scrollXRef = useRef(0);
   const [scrollH, setScrollH] = useState(0);
+  /**
+   * What the scroll can currently see, quantized into coarse bands.
+   *
+   * Measured at idle with forty threads: React was doing nothing at all (2
+   * renders in 6 seconds) while the machine sat at 2.8% idle, because every
+   * trembling line rewrites its `d` — a whole path string — onto two SVG
+   * nodes at 30Hz. That cost is per LINE, not per visible pixel, so lanes
+   * scrolled out of the viewport were charging full price for motion nobody
+   * could see.
+   *
+   * Tracking the raw offset would trade that for a render on every scroll
+   * event, so it is rounded to BAND_PX and published only when the band
+   * actually changes. With a whole viewport of margin either side, a line is
+   * long awake before it can be scrolled into view — nothing pops.
+   */
+  const [scrollBand, setScrollBand] = useState(0);
+
   const scrollHRef = useRef(0);
   scrollHRef.current = scrollH;
   // First guess from the window, not a fixed placeholder: the summit derives
@@ -1233,6 +1255,25 @@ export function LifeTimeline() {
       scrollRef.current?.scrollTo({ x, animated: false });
     }
   }, [vertical, laneSpan, bandX, size.width]);
+
+  /**
+   * Is this line anywhere near the viewport?
+   *
+   * Horizontal maps only: the canvas is taller than the stage and scrolls, so
+   * a lane can sit well outside it. The summit never scrolls vertically — it
+   * turns — so there this is always true and the facing test does the culling.
+   */
+  const bandTop = scrollBand * BAND_PX - VIS_MARGIN;
+  const bandBottom = scrollBand * BAND_PX + (scrollH || size.height) + VIS_MARGIN;
+  const nearViewport = useCallback(
+    (g: BranchGeometry): boolean => {
+      if (vertical) return true;
+      const top = Math.min(g.laneY, g.forkY, g.endY, g.labelY);
+      const bottom = Math.max(g.laneY, g.forkY, g.endY, g.labelY);
+      return bottom >= bandTop && top <= bandBottom;
+    },
+    [vertical, bandTop, bandBottom],
+  );
 
   // The tapped thread stays in sight: when a panel opens, scroll so the pair —
   // its lane and the leaning main line — sits centered in the space the panel
@@ -2477,6 +2518,8 @@ export function LifeTimeline() {
           onScroll={(e) => {
             scrollYRef.current = e.nativeEvent.contentOffset.y;
             scrollXRef.current = e.nativeEvent.contentOffset.x;
+            const b = Math.round(e.nativeEvent.contentOffset.y / BAND_PX);
+            setScrollBand((prev) => (prev === b ? prev : b));
           }}
           scrollEventThrottle={16}
           showsVerticalScrollIndicator
@@ -2824,6 +2867,28 @@ export function LifeTimeline() {
               {layout.geometries.map((g) => {
                 const branch = byId.get(g.branchId);
                 if (!branch) return null;
+                /**
+                 * Off the canvas entirely: draw nothing.
+                 *
+                 * A line that cannot be reached by scrolling still built its
+                 * fork curve, its run, its dots, its label and — the expensive
+                 * part — a fresh path string onto two SVG nodes at 30Hz. The
+                 * band carries a full viewport of margin, so anything that
+                 * could be scrolled to is already mounted and already moving.
+                 *
+                 * The thread the user is holding, the one Pip is walking to
+                 * and the one being operated on are never culled: their own
+                 * effects scroll them into view, and they must exist for that
+                 * to land.
+                 */
+                const spared =
+                  branch.id === focusedBranchId ||
+                  branch.id === armedBranchId ||
+                  branch.id === operationBranchId ||
+                  branch.id === mascot.pendingBranchId ||
+                  branch.id === mascot.inspectedBranchId ||
+                  branch.id === draftBranchId;
+                if (!spared && !nearViewport(g)) return null;
                 // Pending = about to jump there (highlight before moving).
                 // Inspected = currently sitting on it.
                 const mascotActive = showMascot && mascot.visible && mascot.pos.x > -900 &&
@@ -2872,6 +2937,18 @@ export function LifeTimeline() {
                       !vertical ||
                       g.angle === undefined ||
                       Math.cos(g.angle + rotRef.current) > -0.05
+                    }
+                    /**
+                     * Round the back of the mountain RingG already fades the
+                     * rope to nothing — but it was still sampling its length
+                     * and rewriting a path string every tick behind the rock.
+                     * On a full face that is about half the ropes animating
+                     * where there is nothing to see.
+                     */
+                    hidden={
+                      vertical &&
+                      g.angle !== undefined &&
+                      Math.cos(g.angle + rotQ * 0.25) <= -0.12
                     }
                     timeLen={sm?.rockLen ?? 0}
                     wave={vertical ? null : calmCurrent.wave}
