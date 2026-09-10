@@ -8,6 +8,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import { PerformanceMonitor } from "react-native-reanimated";
 import { StatusBar } from "expo-status-bar";
 import { operationDepth, useAppStore } from "@/stores/app-store";
 import { hasTokens } from "@/api/client";
@@ -242,6 +243,15 @@ function AppShell() {
       {ready && tutorialStep === null && view.kind === "now" && !onStage && !creating && (
         <WholenessMoment />
       )}
+      {/* Both thread's frame rates, on the device, while you use it. Dev builds
+          only — `npx expo run:ios --device` is a dev build, the web deploy is
+          not, so this never reaches anyone who did not ask for it.
+
+          Read it as a pair. UI staying at 60/120 while JS dips means the
+          animations are riding the UI thread as intended and only React is
+          busy. BOTH dipping together is the timeline being rebuilt — that is
+          the number this work was aimed at. */}
+      {__DEV__ && <PerformanceMonitor />}
     </View>
   );
 }
