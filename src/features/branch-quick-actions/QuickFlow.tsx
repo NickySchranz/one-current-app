@@ -24,6 +24,7 @@ export function StepFrame({
   onBack,
   backLabel,
   next,
+  secondary,
   children,
 }: {
   /** The thread's name — omitted when the flow hasn't named one yet. */
@@ -35,6 +36,9 @@ export function StepFrame({
   onBack: () => void;
   backLabel?: string;
   next: { label: string; onPress: () => void; disabled?: boolean; icon?: React.ReactNode };
+  /** An optional quieter action beside the primary one — used where a step is
+   * already complete and going further is a choice, not a requirement. */
+  secondary?: { label: string; onPress: () => void; disabled?: boolean };
   children?: React.ReactNode;
 }) {
   const t = useT();
@@ -68,13 +72,23 @@ export function StepFrame({
             ))}
           </View>
         )}
-        <Button
-          variant="primary"
-          label={next.label}
-          icon={next.icon}
-          disabled={next.disabled}
-          onPress={next.onPress}
-        />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          {secondary && (
+            <Button
+              variant="quiet"
+              label={secondary.label}
+              disabled={secondary.disabled}
+              onPress={secondary.onPress}
+            />
+          )}
+          <Button
+            variant="primary"
+            label={next.label}
+            icon={next.icon}
+            disabled={next.disabled}
+            onPress={next.onPress}
+          />
+        </View>
       </View>
     </View>
   );

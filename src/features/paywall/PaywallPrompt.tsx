@@ -3,6 +3,7 @@ import { Modal, Pressable, View } from "react-native";
 import { selectEffectivePro, useAppStore } from "@/stores/app-store";
 import { api, hasTokens } from "@/api/client";
 import type { PaywallReason } from "@/domain/entitlements/logic";
+import { SHOW_TESTING } from "@/config/flags";
 import { useT } from "@/i18n/i18n";
 import { Button, H2, Hint, rowStyles } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
@@ -52,7 +53,7 @@ export function PaywallPrompt({
   const t = useT();
   const tk = useTheme();
   const syncMe = useAppStore((s) => s.syncMe);
-  const signOut = useAppStore((s) => s.signOut);
+  const setShowAuth = useAppStore((s) => s.setShowAuth);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [period, setPeriod] = useState<Period>("monthly");
@@ -64,7 +65,16 @@ export function PaywallPrompt({
     try {
       const checkout = await api.checkout(period);
       if (checkout.mode === "stub") {
-        // No Stripe keys on the server yet: the stub completes immediately.
+        // The stub grants Pro with no money changing hands. It exists so the
+        // flow can be exercised before Stripe is armed, and the server already
+        // 404s the dev endpoint in production — but the client must not depend
+        // on that. A real build refuses to walk this path at all, so a
+        // misconfigured server can never hand out a subscription nobody paid
+        // for.
+        if (!SHOW_TESTING) {
+          setError(t("Payment is not available right now. Nothing has been charged."));
+          return;
+        }
         await api.completeStubCheckout(checkout.sessionId);
       } else if (typeof window !== "undefined") {
         window.location.assign(checkout.url);
@@ -124,10 +134,17 @@ export function PaywallPrompt({
               ))}
             </View>
           )}
+          {canUpgrade && (
+            <Hint>
+              {t(
+                "Renews automatically at the same price each period until you cancel. Cancel any time from Settings → Account; you keep Pro until the period you have paid for ends.",
+              )}
+            </Hint>
+          )}
           {!canUpgrade && (
             <Hint>
               {t(
-                "Upgrading needs an account the server knows. Sign in while online — every thread stays on this device.",
+                "Upgrading needs an account the server knows. Sign in or create one while online — everything you already have stays exactly where it is.",
               )}
             </Hint>
           )}
@@ -144,8 +161,11 @@ export function PaywallPrompt({
               <Button
                 variant="primary"
                 onPress={() => {
+                  // Opens sign-in. It used to call signOut(), which was the
+                  // only route to the gate when the gate was a wall — for
+                  // someone with no account that is a destructive no-op.
                   onClose();
-                  signOut();
+                  setShowAuth(true);
                 }}
                 label={t("Sign in to upgrade")}
               />

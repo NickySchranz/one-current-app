@@ -19,6 +19,7 @@ import { summit } from "./summit";
 import { shareFields } from "./share-fields";
 import { returnGreeting } from "./return";
 import { depth } from "./depth";
+import { release } from "./release";
 
 export const esCO: Record<string, string> = {
   ...common,
@@ -35,4 +36,5 @@ export const esCO: Record<string, string> = {
   ...shareFields,
   ...returnGreeting,
   ...depth,
+  ...release,
 };

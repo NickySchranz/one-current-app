@@ -1,7 +1,5 @@
 /** The long view: per-thread curves, the fortnight trend, the running totals. */
 export const depth: Record<string, string> = {
-  "was {before} · now {after}": "estaba {before} · ahora {after}",
-  "holding at {level} for {n} days": "lleva {n} días {level}",
   "steadier than last week": "más estable que la semana pasada",
   "more pulled than last week": "más repartida que la semana pasada",
   "about the same as last week": "más o menos como la semana pasada",

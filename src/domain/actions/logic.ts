@@ -62,3 +62,21 @@ export function composeIntegratedAction(
 export function completeAction(action: IntegratedAction, now: Date = new Date()): IntegratedAction {
   return { ...action, completedAt: now.toISOString() };
 }
+
+/** The person had a go. Records the attempt without claiming it finished. */
+export function attemptAction(action: IntegratedAction, now: Date = new Date()): IntegratedAction {
+  return { ...action, attemptedAt: now.toISOString() };
+}
+
+/**
+ * The step moved to wherever the real work lives. This is deliberately NOT
+ * completion: no one has done it, so nothing may count it as done.
+ */
+export function handOffAction(action: IntegratedAction, now: Date = new Date()): IntegratedAction {
+  return { ...action, handedOffAt: now.toISOString() };
+}
+
+/** Still expecting something from the person: not finished, not handed away. */
+export function isActionOpen(action: IntegratedAction): boolean {
+  return !action.completedAt && !action.handedOffAt;
+}

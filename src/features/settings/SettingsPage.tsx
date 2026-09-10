@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Linking, Platform, Pressable, View } from "react-native";
-import { selectEffectivePro, useAppStore } from "@/stores/app-store";
+import { selectProIsTestOnly, selectEffectivePro, useAppStore } from "@/stores/app-store";
 import { api, ApiHttpError, ApiOfflineError, getApiUrl, hasTokens, setApiUrl } from "@/api/client";
 import { SHOW_TESTING } from "@/config/flags";
 import { THEMES } from "@/visualization/theme";
@@ -10,12 +10,13 @@ import { useT } from "@/i18n/i18n";
 import {
   AppTextInput,
   Button,
+  CalmNote,
   Card,
   H2,
   Hint,
   P,
-  T,
   rowStyles,
+  T,
 } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
 import { alpha } from "@/ui/color";
@@ -164,10 +165,12 @@ export function SettingsSections() {
   const importData = useAppStore((s) => s.importData);
   const deleteEverything = useAppStore((s) => s.deleteEverything);
   const effectivePro = useAppStore(selectEffectivePro);
+  const proIsTestOnly = useAppStore(selectProIsTestOnly);
   const apiOnline = useAppStore((s) => s.apiOnline);
   const syncMe = useAppStore((s) => s.syncMe);
   const authUser = useAppStore((s) => s.authUser);
   const signOut = useAppStore((s) => s.signOut);
+  const setShowAuth = useAppStore((s) => s.setShowAuth);
 
   const [paywall, setPaywall] = useState<PaywallReason | null>(null);
   const [message, setMessage] = useState("");
@@ -329,21 +332,48 @@ export function SettingsSections() {
     <>
       <H2>{t("Account")}</H2>
       <Card>
-        <View style={rowStyles.filterRow}>
-          <T style={{ flexShrink: 1 }}>
-            {authUser?.name
-              ? t("Signed in as {name} ({email})", {
-                  name: authUser.name,
-                  email: authUser.email,
-                })
-              : t("Signed in as {email}", { email: authUser?.email ?? "" })}
-          </T>
-          <Button onPress={signOut} label={t("Sign out")} />
-        </View>
-        {!signedIn && (
-          <Hint style={{ marginTop: 8, marginBottom: 0 }}>
-            {t("Offline — signed in on this device only.")}
-          </Hint>
+        {proIsTestOnly && (
+          <CalmNote style={{ marginBottom: 8 }}>
+            <T>
+              {t(
+                "Pro is unlocked here by the Testing switch, not by a payment. Nothing has been charged, and this only applies to this browser.",
+              )}
+            </T>
+          </CalmNote>
+        )}
+        {!authUser ? (
+          <>
+            <View style={rowStyles.filterRow}>
+              <T style={{ flexShrink: 1 }}>{t("You are using One Current without an account.")}</T>
+              <Button onPress={() => setShowAuth(true)} label={t("Sign in")} />
+            </View>
+            {/* Said plainly, because the consequence is real and recoverable
+                only by acting before it happens. */}
+            <Hint style={{ marginTop: 8, marginBottom: 0 }}>
+              {t(
+                "Everything you write stays in this browser's own storage. Nothing is sent anywhere. Clearing your browser data, or using another device, means starting over — an account exists so a copy can be kept and restored.",
+              )}
+            </Hint>
+          </>
+        ) : (
+          <>
+            <View style={rowStyles.filterRow}>
+              <T style={{ flexShrink: 1 }}>
+                {authUser.name
+                  ? t("Signed in as {name} ({email})", {
+                      name: authUser.name,
+                      email: authUser.email,
+                    })
+                  : t("Signed in as {email}", { email: authUser.email })}
+              </T>
+              <Button onPress={signOut} label={t("Sign out")} />
+            </View>
+            {!signedIn && (
+              <Hint style={{ marginTop: 8, marginBottom: 0 }}>
+                {t("Offline — signed in on this device only.")}
+              </Hint>
+            )}
+          </>
         )}
         {signedIn && effectivePro && (
           <View style={[rowStyles.filterRow, { marginTop: 8 }]}>
@@ -371,9 +401,12 @@ export function SettingsSections() {
           )}
         </Hint>
         {!signedIn ? (
-          <Hint style={{ marginBottom: 0 }}>
-            {t("Sign in while the server is reachable to use cloud backup.")}
-          </Hint>
+          <View style={rowStyles.filterRow}>
+            <Hint style={{ marginBottom: 0, flexShrink: 1 }}>
+              {t("Cloud backup needs an account. Everything else works without one.")}
+            </Hint>
+            <Button onPress={() => setShowAuth(true)} label={t("Sign in")} />
+          </View>
         ) : (
           <>
             <View style={rowStyles.filterRow}>

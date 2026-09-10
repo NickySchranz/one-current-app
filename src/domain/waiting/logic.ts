@@ -38,6 +38,8 @@ export function applyWaitingToBranch(
       storedQualities: [...new Set([...branch.storedQualities, ...container.reclaimedNow])],
     },
     now,
+    // Choosing to wait quietens the line; the person did not restate a level.
+    "derived",
   );
 }
 

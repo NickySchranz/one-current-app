@@ -7,6 +7,7 @@ import {
   UNKNOWN_KIND,
   type BranchStatus,
   type ForkPeriodChoice,
+  type LoudnessSource,
   type PsychologicalBranch,
   type Loudness,
 } from "./types";
@@ -74,7 +75,8 @@ export function createBranch(input: CreateBranchInput, now: Date = new Date()): 
     forkDate,
     forkLabel,
     loudness: input.loudness ?? 3,
-    loudnessLog: [{ at: nowIso, loudness: input.loudness ?? 3 }],
+    // Creation is the person's own first answer about how loud this is.
+    loudnessLog: [{ at: nowIso, loudness: input.loudness ?? 3, source: "reported" }],
     anxieties: input.anxieties,
     occupies: input.occupies,
     storedQualities: [],
@@ -121,16 +123,25 @@ export function easeLoudness(loudness: Loudness): Loudness {
  * Record on the branch's log that a mutation moved its loudness. Wrap every
  * `next` branch built from `prev`: if the dial did not move, `next` passes
  * through untouched.
+ *
+ * `source` defaults to "derived" deliberately — the app moving a value on
+ * someone's behalf is the common case, and the dangerous mistake is banking a
+ * derived value as though the person had reported it. Callers that ARE the
+ * person speaking have to say so.
  */
 export function trackLoudness(
   prev: PsychologicalBranch,
   next: PsychologicalBranch,
   now: Date = new Date(),
+  source: LoudnessSource = "derived",
 ): PsychologicalBranch {
   if (next.loudness === prev.loudness) return next;
   return {
     ...next,
-    loudnessLog: [...(next.loudnessLog ?? []), { at: now.toISOString(), loudness: next.loudness }],
+    loudnessLog: [
+      ...(next.loudnessLog ?? []),
+      { at: now.toISOString(), loudness: next.loudness, source },
+    ],
   };
 }
 
@@ -173,8 +184,15 @@ export function loudnessSeries(
   branch: PsychologicalBranch,
   days: number,
   now: Date = new Date(),
+  options: { reportedOnly?: boolean } = {},
 ): (number | null)[] {
-  const log = [...(branch.loudnessLog ?? [])].sort((a, b) => a.at.localeCompare(b.at));
+  const all = [...(branch.loudnessLog ?? [])].sort((a, b) => a.at.localeCompare(b.at));
+  // Drawing someone their own curve means drawing only what they said. An
+  // automatic ease is a real event, but it is the app's move, and a line that
+  // mixes the two would show a person "calming down" on days they never
+  // answered. Unlabelled history is excluded too: it predates provenance, so
+  // nobody can now say which it was, and guessing would be the same lie.
+  const log = options.reportedOnly ? all.filter((e) => e.source === "reported") : all;
   const born = branch.firstCreatedAt.slice(0, 10);
   const out: (number | null)[] = [];
   for (let i = days - 1; i >= 0; i--) {
@@ -188,10 +206,25 @@ export function loudnessSeries(
       if (entry.at.slice(0, 10) <= day) value = entry.loudness;
       else break;
     }
-    // Logged after this day but the thread already existed: its opening level.
-    out.push(value ?? log[0]?.loudness ?? branch.loudness);
+    // Nothing logged at or before this day. On the full series the thread's
+    // opening level is a fair stand-in; on the reported-only series it is
+    // not — falling back to branch.loudness there would put a number the
+    // person never gave into a line labelled as theirs.
+    if (value !== null) out.push(value);
+    else if (options.reportedOnly) out.push(log.length > 0 ? log[0].loudness : null);
+    else out.push(log[0]?.loudness ?? branch.loudness);
   }
   return out;
+}
+
+/** How many times the person has said, in their own words, how loud this is. */
+export function reportedLoudnessCount(branch: PsychologicalBranch): number {
+  return (branch.loudnessLog ?? []).filter((e) => e.source === "reported").length;
+}
+
+/** True when the log holds movement whose origin was never recorded. */
+export function hasUnlabelledLoudness(branch: PsychologicalBranch): boolean {
+  return (branch.loudnessLog ?? []).some((e) => e.source === undefined);
 }
 
 /** Merging reduces the branch's active loudness; the residue stays honest, not zero by decree. */

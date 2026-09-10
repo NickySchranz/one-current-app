@@ -27,6 +27,8 @@ import { ErrorBoundary } from "@/ui/ErrorBoundary";
 function AppShell() {
   const ready = useAppStore((s) => s.ready);
   const authUser = useAppStore((s) => s.authUser);
+  const showAuth = useAppStore((s) => s.showAuth);
+  const setShowAuth = useAppStore((s) => s.setShowAuth);
   const view = useAppStore((s) => s.view);
   const init = useAppStore((s) => s.init);
   const refreshNow = useAppStore((s) => s.refreshNow);
@@ -107,11 +109,18 @@ function AppShell() {
     );
   }
 
-  if (!authUser) {
+  // Signing in is a choice, not a toll. Every situation, moment, step and
+  // lesson lives in this device's own database (src/db) — the account only
+  // ever bought server-side extras: cloud backup, share codes, checkout. So
+  // the gate that used to stand here refused people the entire product for
+  // features most of them had not asked for yet. It is now reachable from
+  // More → Account, and signing in later adopts whatever is already here
+  // (init()'s pre-stamp path).
+  if (showAuth) {
     return (
       <View style={{ flex: 1, backgroundColor: tk.bg }}>
         <StatusBar style={tk.mode === "dark" ? "light" : "dark"} />
-        <AuthGate />
+        <AuthGate onDismiss={() => setShowAuth(false)} />
       </View>
     );
   }
@@ -189,14 +198,14 @@ function AppShell() {
         {view.kind === "more" && <MorePage />}
       </View>
       {compactNav && !keyboard.open && <PrimaryNavigation variant="bottom" />}
-      {ready && authUser && <WalkthroughOverlay />}
+      {ready && <WalkthroughOverlay />}
       {/* The return greeting waits for the walkthrough and any open operation:
           a first-run user has nothing to come back to, and someone mid-answer
           is already doing the thing the card would ask for. */}
-      {ready && authUser && tutorialStep === null && view.kind === "now" && !onStage && !creating && (
+      {ready && tutorialStep === null && view.kind === "now" && !onStage && !creating && (
         <ReturnCard />
       )}
-      {ready && authUser && tutorialStep === null && view.kind === "now" && !onStage && !creating && (
+      {ready && tutorialStep === null && view.kind === "now" && !onStage && !creating && (
         <WholenessMoment />
       )}
     </View>

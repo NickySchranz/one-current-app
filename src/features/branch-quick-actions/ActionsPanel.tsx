@@ -1,5 +1,6 @@
 import { Pressable, View, type PressableStateCallbackType } from "react-native";
 import { useAppStore } from "@/stores/app-store";
+import { isActionOpen } from "@/domain/actions/logic";
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import { isClosed } from "@/domain/branches/logic";
 import { decidedToday } from "@/domain/feelings/logic";
@@ -113,6 +114,7 @@ export function ActionsPanel() {
   const actions = useAppStore((s) => s.actions);
   const branches = useAppStore((s) => s.branches);
   const markActionDone = useAppStore((s) => s.markActionDone);
+  const markActionTried = useAppStore((s) => s.markActionTried);
   const setOperation = useAppStore((s) => s.setOperation);
   const t = useT();
   const inTray = useInTray();
@@ -127,7 +129,7 @@ export function ActionsPanel() {
 
   // Planned steps still ahead of you. Steps of integrated threads left with them.
   const pending = actions.filter((a) => {
-    if (a.completedAt) return false;
+    if (!isActionOpen(a)) return false;
     const ownerId = a.branchesIntegrated[0]?.branchId;
     return !ownerId || !!ownerOf(a.id);
   });
@@ -191,15 +193,23 @@ export function ActionsPanel() {
                     kind="decided"
                     title={a.title}
                     hint={
-                      owner
-                        ? t("A step you chose for “{title}”.", { title: owner.title })
-                        : t("A step you chose.")
+                      a.attemptedAt
+                        ? t("You had a go at this. It is still open.")
+                        : owner
+                          ? t("A step you chose for “{title}”.", { title: owner.title })
+                          : t("A step you chose.")
                     }
                     disabled={!owner}
                     onPress={() =>
                       owner && setOperation({ kind: "quick-touch", branchId: owner.id })
                     }
                   />
+                  {/* "I tried" is a real outcome and the common one. Without
+                      it the only way to clear a step is to claim you finished
+                      it, which quietly turns attempts into completions. */}
+                  {!a.attemptedAt && (
+                    <Button label={t("Tried it")} onPress={() => void markActionTried(a.id)} />
+                  )}
                   <Button label={t("Done")} onPress={() => void markActionDone(a.id)} />
                 </View>
               );

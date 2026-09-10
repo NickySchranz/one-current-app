@@ -12,12 +12,19 @@ import {
   easeLoudness,
   trackLoudness,
   type CreateBranchInput, effectiveLoudness, isClosed, isOpen } from "@/domain/branches/logic";
+import type { LoudnessSource } from "@/domain/branches/types";
 import { advanceSkew, appNow, getSkewMs, setRate, setSkewMs } from "@/domain/time/clock";
 import { daysAwayBefore, setPresentDays, withDay } from "@/domain/time/presence";
 import { addMomentToBranch, createMoment, type CreateMomentInput } from "@/domain/moments/logic";
 import { detectRecurrence, recordRecurrence } from "@/domain/branches/recurrence";
 import { applyMergeToBranch, createMerge, type CreateMergeInput } from "@/domain/merges/logic";
-import { completeAction, composeIntegratedAction } from "@/domain/actions/logic";
+import {
+  attemptAction,
+  completeAction,
+  composeIntegratedAction,
+  handOffAction,
+  isActionOpen,
+} from "@/domain/actions/logic";
 import { heldFeelings } from "@/domain/feelings/logic";
 import { newId } from "@/domain/ids";
 import { repo } from "@/db/repository";
@@ -191,6 +198,9 @@ type AppState = {
   firstWholenessSeen: boolean;
   /** True while that moment is on screen. Transient; never persisted. */
   showWholenessMoment: boolean;
+  /** True while the sign-in screen is up. Signing in is optional and reachable
+   * from More → Account; it is not a gate in front of the product. */
+  showAuth: boolean;
 
   init(): Promise<void>;
   /** Re-read the clock so everything derived from "now" follows it. */
@@ -215,7 +225,13 @@ type AppState = {
   updateDraftBranch(patch: Partial<PsychologicalBranch>): void;
   /** The form closed without saving: the optimistic line vanishes. */
   cancelDraftBranch(): void;
-  updateBranch(id: string, patch: Partial<PsychologicalBranch>): Promise<void>;
+  /** `source` says who moved the loudness, if this patch moves it. Defaults to
+   * "derived": only the dial under the person's thumb is them speaking. */
+  updateBranch(
+    id: string,
+    patch: Partial<PsychologicalBranch>,
+    source?: LoudnessSource,
+  ): Promise<void>;
   /** Record today as a day the user was here, and work out how long they were away. */
   notePresence(): Promise<void>;
   /** Set the return card aside without answering it. */
@@ -226,6 +242,7 @@ type AppState = {
   /** Every open thread now has its answer for today. Shows the moment once, ever. */
   noteWholenessReached(): void;
   dismissWholenessMoment(): void;
+  setShowAuth(show: boolean): void;
   /** "Still true": re-anchor every open thread at the level it was left, so an
    * absence costs nothing. Not a decision — it changes no loudness, it only
    * says the dial is still right. */
@@ -240,6 +257,8 @@ type AppState = {
   createTodayAction(branchId: string, step: string): Promise<void>;
   /** An action was done: it settles into the past instead of waiting ahead. */
   markActionDone(actionId: string): Promise<void>;
+  /** The person had a go. Records the attempt; the step stays open. */
+  markActionTried(actionId: string): Promise<void>;
   /** A folded line came back to mind: it continues as an open line again. */
   reopenBranch(branchId: string): Promise<void>;
   clearReclaim(): void;
@@ -554,12 +573,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   wholenessLog: {},
   firstWholenessSeen: true,
   showWholenessMoment: false,
+  showAuth: false,
 
   async init() {
     let [data, settings] = await Promise.all([repo.loadAll(), loadSettings()]);
     const { tutorialDone, ...restored } = settings;
     let { ownerEmail } = settings;
-    let startWalkthrough = !tutorialDone && settings.authUser !== null;
+    // A local session is a real session: a first-run guest gets the walk too.
+    let startWalkthrough = !tutorialDone;
     if (settings.authUser) {
       const email = normalizeEmail(settings.authUser.email);
       if (!ownerEmail) {
@@ -759,14 +780,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     return branch;
   },
 
-  async updateBranch(id, patch) {
+  async updateBranch(id, patch, source = "derived") {
     // Apply to the freshest state synchronously so quick successive edits
     // (e.g. tapping kind then feelings) don't overwrite each other.
     let next: PsychologicalBranch | undefined;
     set((s) => ({
       branches: s.branches.map((b) => {
         if (b.id !== id) return b;
-        next = trackLoudness(b, { ...b, ...patch }, appNow());
+        next = trackLoudness(b, { ...b, ...patch }, appNow(), source);
         return next;
       }),
     }));
@@ -817,6 +838,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   dismissWholenessMoment: () => set({ showWholenessMoment: false }),
 
+  setShowAuth: (showAuth) => set({ showAuth }),
+
   recordWholeness(share) {
     const today = todayIso();
     const rounded = Math.round(share * 1000) / 1000;
@@ -850,7 +873,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   async dialLoudness(id, level) {
     // A touch, not a decision: the day counter is untouched, but the drift
     // re-anchors here — the level under your thumb is the level that is felt.
-    await get().updateBranch(id, { loudness: level, loudnessSetOn: todayIso() });
+    // The one place the person states a level themselves.
+    await get().updateBranch(id, { loudness: level, loudnessSetOn: todayIso() }, "reported");
   },
 
   async deleteBranch(id) {
@@ -887,6 +911,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         lastActivatedAt: appNow().toISOString(),
       },
       appNow(),
+      // The ease that follows a decision is the app's move, not a new answer.
+      "derived",
     );
     await repo.saveBranch(next);
     // "Nothing can be done" and a planned action are mutually exclusive:
@@ -895,7 +921,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (patch?.leftOn) {
       get().addBonkCharge(CHARGE_REST);
       const stale = get().actions.filter(
-        (a) => !a.completedAt && a.branchesIntegrated.some((x) => x.branchId === id),
+        (a) => isActionOpen(a) && a.branchesIntegrated.some((x) => x.branchId === id),
       );
       removedActionIds = stale.map((a) => a.id);
       await Promise.all(removedActionIds.map((actionId) => repo.deleteAction(actionId)));
@@ -929,6 +955,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         leftOn: undefined,
       },
       appNow(),
+      "derived",
     );
     await repo.saveBranch(next);
     set((s) => ({ branches: s.branches.map((b) => (b.id === branchId ? next : b)) }));
@@ -1084,10 +1111,18 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async markActionDone(actionId) {
     const action = get().actions.find((a) => a.id === actionId);
-    if (!action || action.completedAt) return;
+    if (!action || !isActionOpen(action)) return;
     const done = completeAction(action);
     await repo.saveAction(done);
     set((s) => ({ actions: s.actions.map((a) => (a.id === actionId ? done : a)) }));
+  },
+
+  async markActionTried(actionId) {
+    const action = get().actions.find((a) => a.id === actionId);
+    if (!action || !isActionOpen(action) || action.attemptedAt) return;
+    const tried = attemptAction(action, appNow());
+    await repo.saveAction(tried);
+    set((s) => ({ actions: s.actions.map((a) => (a.id === actionId ? tried : a)) }));
   },
 
   async updateMoment(branchId, moment) {
@@ -1174,13 +1209,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         leftOn: undefined,
       },
       appNow(),
+      "derived",
     );
-    // The work lives where your tasks live now: nothing left to do on it here.
+    // The work lives where your tasks live now — so these steps leave this
+    // app, they are not finished. Stamping completedAt here (which is what
+    // this did) counted work nobody had performed, and that count then fed
+    // the day's "done" totals and the psychologist's export.
     const openActions = get()
-      .actions.filter(
-        (a) => !a.completedAt && a.branchesIntegrated.some((x) => x.branchId === branchId),
-      )
-      .map((a) => completeAction(a));
+      .actions.filter((a) => isActionOpen(a) && a.branchesIntegrated.some((x) => x.branchId === branchId))
+      .map((a) => handOffAction(a));
     await repo.saveBranch(next);
     for (const a of openActions) await repo.saveAction(a);
     set((s) => ({
@@ -1430,6 +1467,18 @@ export const useAppStore = create<AppState>((set, get) => ({
  */
 export const selectEffectivePro = (s: { isPro: boolean; serverPro: boolean | null }): boolean =>
   (SHOW_TESTING && s.isPro) || (s.serverPro ?? false);
+
+/**
+ * Pro is on, but nobody paid for it — it comes from the Testing unlock, which
+ * only exists in a build compiled with SHOW_TESTING. Anywhere Pro is shown as
+ * a status, this has to be shown with it: a tester and a subscriber must never
+ * see the same thing, or the tester's experience stops being evidence about
+ * the subscriber's.
+ */
+export const selectProIsTestOnly = (s: {
+  isPro: boolean;
+  serverPro: boolean | null;
+}): boolean => SHOW_TESTING && s.isPro && !s.serverPro;
 
 export function matchesStatusFilter(
   b: PsychologicalBranch,

@@ -56,7 +56,6 @@ export const THEME_COPY: Partial<Record<ThemeId, Record<string, string>>> = {
     "In tension with another thread": "In tension with another rope",
 
     // ── creation ──
-    "Name the thread": "Name the rope",
     "Start the thread": "Fix the rope",
     "The new thread taking shape": "The new rope taking shape",
     "This resembles a thread you integrated before.":

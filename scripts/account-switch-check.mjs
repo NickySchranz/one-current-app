@@ -3,7 +3,7 @@
    returning keeps everything. Offline by nature (static dist, no API), which
    exercises the offline sign-in fallback — the historically open hole.
      npx expo export --platform web && node scripts/account-switch-check.mjs */
-import { serveDist, launchBrowser } from "./promo-lib.mjs";
+import { serveDist, launchBrowser , captureSituation } from "./promo-lib.mjs";
 
 const PORT = 4342;
 const dist = new URL("../dist", import.meta.url).pathname;
@@ -72,19 +72,7 @@ async function skipTourIfShown() {
 
 async function createThread(title) {
   await skipTourIfShown();
-  await page.getByLabel("New thread").first().click();
-  await page.waitForTimeout(800);
-  await page.getByLabel("Name the thread").fill(title);
-  const next = page.getByRole("button", { name: "Next" });
-  await next.click();
-  await page.waitForTimeout(400);
-  await page.getByRole("button", { name: "Today", exact: true }).first().click();
-  await next.click();
-  await page.waitForTimeout(400);
-  await next.click();
-  await page.waitForTimeout(400);
-  await page.getByRole("button", { name: "Start the thread" }).click();
-  await page.waitForTimeout(2200);
+  await captureSituation(page, title, { settle: 2200 });
 }
 
 const threadCount = () => page.evaluate(() => document.querySelectorAll('path[stroke="transparent"]').length);

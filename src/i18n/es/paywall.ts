@@ -13,7 +13,6 @@ export const paywall: Record<string, string> = {
   "€30 — €5 / month": "30 € — 5 € / mes",
   "€48 — €4 / month": "48 € — 4 € / mes",
   "Sign in to upgrade": "Inicia sesión para mejorar",
-  "Upgrading needs an account the server knows. Sign in while online — every thread stays on this device.": "Mejorar necesita una cuenta que el servidor conozca. Inicia sesión con conexión — cada hilo se queda en este dispositivo.",
   "Upgrade to Pro": "Mejorar a Pro",
   "Upgrading…": "Mejorando…",
   "The upgrade did not go through. Check your connection and try again.": "La mejora no se completó. Revisa tu conexión y vuelve a intentarlo.",

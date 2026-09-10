@@ -19,6 +19,16 @@ import {
 } from "@/ui/primitives";
 import { LoudnessSlider, loudnessWord } from "@/ui/LoudnessSlider";
 
+/** The first line names the situation; anything after it is the detail. One
+ * field yields both, so nobody is asked for a title and a description. */
+function firstLine(text: string): string {
+  return text.trim().split("\n")[0].trim();
+}
+function restOfText(text: string): string | undefined {
+  const rest = text.trim().split("\n").slice(1).join("\n").trim();
+  return rest === "" ? undefined : rest;
+}
+
 type WhenId = "today" | "this-week" | "this-month" | "earlier";
 
 const WHEN_OPTIONS: { id: WhenId; label: string }[] = [
@@ -109,7 +119,8 @@ export function CreateBranch() {
       // starts unknown and draws achromatic; Understand → "What kind of
       // thing is this?" colours it in later, or never.
       const result = await requestBranch({
-        title,
+        title: firstLine(title),
+        description: restOfText(title),
         kindChoiceId: UNKNOWN_KIND.id,
         period: p,
         loudness: loudness as Loudness,
@@ -136,41 +147,50 @@ export function CreateBranch() {
     setOperation({ kind: "idle" });
   };
 
-  const namedTitle = title.trim() || undefined;
+  const namedTitle = firstLine(title) || undefined;
 
   return (
     <Panel inTray={inTray}>
       <StepTransition stepKey={stage}>
+        {/* One field is a complete capture. Everything after this is a
+            choice, not a requirement: someone writing down the thing that is
+            pulling at them right now should not have to answer three more
+            questions before it is saved anywhere. The remaining steps — and
+            the line drawing itself in on the stage behind — are untouched for
+            anyone who takes "Add detail". */}
         {stage === 0 && (
           <StepFrame
-            prompt={t("What is pulling at you?")}
-            stepIndex={0}
-            totalSteps={4}
+            prompt={t("What's on your mind?")}
             backLabel={t("Cancel")}
             onBack={cancel}
-            next={{
-              label: t("Next"),
-              disabled: !title.trim(),
+            secondary={{
+              label: t("Add detail →"),
+              disabled: !title.trim() || busy,
               onPress: () => setStage(1),
+            }}
+            next={{
+              label: busy ? t("Saving…") : t("Save"),
+              disabled: !title.trim() || busy,
+              onPress: () => void createNow(),
             }}
           >
             <Field>
               <AppTextInput
                 autoFocus
+                multiline
                 value={title}
                 onChangeText={(v) => {
                   setTitle(v);
-                  // the optimistic line carries the name as it is typed
-                  updateDraftBranch({ title: v });
+                  // The optimistic line carries the first line as its name.
+                  updateDraftBranch({ title: firstLine(v) });
                 }}
-                placeholder={t("Name it in a few words")}
-                accessibilityLabel={t("Name the thread")}
-                onSubmitEditing={() => title.trim() && setStage(1)}
+                placeholder={t("e.g. the conversation I keep putting off")}
+                accessibilityLabel={t("What's on your mind?")}
                 blurOnSubmit={false}
               />
             </Field>
             <Hint style={{ marginTop: 4, marginBottom: 0 }}>
-              {t("Named things get quieter.")}
+              {t("A sentence is enough. You can add more whenever you like.")}
             </Hint>
           </StepFrame>
         )}
@@ -178,8 +198,8 @@ export function CreateBranch() {
           <StepFrame
             title={namedTitle}
             prompt={t("Since when?")}
-            stepIndex={1}
-            totalSteps={4}
+            stepIndex={0}
+            totalSteps={3}
             onBack={() => setStage(0)}
             next={{
               label: t("Next"),
@@ -223,8 +243,8 @@ export function CreateBranch() {
           <StepFrame
             title={namedTitle}
             prompt={t("What does it make you feel? (optional)")}
-            stepIndex={2}
-            totalSteps={4}
+            stepIndex={1}
+            totalSteps={3}
             onBack={() => setStage(1)}
             next={{ label: t("Next"), onPress: () => setStage(3) }}
           >
@@ -258,8 +278,8 @@ export function CreateBranch() {
           <StepFrame
             title={namedTitle}
             prompt={t("How loud is it right now?")}
-            stepIndex={3}
-            totalSteps={4}
+            stepIndex={2}
+            totalSteps={3}
             onBack={() => setStage(2)}
             next={{
               label: t("Start the thread"),

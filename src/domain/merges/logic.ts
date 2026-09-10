@@ -72,6 +72,9 @@ export function applyMergeToBranch(
       waitingContainerId: merge.waitingContainerId ?? branch.waitingContainerId,
     },
     now,
+    // Integration lowering the dial is the app's move, not a new answer from
+    // the person — it must never come back to them as one.
+    "derived",
   );
 }
 

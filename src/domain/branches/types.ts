@@ -44,11 +44,27 @@ export type Controllability =
 /** How loud a thread is, from 1 (quiet) to 5. Fractional values are fine — the slider moves in fine steps. */
 export type Loudness = number;
 
-/** One recorded change of a branch's loudness: what it became and when. */
+/**
+ * Who moved the dial.
+ *
+ * "reported" is the person saying how loud something is — creation, or the
+ * loudness dial under their thumb. "derived" is the app moving it on their
+ * behalf: the ease that follows any decision, the reduction after an
+ * integration. The two must never be read as the same kind of fact, and a
+ * derived value must never be shown back as if the person had said it.
+ *
+ * Absent means UNKNOWN, and stays unknown: entries written before this
+ * existed are not retro-labelled, because nobody can now tell which they were.
+ */
+export type LoudnessSource = "reported" | "derived";
+
+/** One recorded change of a branch's loudness: what it became, when, and why. */
 export type LoudnessLogEntry = {
   /** ISO timestamp of the change. */
   at: string;
   loudness: Loudness;
+  /** Absent on entries written before provenance was recorded. */
+  source?: LoudnessSource;
 };
 
 export type PsychologicalBranch = {

@@ -8,7 +8,11 @@ import {
   type PsychologicalBranch,
 } from "@/domain/branches/types";
 import { ANXIETIES, heldFeelings, suggestLockedFeelings } from "@/domain/feelings/logic";
-import { loudnessSeries } from "@/domain/branches/logic";
+import {
+  hasUnlabelledLoudness,
+  loudnessSeries,
+  reportedLoudnessCount,
+} from "@/domain/branches/logic";
 import { branchColor } from "@/visualization/branch-lines/style";
 import { Sparkline } from "@/ui/Sparkline";
 import { DepthLock } from "@/features/paywall/DepthLock";
@@ -235,15 +239,25 @@ export function BranchView({ branchId }: Props) {
   // has actually moved or actually lasted.
   const themeId = useAppStore((s) => s.theme);
   const held = heldFeelings(branch, appNow());
+  // The curve draws the person's OWN answers and nothing else. Automatic
+  // easing after a decision is a real event, but drawing it here would show
+  // someone calming down on days they never answered — and that reading would
+  // then travel to a clinician. Two answers is the floor; below it there is no
+  // line to draw, and silence beats a line nobody drew.
   const series = useMemo(() => {
     const DAYS = 30;
-    const values = loudnessSeries(branch, DAYS, appNow());
+    if (reportedLoudnessCount(branch) < 2) return null;
+    const values = loudnessSeries(branch, DAYS, appNow(), { reportedOnly: true });
     const real = values.filter((v): v is number => v !== null);
     if (real.length < 2) return null;
-    const first = real[0];
-    const last = real[real.length - 1];
-    if (first === last && real.length < 4) return null;
-    return { values, first, last, span: real.length };
+    return {
+      values,
+      first: real[0],
+      last: real[real.length - 1],
+      span: real.length,
+      // Movement the app made, or history from before provenance existed.
+      partial: hasUnlabelledLoudness(branch),
+    };
   }, [branch]);
 
   const compareAnchorStyle = {
@@ -345,15 +359,19 @@ export function BranchView({ branchId }: Props) {
           />
           <Hint style={{ margin: 0 }}>
             {series.first === series.last
-              ? t("holding at {level} for {n} days", {
+              ? t("you have called it {level} each time", {
                   level: t(loudnessWord(series.last)),
-                  n: series.span,
                 })
-              : t("was {before} · now {after}", {
+              : t("you said {before} · you say {after}", {
                   before: t(loudnessWord(series.first)),
                   after: t(loudnessWord(series.last)),
                 })}
           </Hint>
+          {series.partial && (
+            <Hint style={{ margin: 0 }}>
+              {t("Only your own answers are drawn here. Changes the app made are left out.")}
+            </Hint>
+          )}
         </View>
         </DepthLock>
       )}

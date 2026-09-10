@@ -19,7 +19,9 @@ function looksLikeEmail(value: string): boolean {
  * back to a device-only session so it keeps working offline. A wrong
  * password is a real error — never a fallback.
  */
-export function AuthGate() {
+/** `onDismiss` is present when the person opened this by choice and can leave
+ * again without signing in — the app works locally without an account. */
+export function AuthGate({ onDismiss }: { onDismiss?: () => void }) {
   const t = useT();
   const tk = useTheme();
   const signIn = useAppStore((s) => s.signIn);
@@ -225,6 +227,11 @@ export function AuthGate() {
       }}
     >
       <View style={{ width: "100%", maxWidth: 420 }}>
+        {onDismiss && (
+          <View style={{ marginBottom: 8 }}>
+            <Button variant="quiet" onPress={onDismiss} label={t("← Back to your situations")} />
+          </View>
+        )}
         <View
           style={{
             flexDirection: "row",

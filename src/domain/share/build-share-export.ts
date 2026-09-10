@@ -105,7 +105,10 @@ function shareThread(
   const loudness = (baseline ? [baseline, ...changes] : changes).map((e) => ({
     at: e.at,
     loudness: e.loudness,
+    source: e.source,
   }));
+
+  const reported = loudness.filter((e) => e.source === "reported");
 
   const events: SharedEvent[] = [];
   if (inRange(day(branch.firstCreatedAt), from, to)) {
@@ -194,8 +197,12 @@ function shareThread(
     returnedCount: branch.recurrenceCount > 0 ? branch.recurrenceCount : undefined,
     waiting: shareWaiting(branch, waiting),
     loudness,
-    loudnessWas: loudness.length > 0 ? loudnessWord(loudness[0].loudness) : undefined,
-    loudnessNow: loudness.length > 0 ? loudnessWord(loudness[loudness.length - 1].loudness) : undefined,
+    // Only the person's own answers get named in words. Summarising a derived
+    // ease as "was calling, now murmuring" would put the app's arithmetic in
+    // the patient's mouth in front of their clinician.
+    loudnessWas: reported.length > 0 ? loudnessWord(reported[0].loudness) : undefined,
+    loudnessNow:
+      reported.length > 0 ? loudnessWord(reported[reported.length - 1].loudness) : undefined,
     events,
   };
 }

@@ -45,7 +45,6 @@ export const auth: Record<string, string> = {
   "Offline — signed in on this device only.": "Sin conexión — la sesión quedó solo en este dispositivo.",
   "Account & sync": "Cuenta y sincronización",
   "Cloud backup sends a copy of everything in the app — every thread, moment, step and lesson — to your account on our server, so a new device can pick it up. It stays there until you replace it or delete your account. Part of Pro.": "La copia en la nube manda una copia de todo lo que hay en la app — cada hilo, momento, paso y aprendizaje — a tu cuenta en nuestro servidor, para que un dispositivo nuevo lo recoja. Se queda ahí hasta que la reemplacés o borrés tu cuenta. Parte de Pro.",
-  "Sign in while the server is reachable to use cloud backup.": "Inicia sesión cuando el servidor esté disponible para usar la copia en la nube.",
   "Upload backup": "Subir copia",
   "Restore backup": "Restaurar copia",
   "Bring the server copy onto this device? Matching threads are overwritten.": "¿Traer la copia del servidor a este dispositivo? Los hilos que coincidan se sobrescriben.",

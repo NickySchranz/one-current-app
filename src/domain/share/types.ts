@@ -18,6 +18,13 @@ export type SharedLoudnessEntry = {
   at: string;
   /** 1 (quiet) to 5; fractional values are fine. */
   loudness: number;
+  /**
+   * Who moved it. "reported" is the person's own answer; "derived" is the app
+   * easing it after a decision or an integration. **Absent means unknown** —
+   * written before provenance was recorded, and not safe to read as either.
+   * A clinician must not read a derived value as a self-report.
+   */
+  source?: "reported" | "derived";
 };
 
 /** An unresolved-tension record from an integration. */

@@ -1,9 +1,14 @@
 /* Loudness tracking: every change of a thread's loudness lands on its
-   loudnessLog — creation seeds it, the dial appends, a decision (ease) appends. */
+   loudnessLog — creation seeds it, the dial appends, a decision (ease)
+   appends — AND each entry records who moved it. The person's own answers
+   and the app's automatic easing must stay distinguishable for good: a
+   derived value shown back as a self-report is the one reading this app
+   must never produce. */
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { chromium } from "playwright-core";
+import { captureSituation } from "./promo-lib.mjs";
 
 const DIST = new URL("../dist", import.meta.url).pathname;
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".ico": "image/x-icon" };
@@ -43,26 +48,9 @@ const readLog = () =>
  * Four steps since the single form was replaced; scripts that filled a name
  * and reached straight for the last button had no coverage of it at all,
  * which is how a dead final step shipped unnoticed. */
-async function createThread(page, title, opts = {}) {
-  await page.getByLabel("New thread").first().click();
-  await page.waitForTimeout(900);
-  await page.getByLabel("Name the thread").fill(title);
-  await page.waitForTimeout(200);
-  await page.getByRole("button", { name: "Next" }).first().click();   // → since when
-  await page.waitForTimeout(500);
-  await page.getByText(opts.when ?? "Today", { exact: true }).first().click();
-  await page.waitForTimeout(300);
-  await page.getByRole("button", { name: "Next" }).first().click();   // → feelings
-  await page.waitForTimeout(500);
-  await page.getByRole("button", { name: "Next" }).first().click();   // → loudness
-  await page.waitForTimeout(600);
-  if (opts.beforeFinish) await opts.beforeFinish(page);
-  await page.getByRole("button", { name: "Start the thread" }).click();
-  await page.waitForTimeout(opts.settle ?? 1400);
-}
 
 // 1. create: the log is seeded with the creation loudness
-await createThread(page, "Loudness log test");
+await captureSituation(page, "Loudness log test");
 const created = await readLog();
 console.log(
   `seeded at creation: log=${JSON.stringify(created?.log)}`,
@@ -130,6 +118,16 @@ console.log(
   `no phantom entries: ${before?.log?.length} -> ${after?.log?.length}`,
   before?.log?.length === after?.log?.length ? "OK" : "FAIL",
 );
+
+// Provenance, asserted rather than admired.
+const sources = (await readLog()).log.map((e) => e.source);
+const provenanceOk =
+  sources[0] === "reported" && sources[1] === "reported" && sources[2] === "derived";
+console.log(
+  `provenance (creation+dial reported, ease derived): ${sources.join(", ")}`,
+  provenanceOk ? "OK" : "FAIL",
+);
+if (!provenanceOk) process.exitCode = 1;
 
 await browser.close();
 server.close();

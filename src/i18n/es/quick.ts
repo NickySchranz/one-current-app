@@ -1,8 +1,5 @@
 /** Thread creation and quick-decision copy. Keys are English source strings. */
 export const quick: Record<string, string> = {
-  "What is pulling at you?": "¿Qué tira de ti?",
-  "Name it in a few words": "Ponle nombre en pocas palabras",
-  "Name the thread": "Nombra el hilo",
   "Since when?": "¿Desde cuándo?",
   "What does it make you feel? (optional)": "¿Qué te hace sentir? (opcional)",
   "What it makes you feel": "Lo que te hace sentir",

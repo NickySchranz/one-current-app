@@ -16,6 +16,7 @@ import { summit } from "./summit";
 import { shareFields } from "./share-fields";
 import { returnGreeting } from "./return";
 import { depth } from "./depth";
+import { release } from "./release";
 
 export const es: Record<string, string> = {
   ...common,
@@ -32,4 +33,5 @@ export const es: Record<string, string> = {
   ...shareFields,
   ...returnGreeting,
   ...depth,
+  ...release,
 };

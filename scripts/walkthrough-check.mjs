@@ -81,11 +81,14 @@ const pipRenders = (page) =>
   await page.waitForTimeout(900);
   check("creation screen took over (no walkthrough card)", !(await bubble(page, "Something on your mind").isVisible().catch(() => false)));
 
-  await page.getByLabel("Name the thread").fill("My first real thread");
-  const next = page.getByRole("button", { name: "Next" });
-  await next.click();
+  // The + was already tapped above, so finish the capture from inside the
+  // creation screen. The detail path, because the walk is what teaches it.
+  await page.getByLabel("What's on your mind?").fill("My first real thread");
+  await page.waitForTimeout(200);
+  await page.getByRole("button", { name: "Add detail →" }).click();
   await page.waitForTimeout(500);
   await page.getByRole("button", { name: "Today", exact: true }).first().click();
+  const next = page.getByRole("button", { name: "Next" });
   await next.click();
   await page.waitForTimeout(500);
   await next.click(); // feelings optional

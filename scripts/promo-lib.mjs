@@ -351,3 +351,40 @@ export class Recorder {
     console.log(`  ${this.name}: ${this.frame} frames (${(this.frame / FPS).toFixed(1)}s), ${this.beats.length} beats`);
   }
 }
+
+/**
+ * Capture a situation the way a person does.
+ *
+ * Two paths, because the app now has two: `detail: false` (the default) saves
+ * from the single field, which is the whole flow for most captures;
+ * `detail: true` walks the optional since-when / feelings / loudness steps
+ * that follow "Add detail". Both must keep working, so scripts that only need
+ * a situation to exist should use the quick one and leave the long path to
+ * the scripts that are actually about it.
+ */
+export async function captureSituation(page, title, opts = {}) {
+  await page.getByLabel("New thread").first().click();
+  await page.waitForTimeout(900);
+  await page.getByLabel("What's on your mind?").fill(title);
+  await page.waitForTimeout(200);
+
+  if (!opts.detail) {
+    if (opts.beforeFinish) await opts.beforeFinish(page);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.waitForTimeout(opts.settle ?? 1400);
+    return;
+  }
+
+  await page.getByRole("button", { name: "Add detail →" }).click();
+  await page.waitForTimeout(500);
+  await page.getByText(opts.when ?? "Today", { exact: true }).first().click();
+  await page.waitForTimeout(300);
+  const next = page.getByRole("button", { name: "Next" }).first();
+  await next.click();                                    // → feelings
+  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: "Next" }).first().click();  // → loudness
+  await page.waitForTimeout(600);
+  if (opts.beforeFinish) await opts.beforeFinish(page);
+  await page.getByRole("button", { name: "Start the thread" }).click();
+  await page.waitForTimeout(opts.settle ?? 1400);
+}

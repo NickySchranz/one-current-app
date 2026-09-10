@@ -20,7 +20,6 @@ export const sweep: Record<string, string> = {
   "Your attention is {word}.": "Tu atención está {word}.",
   "Your attention is {word} — about {pct} percent of you moves with your main line.": "Tu atención está {word} — cerca del {pct} por ciento de ti avanza con tu línea principal.",
   "{title} is currently the loudest thread.": "{title} es ahorita el hilo que suena más duro.",
-  "Named things get quieter.": "Lo que uno nombra se calma.",
   "Longer ago": "Hace más tiempo",
   "It may hold some of {list} for now — integrating it brings them home.": "Puede llevarse parte de {list} por ahora — integrarlo los trae de vuelta.",
   "The new thread taking shape": "El nuevo hilo tomando forma",

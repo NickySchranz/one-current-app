@@ -26,6 +26,7 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from "react-native-svg";
 import { filterBranches, useAppStore, operationDepth } from "@/stores/app-store";
+import { isActionOpen } from "@/domain/actions/logic";
 import { useLayoutStore } from "@/stores/layout-store";
 import { measureNode } from "@/ui/measure";
 import { setWalkthroughPoint, useWalkthroughTarget } from "@/features/tutorial/targets";
@@ -662,7 +663,7 @@ export function LifeTimeline() {
   // raises calmProgress (sacred current, celebration) but does NOT coil the
   // rope or earn a ledge — the climb counts handledToday only.
   const hasPendingStep = (b: PsychologicalBranch) =>
-    actions.some((a) => !a.completedAt && a.branchesIntegrated[0]?.branchId === b.id);
+    actions.some((a) => isActionOpen(a) && a.branchesIntegrated[0]?.branchId === b.id);
   const calmProgress =
     activeLines.length === 0
       ? 1
@@ -1622,6 +1623,9 @@ export function LifeTimeline() {
       const owner = branches.find((b) => b.id === a.branchesIntegrated[0]?.branchId);
       if (owner && isClosed(owner)) continue;
       const doneToday = a.completedAt?.slice(0, 10) === today;
+      // A handed-off step is not on today's board at all: it went elsewhere,
+      // and it was never done.
+      if (a.handedOffAt) continue;
       if (a.completedAt && !doneToday) continue;
       items.push({
         id: a.id,

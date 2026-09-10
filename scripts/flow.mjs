@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { chromium } from "playwright-core";
+import { captureSituation } from "./promo-lib.mjs";
 
 const DIST = new URL("../dist", import.meta.url).pathname;
 const MIME = {
@@ -55,26 +56,10 @@ await page.waitForTimeout(1500);
  * Four steps since the single form was replaced; scripts that filled a name
  * and reached straight for the last button had no coverage of it at all,
  * which is how a dead final step shipped unnoticed. */
-async function createThread(page, title, opts = {}) {
-  await page.getByLabel("New thread").first().click();
-  await page.waitForTimeout(900);
-  await page.getByLabel("Name the thread").fill(title);
-  await page.waitForTimeout(200);
-  await page.getByRole("button", { name: "Next" }).first().click();   // → since when
-  await page.waitForTimeout(500);
-  await page.getByText(opts.when ?? "Today", { exact: true }).first().click();
-  await page.waitForTimeout(300);
-  await page.getByRole("button", { name: "Next" }).first().click();   // → feelings
-  await page.waitForTimeout(500);
-  await page.getByRole("button", { name: "Next" }).first().click();   // → loudness
-  await page.waitForTimeout(600);
-  if (opts.beforeFinish) await opts.beforeFinish(page);
-  await page.getByRole("button", { name: "Start the thread" }).click();
-  await page.waitForTimeout(opts.settle ?? 1400);
-}
 
 // 1-2. walk the create wizard: name, since when, feelings, then start it
-await createThread(page, "Tax return looming", {
+await captureSituation(page, "Tax return looming", {
+  detail: true,
   beforeFinish: async () => step("01-create-tray"),
 });
 await step("02-branch-born", 1600);

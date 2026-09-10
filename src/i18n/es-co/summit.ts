@@ -57,7 +57,6 @@ export const summit: Record<string, string> = {
   "In tension with another rope": "En tensión con otra cuerda",
 
   // creation
-  "Name the rope": "Nombra la cuerda",
   "Fix the rope": "Fija la cuerda",
   "The new rope taking shape": "La nueva cuerda tomando forma",
   "This resembles a rope you integrated before.": "Se parece a una cuerda que ya integraste.",
