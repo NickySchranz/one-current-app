@@ -24,15 +24,30 @@ jobs:
       - run: node scripts/domain-check.mjs
       - run: node scripts/share-payload-check.mjs
       - name: Export web build
-        run: npx expo export --platform web
+        # --clear because EXPO_PUBLIC_* values are inlined at transform time
+        # and Metro will happily serve a cached transform carrying the PREVIOUS
+        # value. The bundle then looks right (the strings are always present)
+        # while the flag itself is stale — which is exactly the failure mode
+        # toggling SHOW_TESTING invites.
+        run: npx expo export --platform web --clear
         env:
           EXPO_PUBLIC_API_URL: https://api.onecurrentapp.com
-          # EXPO_PUBLIC_SHOW_TESTING is deliberately NOT set here. With it on,
-          # anyone who opens the site unlocks Pro for their own browser and can
-          # move the app's clock — harmless while nothing was for sale, but the
-          # Pro gates stop being gates, and Pro now carries the long view
-          # (curves, the fortnight trend, the running totals). Local builds
-          # still get the Testing card: `EXPO_PUBLIC_SHOW_TESTING=1 npm run web`.
+          # Testing card ON in production, asked for deliberately so the live
+          # build can be exercised the way a local one is (Pro unlock, clock
+          # skew, fill the charge, always drop tokens).
+          #
+          # What it means while it is on, all of it reversible by deleting
+          # this one line:
+          #   · anyone who opens the site can unlock Pro for THEIR OWN browser
+          #     and move the app's clock. Nothing leaves the device and no
+          #     other account is touched — but the Pro gates (creature themes,
+          #     the psychologist share, the long view) stop being gates.
+          #   · the client-side refusal to follow a stub checkout is disarmed:
+          #     that guard is `!SHOW_TESTING`, so with this set a server
+          #     offering `mode: "stub"` would be followed. The API 404s its dev
+          #     endpoint in production, so this is belt-and-braces rather than
+          #     the only thing standing there — but the braces are off.
+          EXPO_PUBLIC_SHOW_TESTING: "1"
       - run: node scripts/inject-head.mjs dist/index.html
       - name: Deploy
         # --branch is REQUIRED here, not optional. actions/checkout leaves a
