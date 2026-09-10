@@ -239,8 +239,7 @@ export function ReflectionScreen() {
                 <Mascot
                   posX={mascot.posX}
                   posY={mascot.posY}
-                  frame={mascot.frame}
-                  flip={mascot.flip}
+                  frameStore={mascot.frameStore}
                   mascotType={mascot.mascotType}
                   bubbleText=""
                   showTapHint={false}

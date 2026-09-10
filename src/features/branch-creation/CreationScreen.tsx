@@ -183,8 +183,7 @@ export function CreationScreen() {
                 <Mascot
                   posX={mascot.posX}
                   posY={mascot.posY}
-                  frame={mascot.frame}
-                  flip={mascot.flip}
+                  frameStore={mascot.frameStore}
                   mascotType={mascot.mascotType}
                   // He watches the line take shape, quietly — no speech here.
                   bubbleText=""

@@ -3063,8 +3063,10 @@ export function LifeTimeline() {
                   runPhase={mascot.runPhase}
                   // A summit strike is a throw, so he keeps the frame he has
                   // — a LAND_A jolt would drop him off the rope he is on.
-                  frame={hit && !hit.calm && !vertical ? "LAND_A" : mascot.frame}
-                  flip={mascot.flip}
+                  frameStore={mascot.frameStore}
+                  // A summit strike is a throw, so he keeps the frame he has
+                  // — a LAND_A jolt would drop him off the rope he is on.
+                  frameOverride={hit && !hit.calm && !vertical ? "LAND_A" : null}
                   mascotType={mascot.mascotType}
                   // Summit: he shins up the rope he is quieting, and swings
                   // with it while he hangs there.
@@ -3073,7 +3075,6 @@ export function LifeTimeline() {
                   grip={gripRide}
                   bubbleO={grabPrompt ? undefined : mascot.bubbleO}
                   bubbleText={mascot.bubbleText}
-                  showTapHint={mascot.frame === 'IDLE_A' || mascot.frame === 'IDLE_B'}
                   theme={tk}
                   onPress={mascot.onPress}
                 />

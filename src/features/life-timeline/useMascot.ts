@@ -14,6 +14,7 @@ import type { BranchGeometry } from "@/visualization/branch-lines/paths";
 import { isClosed } from "@/domain/branches/logic";
 import { handledToday } from "@/domain/feelings/logic";
 import type { FrameName, MascotType } from "./mascot-frames";
+import { createMascotFrameStore, type MascotFrameStore } from "./mascot-frame-store";
 
 const PX = 2.2; // must match PX in mascot-frames.ts
 
@@ -40,8 +41,8 @@ export type MascotState = {
    * he lets go. His own altitude does not move; that invariant is intact.
    */
   rise: SharedValue<number>;
-  frame: FrameName;
-  flip: number;
+  /** Sprite frame + facing, outside React — only the sprite subscribes. */
+  frameStore: MascotFrameStore;
   bubbleO: SharedValue<number>;
   bubbleText: string;
   mascotType: MascotType;
@@ -426,20 +427,18 @@ export function useMascot(
    * compared first and React never hears about it. Call sites are unchanged
    * — they still just say `setFrame('RUN_A')`.
    */
-  const [frame, setFrameState] = useState<FrameName>('IDLE_A');
-  const frameRef = useRef<FrameName>('IDLE_A');
-  const setFrame = (f: FrameName) => {
-    if (frameRef.current === f) return;
-    frameRef.current = f;
-    setFrameState(f);
-  };
-  const [flip, setFlipState] = useState(1);
-  const flipRef = useRef(1);
-  const setFlip = (v: number) => {
-    if (flipRef.current === v) return;
-    flipRef.current = v;
-    setFlipState(v);
-  };
+  /**
+   * Frame and facing live outside React entirely (see mascot-frame-store).
+   * They changed on nearly every beat of the state machine, and because this
+   * hook runs inside LifeTimeline every one of those beats re-rendered the
+   * whole timeline to move a few sprite pixels. Only the sprite subscribes
+   * now; call sites here are unchanged.
+   */
+  const frameStoreRef = useRef<MascotFrameStore | null>(null);
+  if (frameStoreRef.current === null) frameStoreRef.current = createMascotFrameStore();
+  const frameStore = frameStoreRef.current;
+  const setFrame = (f: FrameName) => frameStore.set({ frame: f });
+  const setFlip = (v: number) => frameStore.set({ flip: v });
   const bubbleO = useSharedValue(0);
   const [bubbleText, setBubbleTextState] = useState('');
   const bubbleTextRef = useRef('');
@@ -1428,7 +1427,7 @@ export function useMascot(
   const visible = branches.some(b => !isClosed(b));
 
   return {
-    pos, posX, posY, runPhase, rise, frame, flip,
+    pos, posX, posY, runPhase, rise, frameStore,
     bubbleO, bubbleText,
     mascotType,
     inspectedBranchId: inspectedIdState,

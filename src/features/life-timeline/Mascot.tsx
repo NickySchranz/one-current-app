@@ -3,7 +3,8 @@
  * Driven by plain JS state from useMascot (web + native compatible).
  */
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useSyncExternalStore } from "react";
+import type { MascotFrameStore } from "./mascot-frame-store";
 import { Platform } from "react-native";
 import Animated, {
   useAnimatedProps,
@@ -269,15 +270,19 @@ type Props = {
   /** Visible canvas width: he fades out as his anchor nears the edges, so
    * no half-clipped sprite or bubble ever lingers at the boundary. */
   viewW?: number;
-  frame: FrameName;
-  flip: number;
+  /** Frame + facing, read straight from the store so a blink re-renders only
+   *  this sprite and nothing above it. */
+  frameStore: MascotFrameStore;
+  /** Force a frame regardless of the state machine (a strike's LAND_A). */
+  frameOverride?: FrameName | null;
   mascotType: MascotType;
   /** Bubble fade on the UI thread; omit for a mascot that never speaks. */
   bubbleO?: SharedValue<number>;
   /** 0/1 gait phase while `frame` is a RUN frame — swapped without renders. */
   runPhase?: SharedValue<number>;
   bubbleText: string;
-  showTapHint: boolean;
+  /** Omit to let the sprite decide from its own frame (true while idle). */
+  showTapHint?: boolean;
   theme: ThemeTokens;
   onPress: () => void;
   /** Summit: how far up the rope he has shinned (px above his station). His
@@ -298,13 +303,19 @@ const AnimatedG = Animated.createAnimatedComponent(G);
 const HAND_DY = PX * 7;
 
 function Mascot__inner({
-  posX, posY, frame, flip, mascotType,
+  posX, posY, frameStore, frameOverride = null, mascotType,
   bubbleO, bubbleText, showTapHint, theme, onPress, runPhase,
   viewW = 0,
   rise = undefined,
   sway = null,
   grip = null,
 }: Props) {
+  // This subscription is the whole point: the frame changes constantly, and
+  // only this component hears about it.
+  const frameState = useSyncExternalStore(frameStore.subscribe, frameStore.get, frameStore.get);
+  const frame = frameOverride ?? frameState.frame;
+  const flip = frameState.flip;
+  const tapHint = showTapHint ?? (frame === 'IDLE_A' || frame === 'IDLE_B');
   const palette = useMemo(() => resolveColors(theme.accent), [theme.accent]);
   const frames = CHARACTER_FRAMES[mascotType];
   const pixels = frames[frame] ?? frames['IDLE_A'];
@@ -412,7 +423,7 @@ function Mascot__inner({
         // pointer cursor on web makes it obvious it's clickable
         {...(Platform.OS === 'web' ? { style: { cursor: 'pointer' } as object } : null)}
       >
-        {showTapHint && <TapRing spriteW={spriteW} theme={theme} />}
+        {tapHint && <TapRing spriteW={spriteW} theme={theme} />}
         {running ? (
           <>
             <AnimatedG animatedProps={gaitA}>
