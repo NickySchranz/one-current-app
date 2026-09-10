@@ -1325,6 +1325,51 @@ export function LifeTimeline() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- resetGesture is stable in spirit
   }, [scrollLocked]);
 
+  /**
+   * One React commit per FRAME while a finger is down, not one per touch event.
+   *
+   * Both of the things a summit drag changes are expensive on this side:
+   * `panBy` writes the store's window, which re-runs buildSummitLayout for
+   * every visible thread and every memo downstream of it, and `setRotQ` steps
+   * the rock's own silhouette. A drag was firing both on every move event —
+   * on a 120Hz panel that is twice the layout work per displayed frame, and
+   * it is why the map felt like treacle.
+   *
+   * The ropes themselves never depended on this: `rotSV` is written straight
+   * through on the UI thread, so the turn stays smooth no matter how coarse
+   * the React side is. Only the parts that genuinely have to be rebuilt in
+   * React are held to frame cadence here.
+   */
+  const panAccumRef = useRef(0);
+  const pendingRotQRef = useRef<number | null>(null);
+  const flushRafRef = useRef<number | null>(null);
+  const scheduleFlush = useCallback(() => {
+    if (flushRafRef.current !== null) return;
+    flushRafRef.current = requestAnimationFrame(() => {
+      flushRafRef.current = null;
+      const fraction = panAccumRef.current;
+      panAccumRef.current = 0;
+      const q = pendingRotQRef.current;
+      pendingRotQRef.current = null;
+      if (q !== null) setRotQ(q);
+      if (fraction !== 0) panBy(fraction);
+    });
+  }, [panBy]);
+  /** Pan by a window fraction, coalesced to the next frame. */
+  const panByFrame = useCallback(
+    (fraction: number) => {
+      panAccumRef.current += fraction;
+      scheduleFlush();
+    },
+    [scheduleFlush],
+  );
+  useEffect(
+    () => () => {
+      if (flushRafRef.current !== null) cancelAnimationFrame(flushRafRef.current);
+    },
+    [],
+  );
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -1376,9 +1421,13 @@ export function LifeTimeline() {
               // step the rock's own shape along with the finger
               const q = Math.round(rotSV.value / 0.25);
               if (q !== rotQRef.current) {
+                // Refs stay immediate — everything that reasons about which
+                // ropes are reachable reads them synchronously. Only the React
+                // state waits for the frame.
                 rotQRef.current = q;
                 rotRef.current = rotSV.value;
-                setRotQ(q);
+                pendingRotQRef.current = q;
+                scheduleFlush();
               }
               const dy = gs.moveY - lastYRef.current;
               if (dy === 0) return;
@@ -1391,7 +1440,7 @@ export function LifeTimeline() {
               // panBy takes a fraction of the STORE window; scale so a px of
               // finger moves a px of the (shorter) display window.
               const scale = summit.panScale ?? 1;
-              panBy((dy / Math.max(1, timeLen)) * scale * (nearDates ? 4 : 1));
+              panByFrame((dy / Math.max(1, timeLen)) * scale * (nearDates ? 4 : 1));
               return;
             }
             const dx = gs.moveX - lastXRef.current;
@@ -1400,7 +1449,7 @@ export function LifeTimeline() {
             // Dragging along the date labels scrubs faster than dragging the lanes.
             const svgY = gs.moveY - stagePosRef.current.y + scrollYRef.current;
             const nearDates = svgY > layoutRef.current.height - 56;
-            panBy((-dx / Math.max(1, layoutRef.current.metrics.width)) * (nearDates ? 4 : 1));
+            panByFrame((-dx / Math.max(1, layoutRef.current.metrics.width)) * (nearDates ? 4 : 1));
           }
         },
         onPanResponderRelease: () => {
@@ -1576,11 +1625,11 @@ export function LifeTimeline() {
       const rect = el.getBoundingClientRect();
       const svgY = e.clientY - rect.top + scrollYRef.current;
       const nearDates = svgY > layoutRef.current.height - 56;
-      panBy((e.deltaX / Math.max(1, rect.width)) * (nearDates ? 4 : 1));
+      panByFrame((e.deltaX / Math.max(1, rect.width)) * (nearDates ? 4 : 1));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [panBy]);
+  }, [panByFrame]);
 
   // ---- derived view data ---------------------------------------------------
 
