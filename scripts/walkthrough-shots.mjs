@@ -38,9 +38,10 @@ async function run(tag, viewport) {
   await page.getByLabel("New thread").first().click();
   await page.waitForTimeout(1000);
   await shot("03-creation");
-  await page.getByLabel("Name the thread").fill("The garden fence");
+  await page.getByLabel("What's on your mind?").fill("The garden fence");
+  await page.getByRole("button", { name: "Add detail →" }).click();
+  await page.waitForTimeout(400);
   const next = page.getByRole("button", { name: "Next" });
-  await next.click(); await page.waitForTimeout(400);
   await page.getByRole("button", { name: "Today", exact: true }).first().click();
   await next.click(); await page.waitForTimeout(400);
   await next.click(); await page.waitForTimeout(400);

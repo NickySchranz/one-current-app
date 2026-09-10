@@ -113,13 +113,14 @@ async function scene01_hero() {
   await rec.during(rec.glideClick(page.getByLabel("New thread").first(), 700));
   await rec.hold(700);
 
-  // Creation is a screen of its own now: a bare stage holding only the line
-  // being born, with Pip at its end, and four questions one at a time.
+  // Creation is a screen of its own: a bare stage holding only the line being
+  // born, with Pip at its end. One field is the whole capture; the footage
+  // takes the optional detail path because that is what there is to look at.
   const next = page.getByRole("button", { name: "Next" });
   rec.beat("naming");
-  await typeInto(rec, page.getByLabel("Name the thread"), "The presentation on Friday");
+  await typeInto(rec, page.getByLabel("What's on your mind?"), "The presentation on Friday");
   await rec.hold(900); // the label writes itself along the line
-  await rec.glideClick(next, 450);
+  await rec.glideClick(page.getByRole("button", { name: "Add detail →" }), 450);
   await rec.hold(700);
 
   rec.beat("since");

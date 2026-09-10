@@ -25,9 +25,23 @@ const goHome = async () => {
   await page.waitForTimeout(1600);
 };
 
+/** Signing in is no longer a wall the app opens onto — it lives in More →
+ * Account, and a guest can use everything without ever going there. */
+async function openAuthGate() {
+  const onGate = await page.getByLabel("Email").first().isVisible().catch(() => false);
+  if (onGate) return;
+  await skipTourIfShown();
+  await page.getByText("≡More").first().click();
+  await page.waitForTimeout(900);
+  await page.getByRole("button", { name: "Sign in" }).first().click();
+  await page.waitForTimeout(1000);
+  if (!(await page.getByLabel("Email").first().isVisible().catch(() => false))) {
+    throw new Error("could not reach the sign-in screen from More");
+  }
+}
+
 async function signInAs(email, expectConfirm) {
-  const already = await page.getByRole("button", { name: "Sign in" }).first().isVisible().catch(() => false);
-  if (!already) throw new Error("not on the auth gate");
+  await openAuthGate();
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill("password-123");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -70,8 +84,20 @@ async function skipTourIfShown() {
   }
 }
 
-async function createThread(title) {
+/** Sign-in now starts from More, so afterwards we can be anywhere. */
+async function goToNow() {
   await skipTourIfShown();
+  if (await page.getByLabel("New thread").first().isVisible().catch(() => false)) return;
+  const nowTab = page.getByText("●Now").first();
+  if (await nowTab.isVisible().catch(() => false)) {
+    await nowTab.click();
+    await page.waitForTimeout(1000);
+  }
+  await skipTourIfShown();
+}
+
+async function createThread(title) {
+  await goToNow();
   await captureSituation(page, title, { settle: 2200 });
 }
 
@@ -116,6 +142,8 @@ check(
 
 // 5. "Go back" leaves everything untouched.
 await signOut();
+// Signing out drops to a local session now, not to the sign-in screen.
+await openAuthGate();
 await page.getByLabel("Email").fill("c@onecurrentapp.com");
 await page.getByLabel("Password").fill("password-123");
 await page.getByRole("button", { name: "Sign in", exact: true }).click();

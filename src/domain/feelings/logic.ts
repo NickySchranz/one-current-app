@@ -78,6 +78,11 @@ export function decidedToday(branch: PsychologicalBranch, now: Date = new Date()
  * imports visualization.)
  */
 export function handledToday(branch: PsychologicalBranch, now: Date = new Date()): boolean {
+  // Waiting is an answer that keeps holding. Asking again tomorrow would
+  // make the person re-decide something they already decided, which is the
+  // exact pressure the disposition exists to remove — the review date brings
+  // it back on its own (see the store's init).
+  if (branch.status === "waiting-with-boundaries") return true;
   return decidedToday(branch, now) || (!!branch.leftOn && branch.leftOn === isoDate(now));
 }
 

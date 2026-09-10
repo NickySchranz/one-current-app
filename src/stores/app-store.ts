@@ -13,6 +13,8 @@ import {
   trackLoudness,
   type CreateBranchInput, effectiveLoudness, isClosed, isOpen } from "@/domain/branches/logic";
 import type { LoudnessSource } from "@/domain/branches/types";
+import { applyWaitingToBranch, createWaitingContainer, isReviewDue } from "@/domain/waiting/logic";
+import type { WaitingContainer } from "@/domain/waiting/types";
 import { advanceSkew, appNow, getSkewMs, setRate, setSkewMs } from "@/domain/time/clock";
 import { daysAwayBefore, setPresentDays, withDay } from "@/domain/time/presence";
 import { addMomentToBranch, createMoment, type CreateMomentInput } from "@/domain/moments/logic";
@@ -43,6 +45,8 @@ export type View =
   | { kind: "now" }
   | { kind: "history" }
   | { kind: "merge-review"; mergeId: string }
+  /** Preparing something to say out loud, about these situations. */
+  | { kind: "brief"; branchIds: string[] }
   | { kind: "more" };
 
 /**
@@ -68,6 +72,7 @@ export type TimelineOperation =
   /** The final, explicit merge confirmation. Focused. */
   | { kind: "confirming-merge"; branchIds: string[] }
   /** A branch that needs more support than an app should carry alone. Focused. */
+  | { kind: "quick-wait"; branchId: string }
   | { kind: "seeking-support"; branchId: string };
 
 /**
@@ -87,6 +92,7 @@ export function operationDepth(
     case "quick-act":
     case "quick-merge":
     case "quick-note":
+    case "quick-wait":
     case "confirming-merge":
       return "stage";
     case "understanding":
@@ -119,6 +125,9 @@ type AppState = {
   actions: IntegratedAction[];
   /** What the fires taught you — each survives its burned thread. */
   lessons: Lesson[];
+  /** Open and closed waiting containers. Loaded with everything else; until
+   * the Wait disposition existed these lived only in the database. */
+  waiting: WaitingContainer[];
   mergeDraft?: MergeDraft;
   view: View;
   operation: TimelineOperation;
@@ -198,6 +207,14 @@ type AppState = {
   firstWholenessSeen: boolean;
   /** True while that moment is on screen. Transient; never persisted. */
   showWholenessMoment: boolean;
+  /** Map or list for the Now view. The map is the default and the app's
+   * identity; the list is its text equivalent and a calmer way in. */
+  nowMode: "map" | "list";
+  /** Situations the person keeps at the top of the list, in their order. */
+  pinnedSituationIds: string[];
+  /** Situations set aside for now. Never hidden from the map or history —
+   * only from the list's first screen, and always recoverable. */
+  dismissedSituationIds: string[];
   /** True while the sign-in screen is up. Signing in is optional and reachable
    * from More → Account; it is not a gate in front of the product. */
   showAuth: boolean;
@@ -243,6 +260,9 @@ type AppState = {
   noteWholenessReached(): void;
   dismissWholenessMoment(): void;
   setShowAuth(show: boolean): void;
+  setNowMode(mode: "map" | "list"): void;
+  setSituationPinned(branchId: string, pinned: boolean): void;
+  setSituationDismissed(branchId: string, dismissed: boolean): void;
   /** "Still true": re-anchor every open thread at the level it was left, so an
    * absence costs nothing. Not a decision — it changes no loudness, it only
    * says the dial is still right. */
@@ -253,6 +273,18 @@ type AppState = {
   addMoment(input: CreateMomentInput): Promise<BranchCommit>;
   /** Any decision about a branch loosens its loudness; optionally applies a patch alongside. */
   easeBranch(id: string, patch?: Partial<PsychologicalBranch>): Promise<void>;
+  /** Wait for something specific, with a date to look again. */
+  startWaiting(
+    branchId: string,
+    input: { awaiting: string; reviewDate: string },
+  ): Promise<void>;
+  /** Stop waiting and let it reach Now again — the review came, or you chose to look. */
+  stopWaiting(branchId: string): Promise<void>;
+  /** Looked, and did not decide. An honest answer that claims no progress. */
+  markUnsure(branchId: string): Promise<void>;
+  /** It stopped mattering. Closes the situation without claiming it was
+   * worked through, resolved, or learned from. */
+  closeAsNoLongerRelevant(branchId: string): Promise<void>;
   /** One small step today for a single branch; eases its loudness. */
   createTodayAction(branchId: string, step: string): Promise<void>;
   /** An action was done: it settles into the past instead of waiting ahead. */
@@ -396,6 +428,10 @@ const COIN_CHANCE_BONK = 0.35;
 const COIN_ALWAYS_KEY = "one-current-coin-always";
 /** ISO days the app was opened. Loudness drift counts these and nothing else. */
 const PRESENCE_KEY = "one-current-present-days";
+const NOW_MODE_KEY = "one-current-now-mode";
+const PINNED_KEY = "one-current-pinned";
+/** Cleared each new day: "not now" means not now, not never. */
+const DISMISSED_KEY = "one-current-dismissed";
 /** Set once the user has reached a fully answered day and been shown it. */
 const FIRST_WHOLENESS_KEY = "one-current-first-wholeness";
 /** One wholeness reading per day, so the trend is measured rather than reconstructed. */
@@ -546,6 +582,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   merges: [],
   actions: [],
   lessons: [],
+  waiting: [],
   view: { kind: "now" },
   operation: { kind: "idle" },
   typeFilter: new Set(),
@@ -574,6 +611,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   firstWholenessSeen: true,
   showWholenessMoment: false,
   showAuth: false,
+  nowMode: "map",
+  pinnedSituationIds: [],
+  dismissedSituationIds: [],
 
   async init() {
     let [data, settings] = await Promise.all([repo.loadAll(), loadSettings()]);
@@ -599,6 +639,39 @@ export const useAppStore = create<AppState>((set, get) => ({
         startWalkthrough = true;
       }
     }
+    const [savedNowMode, savedPinned, savedDismissed] = await Promise.all([
+      AsyncStorage.getItem(NOW_MODE_KEY).catch(() => null),
+      AsyncStorage.getItem(PINNED_KEY).catch(() => null),
+      AsyncStorage.getItem(DISMISSED_KEY).catch(() => null),
+    ]);
+    const readIds = (raw: string | null): string[] => {
+      try {
+        const v: unknown = raw ? JSON.parse(raw) : [];
+        return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+      } catch {
+        return [];
+      }
+    };
+    // "Not now" is scoped to a day on purpose. Anything else turns a gentle
+    // "later" into a hiding place, and the situation quietly stops existing.
+    const dismissedRaw = readIds(savedDismissed);
+    const dismissedToday = dismissedRaw[0] === todayIso() ? dismissedRaw.slice(1) : [];
+
+    // A wait whose date has come is over: the line rejoins the day's
+    // questions on its own. Without this, "come back to me in two weeks"
+    // would be a promise the app quietly failed to keep.
+    const dueWaits = data.waiting.filter((w) => isReviewDue(w, appNow()));
+    for (const w of dueWaits) {
+      const branch = data.branches.find((b) => b.id === w.branchId);
+      if (!branch || branch.status !== "waiting-with-boundaries") continue;
+      const revived = { ...branch, status: "active" as const, waitingContainerId: undefined };
+      const closed = { ...w, closedAt: appNow().toISOString() };
+      data.branches = data.branches.map((b) => (b.id === branch.id ? revived : b));
+      data.waiting = data.waiting.map((x) => (x.id === w.id ? closed : x));
+      await repo.saveBranch(revived);
+      await repo.saveWaiting(closed);
+    }
+
     // BEFORE `ready`, not after: the wholeness chip records a reading as soon
     // as it renders, and if it got there first it would persist a log of one
     // day over the stored history — wiping the trend on every startup.
@@ -611,11 +684,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       tutorialStep: startWalkthrough ? "welcome" : null,
       branches: data.branches,
       merges: data.merges,
+      waiting: data.waiting,
       lessons: data.lessons,
       actions: data.actions,
       mergeDraft: draft,
       nowTick: appNow().getTime(),
       window: weekWindow(appNow()),
+      nowMode: savedNowMode === "list" ? "list" : "map",
+      pinnedSituationIds: readIds(savedPinned),
+      dismissedSituationIds: dismissedToday,
       view: { kind: "now" },
       // An interrupted merge is restored where it stopped — at the confirmation.
       operation: draft
@@ -840,6 +917,30 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setShowAuth: (showAuth) => set({ showAuth }),
 
+  setNowMode: (nowMode) => {
+    set({ nowMode });
+    AsyncStorage.setItem(NOW_MODE_KEY, nowMode).catch(() => {});
+  },
+
+  setSituationPinned: (branchId, pinned) => {
+    const next = pinned
+      ? [...new Set([...get().pinnedSituationIds, branchId])]
+      : get().pinnedSituationIds.filter((id) => id !== branchId);
+    set({ pinnedSituationIds: next });
+    AsyncStorage.setItem(PINNED_KEY, JSON.stringify(next)).catch(() => {});
+  },
+
+  setSituationDismissed: (branchId, dismissed) => {
+    const next = dismissed
+      ? [...new Set([...get().dismissedSituationIds, branchId])]
+      : get().dismissedSituationIds.filter((id) => id !== branchId);
+    set({ dismissedSituationIds: next });
+    // Stamped with the day it was set: init drops the list on a new date, so
+    // "not now" expires by itself rather than becoming a permanent hiding
+    // place for the situations someone least wants to look at.
+    AsyncStorage.setItem(DISMISSED_KEY, JSON.stringify([todayIso(), ...next])).catch(() => {});
+  },
+
   recordWholeness(share) {
     const today = todayIso();
     const rounded = Math.round(share * 1000) / 1000;
@@ -933,6 +1034,99 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? s.actions.filter((a) => !removedActionIds.includes(a.id))
           : s.actions,
       reclaim: freed.length > 0 ? { key: Date.now(), branchId: id, feelings: freed } : s.reclaim,
+    }));
+  },
+
+  async startWaiting(branchId, input) {
+    const branch = get().branches.find((b) => b.id === branchId);
+    if (!branch) return;
+    const container = createWaitingContainer(
+      {
+        branchId,
+        awaiting: input.awaiting,
+        reviewDate: input.reviewDate,
+        // The richer fields the container can hold are not asked for here.
+        // Waiting has to cost one sentence and one date, or nobody will pick
+        // it over letting the thing rot quietly.
+        actionTaken: "",
+        outsideControl: [],
+        reopenConditions: [],
+        continueMeanwhile: [],
+        reclaimedNow: [],
+      },
+      appNow(),
+    );
+    const next = applyWaitingToBranch(branch, container, appNow());
+    await repo.saveWaiting(container);
+    await repo.saveBranch(next);
+    const freed = heldFeelings(branch);
+    set((s) => ({
+      waiting: [...s.waiting.filter((w) => w.branchId !== branchId), container],
+      branches: s.branches.map((b) => (b.id === branchId ? next : b)),
+      reclaim: freed.length > 0 ? { key: Date.now(), branchId, feelings: freed } : s.reclaim,
+      operation: { kind: "idle" },
+      view: nowView(s.view),
+    }));
+  },
+
+  async stopWaiting(branchId) {
+    const branch = get().branches.find((b) => b.id === branchId);
+    if (!branch) return;
+    const container = get().waiting.find((w) => w.branchId === branchId && !w.closedAt);
+    if (container) {
+      const closed = { ...container, closedAt: appNow().toISOString() };
+      await repo.saveWaiting(closed);
+      set((s) => ({ waiting: s.waiting.map((w) => (w.id === closed.id ? closed : w)) }));
+    }
+    // Back to an ordinary open line. Not a decision: the day's answer is
+    // still ahead of the person, which is the point of the review arriving.
+    const next: PsychologicalBranch = {
+      ...branch,
+      status: "active",
+      waitingContainerId: undefined,
+    };
+    await repo.saveBranch(next);
+    set((s) => ({ branches: s.branches.map((b) => (b.id === branchId ? next : b)) }));
+  },
+
+  async markUnsure(branchId) {
+    const branch = get().branches.find((b) => b.id === branchId);
+    if (!branch) return;
+    // Counts as today's answer — the person did look — but moves no loudness
+    // and records no progress. Pretending uncertainty is a decision is how
+    // an app starts lying to someone about their own week.
+    const next: PsychologicalBranch = {
+      ...branch,
+      lastDecisionOn: todayIso(),
+      lastActivatedAt: appNow().toISOString(),
+    };
+    await repo.saveBranch(next);
+    set((s) => ({
+      branches: s.branches.map((b) => (b.id === branchId ? next : b)),
+      operation: { kind: "idle" },
+      view: nowView(s.view),
+    }));
+  },
+
+  async closeAsNoLongerRelevant(branchId) {
+    const branch = get().branches.find((b) => b.id === branchId);
+    if (!branch) return;
+    const freed = heldFeelings(branch);
+    // "archived", not "merged": integrating means it gave you something and
+    // you took it. Plenty of things simply stop mattering, and recording
+    // that as an integration would put a resolution in someone's history
+    // that never happened. It stays in history either way.
+    const next: PsychologicalBranch = {
+      ...branch,
+      status: "archived",
+      mergeDate: todayIso(),
+      lastDecisionOn: todayIso(),
+      leftOn: undefined,
+    };
+    await repo.saveBranch(next);
+    set((s) => ({
+      branches: s.branches.map((b) => (b.id === branchId ? next : b)),
+      reclaim: freed.length > 0 ? { key: Date.now(), branchId, feelings: freed } : s.reclaim,
     }));
   },
 
@@ -1279,7 +1473,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     AsyncStorage.setItem(AUTH_KEY, JSON.stringify(user)).catch(() => {
       // storage may be unavailable; the session still applies now
     });
-    set({ authUser: user });
+    // Closing the sign-in screen is part of signing in. It used to close
+    // itself because it WAS the app until there was a session; now it is a
+    // screen someone chose to open, so it has to be sent away explicitly.
+    set({ authUser: user, showAuth: false });
     // A first session on this device (or after a takeover) gets the walkthrough.
     const done = await AsyncStorage.getItem(TUTORIAL_KEY).catch(() => null);
     if (done !== "done" && get().tutorialStep === null) set({ tutorialStep: "welcome" });
@@ -1339,6 +1536,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       branches: data.branches,
       merges: data.merges,
+      waiting: data.waiting,
       actions: data.actions,
       // Imported lessons reach the disk through repo.importAll; without this
       // they stayed invisible until the next launch.
@@ -1386,7 +1584,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Table writes chain on their own queue, so anything in flight lands
     // before the clear — nothing stale can re-persist afterwards.
     await wipeLocalStorageData();
-    set({ branches: [], merges: [], actions: [], lessons: [] });
+    set({ branches: [], merges: [], actions: [], lessons: [], waiting: [] });
   },
   async deleteEverything() {
     await get().wipeLocalData();

@@ -16,6 +16,7 @@ import {
 import { branchColor } from "@/visualization/branch-lines/style";
 import { Sparkline } from "@/ui/Sparkline";
 import { DepthLock } from "@/features/paywall/DepthLock";
+import { WhereThisStandsCard } from "@/features/situation/WhereThisStands";
 import { loudnessWord } from "@/ui/LoudnessSlider";
 import { describeBranch } from "@/visualization/a11y/describe";
 import { useT } from "@/i18n/i18n";
@@ -283,6 +284,10 @@ export function BranchView({ branchId }: Props) {
       >
         {describeBranch(branch, t)}
       </T>
+
+      {/* Where it stands comes first. The timeline below is for sequence and
+          detail; this is the thing someone came back to find out. */}
+      <WhereThisStandsCard branchId={branch.id} />
 
       {/* Naming the kind is never asked at creation — this is the moment the
           user chose to look closely, which is the only moment they can answer

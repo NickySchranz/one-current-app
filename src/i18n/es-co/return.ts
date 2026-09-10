@@ -5,7 +5,6 @@ export const returnGreeting: Record<string, string> = {
   "was {level}": "estaba {level}",
   "and {n} more, all as they were": "y {n} más, todos como estaban",
   "Still true": "Sigue igual",
-  "Let's go through them": "Repasémoslos",
   "held": "guardada",
   "Your threads are where you left them.": "Tus hilos están donde los dejaste.",
   "Your threads are where you left them. Nothing was added while you were away.":

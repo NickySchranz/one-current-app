@@ -31,6 +31,11 @@ const { trackLoudness, loudnessSeries, reportedLoudnessCount, hasUnlabelledLoudn
   await load("branches/logic.mjs");
 const { attemptAction, completeAction, handOffAction, isActionOpen } =
   await load("actions/logic.mjs");
+const { applyWaitingToBranch, createWaitingContainer, isReviewDue } =
+  await load("waiting/logic.mjs");
+const { handledToday } = await load("feelings/logic.mjs");
+const { whereThisStands, headlineOf } = await load("situations/where-this-stands.mjs");
+const { buildBrief, renderBriefText } = await load("brief/build-brief.mjs");
 
 const AT = new Date("2026-09-09T10:00:00.000Z");
 const make = (title, kindChoiceId, extra = {}) => ({
@@ -213,6 +218,166 @@ check(
   `completedAt=${handed.completedAt}`,
 );
 check("a handed-off step is no longer open work either", !isActionOpen(handed));
+
+console.log("\ndispositions\n");
+
+const situation = make("their answer about the dates", "unnamed", { loudness: 4 });
+const container = createWaitingContainer(
+  {
+    branchId: situation.id,
+    awaiting: "their answer about the dates",
+    reviewDate: ago(-14), // a fortnight out
+    actionTaken: "",
+    outsideControl: [],
+    reopenConditions: [],
+    continueMeanwhile: [],
+    reclaimedNow: [],
+  },
+  AT,
+);
+const waiting = applyWaitingToBranch(situation, container, AT);
+
+check("waiting is a real state, not a rest", waiting.status === "waiting-with-boundaries");
+check("it keeps its own container", waiting.waitingContainerId === container.id);
+check(
+  "and it stops asking every morning — otherwise waiting is just rest with extra steps",
+  handledToday(waiting, new Date(AT.getTime() + 3 * 86400000)),
+);
+check(
+  "the review is not due before its date",
+  !isReviewDue(container, AT),
+);
+check(
+  "and is due once the date arrives",
+  isReviewDue(container, new Date(AT.getTime() + 15 * 86400000)),
+);
+check(
+  "quietening the line is recorded as the app's move, not the person's",
+  waiting.loudnessLog.at(-1).source === "derived",
+);
+check(
+  "a closed wait stops being due, so it cannot revive twice",
+  !isReviewDue({ ...container, closedAt: AT.toISOString() }, new Date(AT.getTime() + 99 * 86400000)),
+);
+
+console.log("\nwhere this stands\n");
+
+const bare = make("something I keep circling", "unnamed");
+const bareStands = whereThisStands({ branch: bare, actions: [], merges: [], waiting: [] });
+check(
+  "a situation with nothing recorded says so, rather than inventing a next step",
+  bareStands.empty && bareStands.lines.length === 0,
+  `${bareStands.lines.length} line(s): ${bareStands.lines.map((l) => l.label).join(", ")}`,
+);
+check("and offers no headline to lead with", headlineOf(bareStands) === undefined);
+
+const lived = {
+  ...make("the conversation with R", "relationship"),
+  commits: [{ id: "m1", date: ago(3), title: "R brought it up first", type: "event" }],
+  unmetNeeds: ["to know where I stand"],
+};
+const livedActions = [
+  {
+    id: "a1",
+    title: "write down what I actually want to say",
+    instruction: "",
+    durationMinutes: 10,
+    minimumVersion: "",
+    qualitiesCarried: [],
+    completionDefinition: "",
+    createdAt: ago(2) + "T09:00:00.000Z",
+    attemptedAt: ago(1) + "T09:00:00.000Z",
+    branchesIntegrated: [{ branchId: lived.id, branchTitle: lived.title, representedAs: "" }],
+  },
+];
+const livedStands = whereThisStands({
+  branch: lived,
+  actions: livedActions,
+  merges: [],
+  waiting: [],
+});
+const labels = livedStands.lines.map((l) => l.label);
+check("it surfaces the latest development", labels.includes("Latest"));
+check(
+  "an attempt never reads as something done",
+  !labels.includes("You did"),
+  labels.join(", "),
+);
+check(
+  "an attempted step that is still open says so once, as the next thing",
+  livedStands.lines.some((l) => l.kind === "next" && l.label === "Still to finish") &&
+    labels.filter((l) => l === "Still to finish" || l === "You tried").length === 1,
+  labels.join(", "),
+);
+// An attempt that has since been superseded is history, and reads that way.
+const supersededStands = whereThisStands({
+  branch: lived,
+  actions: [
+    ...livedActions,
+    {
+      ...livedActions[0],
+      id: "a2",
+      title: "just say it on Tuesday",
+      createdAt: ago(0) + "T09:00:00.000Z",
+      attemptedAt: undefined,
+    },
+  ],
+  merges: [],
+  waiting: [],
+});
+const supersededLabels = supersededStands.lines.map((l) => l.label);
+check(
+  "and an older attempt is still shown as an attempt",
+  supersededLabels.includes("You tried") && supersededLabels.includes("Next step"),
+  supersededLabels.join(", "),
+);
+check("and what is unresolved stays visible", labels.includes("Still open"));
+check(
+  "every line is attributed — nothing is silently the app's opinion",
+  livedStands.lines.every((l) => l.voice === "theirs" || l.voice === "app"),
+);
+check(
+  "the person's own words are never rewritten",
+  livedStands.lines.some((l) => l.text === "R brought it up first" && l.voice === "theirs"),
+);
+
+console.log("\nconversation brief\n");
+
+const brief = buildBrief({
+  branches: [lived, bare],
+  actions: livedActions,
+  merges: [],
+  waiting: [],
+  branchIds: [lived.id, bare.id],
+  now: AT,
+});
+check("a brief covers each chosen situation", brief.sections.length === 2);
+check(
+  "a situation with nothing recorded still gets an honest line rather than a blank",
+  brief.sections[1].lines.length === 1 && brief.sections[1].lines[0].voice === "app",
+);
+
+const rendered = renderBriefText(brief);
+check("the rendered brief names the situation", rendered.includes("the conversation with R"));
+check("and carries the person's words verbatim", rendered.includes("R brought it up first"));
+
+// Dropping a line must actually drop it — the preview is the artefact.
+const trimmed = {
+  ...brief,
+  sections: brief.sections.map((sec) => ({
+    ...sec,
+    lines: sec.lines.map((l) => ({ ...l, include: l.label !== "Latest" })),
+  })),
+};
+check(
+  "a line left out does not appear in what is handed over",
+  !renderBriefText(trimmed).includes("R brought it up first"),
+);
+check(
+  "an empty question is not rendered as a blank bullet",
+  !renderBriefText({ ...brief, questions: [{ id: "q", label: "Question", text: "  ", include: true, voice: "theirs" }] })
+    .includes("To ask"),
+);
 
 console.log(`\n${failures} failure(s).\n`);
 process.exit(failures > 0 ? 1 : 0);

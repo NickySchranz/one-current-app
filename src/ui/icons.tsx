@@ -158,3 +158,34 @@ export function IconClock(p: IconProps) {
     </Svg>
   );
 }
+
+/** Prepare a conversation: two lines leaning toward each other, mid-sentence. */
+export function IconTalk(p: IconProps) {
+  const s = strokeProps(p);
+  return (
+    <Svg width={p.size ?? 24} height={p.size ?? 24} viewBox="0 0 24 24">
+      <Path
+        d="M3.6 8.2 C3.5 6.4, 4.6 5.4, 6.4 5.4 L13.9 5.5 C15.6 5.4, 16.6 6.5, 16.5 8.1 L16.6 11.6 C16.6 13.3, 15.5 14.2, 13.8 14.2 L8.4 14.1 L5.2 16.6 C5.3 15.4, 5.3 14.8, 5.2 14.1 C4.2 13.9, 3.6 13.1, 3.6 11.8 Z"
+        {...s}
+      />
+      <Path
+        d="M8.6 17.4 C8.6 18.7, 9.5 19.4, 10.9 19.4 L16.1 19.3 L19.3 21.4 C19.2 20.4, 19.2 19.9, 19.3 19.2 C20.2 18.9, 20.6 18.2, 20.6 17.1 L20.5 12.9"
+        {...s}
+      />
+    </Svg>
+  );
+}
+
+/** Still unsure: a question mark with no full stop under it. */
+export function IconUnsure(p: IconProps) {
+  const s = strokeProps(p);
+  return (
+    <Svg width={p.size ?? 24} height={p.size ?? 24} viewBox="0 0 24 24">
+      <Path
+        d="M8.4 8.6 C8.3 6.4, 10 5.1, 12.2 5.2 C14.4 5.2, 15.9 6.5, 15.9 8.4 C16 10.4, 14.6 11.2, 13.3 12.1 C12.3 12.8, 12 13.5, 12 14.8"
+        {...s}
+      />
+      <Path d="M11.9 18.2 L12 18.9" {...s} />
+    </Svg>
+  );
+}

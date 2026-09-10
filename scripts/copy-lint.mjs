@@ -55,6 +55,14 @@ const DYNAMIC_KEYS = [
   // TYPE_LABELS (src/features/integrated-threads/IntegratedThreadsPanel.tsx)
   "Not named", "Event", "Waiting", "Projection", "Identity", "Relationship",
   "Body", "Project",
+  // QuickWait HORIZONS + the Wait entry in QuickBranchMenu's ACTIONS table
+  "In a week", "In two weeks", "In a month",
+  "Wait for something",
+  "It is not yours to move yet — name what you are waiting for.",
+  // whereThisStands labels + brief line labels (rendered t(line.label))
+  "Latest", "You decided", "Where you landed", "You did", "You tried",
+  "Moved to your own tasks", "Waiting for", "Next step", "Still to finish",
+  "Still open", "Where this stands", "Question",
   // LOUDNESS_WORDS (src/ui/LoudnessSlider.tsx)
   "quiet", "murmuring", "speaking", "calling", "loud",
   // bonk verbs + super state (src/features/life-timeline/LifeTimeline.tsx)
@@ -192,7 +200,10 @@ let bannedHits = 0;
 const usedKeys = new Set(DYNAMIC_KEYS);
 const srcChunks = [];
 const srcSansOverlayChunks = [];
-for (const file of walk(SRC)) {
+// App.tsx sits outside src/ and was therefore never linted — its copy could
+// go untranslated and its banned words unnoticed. It holds the shell: the
+// offline pill, the Now map/list toggle.
+for (const file of [...walk(SRC), join(process.cwd(), "App.tsx")]) {
   const rel = relative(process.cwd(), file);
   if (rel.startsWith(join("src", "i18n") + "/")) continue;
   const text = readFileSync(file, "utf8");

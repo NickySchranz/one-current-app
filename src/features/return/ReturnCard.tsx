@@ -36,6 +36,7 @@ export function ReturnCard() {
   const mascotType = useAppStore((s) => s.mascotType);
   const greetReturn = useAppStore((s) => s.greetReturn);
   const holdOpenThreads = useAppStore((s) => s.holdOpenThreads);
+  const closeAsNoLongerRelevant = useAppStore((s) => s.closeAsNoLongerRelevant);
   const { width: winW } = useWindowDimensions();
 
   // What was left open, loudest first — and at the level it was LEFT at, not
@@ -107,7 +108,7 @@ export function ReturnCard() {
           {held.slice(0, SHOWN).map((b) => (
             <View
               key={b.id}
-              style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}
+              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
             >
               <T style={{ flex: 1, fontSize: 13.6 }} numberOfLines={1}>
                 {b.title}
@@ -115,6 +116,14 @@ export function ReturnCard() {
               <Hint style={{ margin: 0 }}>
                 {t("was {level}", { level: t(loudnessWord(b.loudness)) })}
               </Hint>
+              {/* Some of what was waiting simply stopped mattering while the
+                  person was away, and that has to be one tap — otherwise the
+                  only way to clear it is to claim it was worked through. */}
+              <Button
+                variant="quiet"
+                label={t("Not any more")}
+                onPress={() => void closeAsNoLongerRelevant(b.id)}
+              />
             </View>
           ))}
           {held.length > SHOWN && (
@@ -127,10 +136,10 @@ export function ReturnCard() {
         <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
           <Button
             variant="primary"
-            label={t("Still true")}
+            label={t("All still the same")}
             onPress={() => void holdOpenThreads()}
           />
-          <Button variant="quiet" label={t("Let's go through them")} onPress={greetReturn} />
+          <Button variant="quiet" label={t("Something changed")} onPress={greetReturn} />
         </View>
       </View>
     </View>

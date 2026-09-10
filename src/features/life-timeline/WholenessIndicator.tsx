@@ -22,7 +22,11 @@ import { useAppStore } from "@/stores/app-store";
 import { useWalkthroughTarget } from "@/features/tutorial/targets";
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import { effectiveLoudness } from "@/domain/branches/logic";
-import { decidedToday, energySplit, integrationSummary } from "@/domain/feelings/logic";
+import {
+  energySplit,
+  handledToday,
+  integrationSummary,
+} from "@/domain/feelings/logic";
 import { useT } from "@/i18n/i18n";
 import { useTheme } from "@/ui/theme";
 import { alpha, mix } from "@/ui/color";
@@ -137,7 +141,7 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
   const wholeness = energySplit(branches, now).mainShare;
   const returnedToday = integrationSummary(branches, now).returnedToday;
   const undecided = activeLines
-    .filter((b) => !decidedToday(b, now))
+    .filter((b) => !handledToday(b, now))
     .sort((a, b) => effectiveLoudness(b, now) - effectiveLoudness(a, now));
 
   // The chip is the one place that computes this, so it is the one place that
@@ -287,7 +291,7 @@ export function WholenessIndicator({ activeLines, onChipHeight }: Props) {
                 <Path d="M 20 10 L 54 10" stroke={tk.lineMain} strokeWidth={2} fill="none" />
               )}
               {activeLines.slice(0, 6).map((b, i) => {
-                const isUndecided = !decidedToday(b, now);
+                const isUndecided = !handledToday(b, now);
                 const side = i % 2 === 0 ? 1 : -1;
                 const fan = isUndecided ? side * (3 + i * 2.2) : side * 1.2;
                 const y = Math.max(2, Math.min(18, 10 + fan));

@@ -31,8 +31,11 @@ import {
   IconHeart,
   IconMerge,
   IconNote,
+  IconClock,
   IconSetDown,
   IconStep,
+  IconTalk,
+  IconUnsure,
   type IconProps,
 } from "@/ui/icons";
 
@@ -42,7 +45,7 @@ type Props = { branchId: string; startExpanded?: boolean; dialOnly?: boolean };
 
 const ACTIONS: {
   key: string;
-  kind: "quick-act" | "quick-merge" | "quick-note";
+  kind: "quick-act" | "quick-merge" | "quick-note" | "quick-wait";
   label: string;
   hint: string;
   icon: ComponentType<IconProps>;
@@ -54,6 +57,13 @@ const ACTIONS: {
     label: "Integrate",
     hint: "Fold what it gave you back into your one line.",
     icon: IconMerge,
+  },
+  {
+    key: "w",
+    kind: "quick-wait",
+    label: "Wait for something",
+    hint: "It is not yours to move yet — name what you are waiting for.",
+    icon: IconClock,
   },
   {
     key: "t",
@@ -86,6 +96,8 @@ function SheetTitle({ title }: { title: string }) {
 export function QuickBranchMenu({ branchId, startExpanded = false, dialOnly = false }: Props) {
   const branch = useAppStore((s) => s.branches.find((b) => b.id === branchId));
   const setOperation = useAppStore((s) => s.setOperation);
+  const setView = useAppStore((s) => s.setView);
+  const markUnsure = useAppStore((s) => s.markUnsure);
   const reopenBranch = useAppStore((s) => s.reopenBranch);
   const easeBranch = useAppStore((s) => s.easeBranch);
   const dialLoudness = useAppStore((s) => s.dialLoudness);
@@ -341,6 +353,17 @@ export function QuickBranchMenu({ branchId, startExpanded = false, dialOnly = fa
               accessibilityHint={t("Nothing to do today — saying so is a real answer.")}
               onPress={leaveForToday}
             />
+            {/* Not knowing is the commonest honest state, and until now the
+                menu had no word for it: every option claimed some kind of
+                progress, so looking without deciding meant closing the sheet
+                and having the thread ask again tomorrow as though you had
+                not shown up. */}
+            <Choice
+              icon={IconUnsure}
+              title={t("Still unsure")}
+              accessibilityHint={t("You looked and did not decide. That counts as today's answer.")}
+              onPress={() => void markUnsure(branchId)}
+            />
           </View>
           <View style={{ flexDirection: "column", alignItems: "flex-start", gap: 3.2, marginTop: 3.2 }}>
             <Button
@@ -348,6 +371,12 @@ export function QuickBranchMenu({ branchId, startExpanded = false, dialOnly = fa
               icon={<IconEye size={16} color={theme.inkSoft} />}
               label={t("Understand this thread")}
               onPress={() => setOperation({ kind: "understanding", branchId })}
+            />
+            <Button
+              variant="quiet"
+              icon={<IconTalk size={16} color={theme.inkSoft} />}
+              label={t("Prepare a conversation")}
+              onPress={() => setView({ kind: "brief", branchIds: [branchId] })}
             />
             <Button
               variant="quiet"

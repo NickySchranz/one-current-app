@@ -54,7 +54,7 @@ const whileOpen = await branchCount();
 console.log(`optimistic line: before=${before} open=${whileOpen}`, whileOpen === before + 1 ? "OK" : "FAIL");
 
 // 2. the typed name walks onto the line
-await page.getByLabel("Name the thread").fill("Draft under test");
+await page.getByLabel("What's on your mind?").fill("Draft under test");
 await page.waitForTimeout(400);
 const hasLabel = await page.evaluate(() =>
   [...document.querySelectorAll("svg text")].some((t) => t.textContent.includes("Draft under test")),
@@ -78,9 +78,14 @@ await page.screenshot({ path: "/tmp/draft-02-cancelled.png" });
 // 4. create again, save — the line stays (and survives reload)
 await page.getByLabel("New thread").first().click();
 await page.waitForTimeout(800);
-await page.getByLabel("Name the thread").fill("Kept thread");
-await page.getByRole("button", { name: "Start the thread" }).click();
-await page.waitForTimeout(1500);
+await page.getByLabel("What's on your mind?").fill("Kept thread");
+// One field is the whole capture now; "Start the thread" lives at the end of
+// the optional detail path.
+await page.getByRole("button", { name: "Save", exact: true }).click();
+// The born draw-in runs ~1.7s. Capture used to take three more steps before
+// reaching this point, which hid the wait; with one field the harness has to
+// state it, or it pans mid-animation and reads the draw-in as a stale dash.
+await page.waitForTimeout(2600);
 // no loudness field in the create form anymore
 await page.keyboard.press("Escape");
 await page.waitForTimeout(500);
@@ -93,16 +98,26 @@ await page.mouse.down();
 for (let i = 1; i <= 10; i++) await page.mouse.move(500 + i * 30, 150);
 await page.mouse.up();
 await page.waitForTimeout(600);
+// The born draw-in is drawn as dash `L,L` with the offset animating from L
+// down to 0, so a stuck one is that idiom with a non-zero offset left on it.
+// Nothing else on the map uses it: the flow is a small repeating dash
+// ("2,26"), and the answer shimmer is a single dash with an effectively
+// infinite gap ("110,1000000") that sits idle and invisible until an answer
+// fires it. The old heuristic — "a first value under 10000 is suspicious" —
+// could not tell those apart, which is why it flagged an empty map.
 const staleDash = await page.evaluate(() =>
   [...document.querySelectorAll("path")]
     .filter((p) => parseFloat(p.getAttribute("stroke-width") ?? "0") >= 2)
-    .map((p) => p.getAttribute("stroke-dasharray"))
-    .filter((da) => {
-      if (!da || da === "none") return false;
-      const first = parseFloat(da);
-      // a dash longer than any path is a solid stroke; short dashes are the bug
-      return first < 10000 && first > 3; // ignore the dotted future axis (2 6)
-    }),
+    .map((p) => ({
+      da: p.getAttribute("stroke-dasharray"),
+      off: parseFloat(p.getAttribute("stroke-dashoffset") ?? "0"),
+    }))
+    .filter((r) => {
+      if (!r.da || r.da === "none") return false;
+      const [a, b] = r.da.split(/[,\s]+/).map(parseFloat);
+      return a === b && Math.abs(r.off) > 0.5; // a draw-in left part-way
+    })
+    .map((r) => `${r.da}@${r.off}`),
 );
 console.log(
   `stale born dash after pan: [${staleDash.join(" | ")}]`,
@@ -140,14 +155,23 @@ const dashed = await page.evaluate(() =>
 console.log(`dashed thread lines: ${dashed}`, dashed === 0 ? "OK" : "FAIL");
 await page.screenshot({ path: "/tmp/draft-03-examples.png" });
 
-// 6. lane stability: with other threads on the board, the optimistic line
-// must keep its vertical spot while "since when?" changes.
+// 6. the draft line holds ONE lane while the answers change.
+//
+// This used to compare the label's y on the creation stage against its y on
+// the map, and has been failing on main since creation moved to a screen of
+// its own: that stage builds its own layout, with its own height and its own
+// week window around Now, so the two coordinate systems were never going to
+// agree. (Verified against main at the time of writing — identical numbers,
+// y0=350 saved=654. The script had been dying earlier, at "Start the thread",
+// so nobody saw it.) What still matters, and is testable, is that the line
+// does not hop lanes while "since when?" is being answered, and that the
+// saved thread actually lands on the map.
 await page.getByLabel("New thread").first().click();
 await page.waitForTimeout(900);
-await page.getByLabel("Name the thread").fill("Pinned draft");
+await page.getByLabel("What's on your mind?").fill("Pinned draft");
 await page.waitForTimeout(400);
-// SVG user-space y of the label: lane position pure, unaffected by the
-// stage's focus scrolling.
+await page.getByRole("button", { name: "Add detail →" }).click();
+await page.waitForTimeout(600);
 const labelY = () =>
   page.evaluate(() => {
     const t = [...document.querySelectorAll("svg text")].find((el) =>
@@ -165,38 +189,44 @@ for (const when of ["This week", "This month", "Earlier…"]) {
 await page.getByText("I am not sure").click();
 await page.waitForTimeout(500);
 ys.push(await labelY());
-const stable = ys.every((y) => y !== null && Math.abs(y - y0) <= 1);
-console.log(`draft lane stays put: ys=[${ys.join(", ")}]`, stable ? "OK" : "FAIL");
+// One lane gap is >= 34px (paths.ts); a fork date reaching further back
+// reframes the stage's own window, which moves the line a little without
+// ever moving it to another lane.
+const LANE_GAP = 34;
+const sameLane = ys.every((y) => y !== null && Math.abs(y - y0) < LANE_GAP);
+console.log(`draft keeps one lane while answering: ys=[${ys.join(", ")}]`, sameLane ? "OK" : "FAIL");
 await page.screenshot({ path: "/tmp/draft-05-pinned-lane.png" });
 
-// 7. saving must not move the line either — the quick menu (loudness) opens
-// and the line stays exactly where the draft drew it.
+// 7. saving puts it on the map, once, and it stays there.
+for (let i = 0; i < 2; i++) {
+  await page.getByRole("button", { name: "Next" }).first().click();
+  await page.waitForTimeout(500);
+}
 await page.getByRole("button", { name: "Start the thread" }).click();
-await page.waitForTimeout(1200);
-const ySaved = await labelY();
-// nudge the loudness bar, then check again
-const bar = page.getByRole("slider").first();
-const box = await bar.boundingBox();
-if (box) await page.mouse.click(box.x + box.width * 0.6, box.y + box.height / 2);
-await page.waitForTimeout(600);
-const yLoud = await labelY();
-// Loudness intentionally pulls a line a few px away from the main line
-// (paths.ts pullOffset); a lane hop would be a whole laneGap (>=34px).
-const PULL = 16;
-const pinnedThroughSave =
-  ySaved !== null && yLoud !== null && Math.abs(ySaved - y0) <= 1 && Math.abs(yLoud - y0) <= PULL;
-console.log(
-  `line stays after save + loudness: y0=${y0} saved=${ySaved} loud=${yLoud}`,
-  pinnedThroughSave ? "OK" : "FAIL",
-);
-await page.screenshot({ path: "/tmp/draft-06-after-save-loudness.png" });
+await page.waitForTimeout(2600);
 await page.keyboard.press("Escape");
-await page.waitForTimeout(600);
-const yClosed = await labelY();
+await page.waitForTimeout(800);
+// Names are drawn twice on purpose — a stroked pass behind a filled one, so
+// they stay readable over the map — so count distinct positions, not nodes.
+const onMap = await page.evaluate(() => {
+  const at = new Set(
+    [...document.querySelectorAll("svg text")]
+      .filter((el) => el.textContent.includes("Pinned draft"))
+      .map((el) => `${el.getAttribute("x")},${el.getAttribute("y")}`),
+  );
+  return at.size;
+});
+console.log(`saved thread is on the map in one place: ${onMap}`, onMap === 1 ? "OK" : "FAIL");
+const yMap = await labelY();
+await page.mouse.move(500, 400);
+await page.mouse.wheel(0, 200);
+await page.waitForTimeout(800);
+const yAfterScroll = await labelY();
 console.log(
-  `line stays after menu closes: closed=${yClosed}`,
-  yClosed !== null && Math.abs(yClosed - y0) <= PULL ? "OK" : "FAIL",
+  `and holds its lane through a pan: ${yMap} -> ${yAfterScroll}`,
+  yMap !== null && yAfterScroll !== null && Math.abs(yAfterScroll - yMap) < LANE_GAP ? "OK" : "FAIL",
 );
+await page.screenshot({ path: "/tmp/draft-06-after-save.png" });
 
 await browser.close();
 server.close();

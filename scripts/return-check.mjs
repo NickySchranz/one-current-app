@@ -101,8 +101,15 @@ await page.keyboard.press("Escape");
 await chip.click({ force: true }).catch(() => {});
 await page.waitForTimeout(300);
 
-// "Still true" is the cheap honest answer: it re-anchors, it does not decide.
-await page.getByRole("button", { name: "Still true" }).click();
+// "All still the same" is the cheap honest answer: it re-anchors, it does
+// not decide. The other two — "Something changed", and per-row "Not any
+// more" — are the rest of the brief's three.
+check(
+  "the other two honest answers are offered",
+  (await page.getByRole("button", { name: "Something changed" }).count()) === 1 &&
+    (await page.getByRole("button", { name: "Not any more" }).count()) > 0,
+);
+await page.getByRole("button", { name: "All still the same" }).click();
 await page.waitForTimeout(800);
 check("the card is set down", (await page.getByLabel("return-card").count()) === 0);
 

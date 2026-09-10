@@ -11,6 +11,7 @@ import { useMascot } from "@/features/life-timeline/useMascot";
 import { QuickAct } from "@/features/branch-quick-actions/QuickAct";
 import { QuickMerge } from "@/features/branch-quick-actions/QuickMerge";
 import { QuickNote } from "@/features/branch-quick-actions/QuickNote";
+import { QuickWait } from "@/features/branch-quick-actions/QuickWait";
 import { MergeWizard } from "@/features/branch-merge/MergeWizard";
 import { InTrayContext, Tag } from "@/ui/primitives";
 import { useTheme } from "@/ui/theme";
@@ -27,6 +28,8 @@ function stageLabel(op: TimelineOperation): string {
       return "What is true now";
     case "quick-note":
       return "A note";
+    case "quick-wait":
+      return "What you are waiting for";
     case "confirming-merge":
       return "Integrate into Now";
     default:
@@ -42,6 +45,8 @@ function stageBody(op: TimelineOperation) {
       return <QuickMerge key={op.branchId} branchId={op.branchId} />;
     case "quick-note":
       return <QuickNote key={op.branchId} branchId={op.branchId} />;
+    case "quick-wait":
+      return <QuickWait key={op.branchId} branchId={op.branchId} />;
     case "confirming-merge":
       return <MergeWizard branchIds={op.branchIds} />;
     default:

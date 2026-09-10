@@ -1,5 +1,12 @@
 import { useEffect } from "react";
-import { ActivityIndicator, AppState, Platform, useWindowDimensions, View } from "react-native";
+import {
+  ActivityIndicator,
+  AppState,
+  Platform,
+  Pressable,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { operationDepth, useAppStore } from "@/stores/app-store";
@@ -8,11 +15,13 @@ import { useT } from "@/i18n/i18n";
 import { PrimaryNavigation } from "@/features/navigation/PrimaryNavigation";
 import { Logo } from "@/features/navigation/Logo";
 import { LifeTimeline } from "@/features/life-timeline/LifeTimeline";
+import { NowList } from "@/features/situation/NowList";
 import { OperationTray } from "@/features/timeline-shell/OperationTray";
 import { CreationScreen } from "@/features/branch-creation/CreationScreen";
 import { ReflectionScreen } from "@/features/reflection/ReflectionScreen";
 import { HistoryView } from "@/features/history/HistoryView";
 import { MergeReview } from "@/features/history/MergeReview";
+import { BriefView } from "@/features/brief/BriefView";
 import { MorePage } from "@/features/more/MorePage";
 import { AuthGate } from "@/features/auth/AuthGate";
 import { useTheme } from "@/ui/theme";
@@ -28,6 +37,8 @@ function AppShell() {
   const ready = useAppStore((s) => s.ready);
   const authUser = useAppStore((s) => s.authUser);
   const showAuth = useAppStore((s) => s.showAuth);
+  const nowMode = useAppStore((s) => s.nowMode);
+  const setNowMode = useAppStore((s) => s.setNowMode);
   const setShowAuth = useAppStore((s) => s.setShowAuth);
   const view = useAppStore((s) => s.view);
   const init = useAppStore((s) => s.init);
@@ -184,17 +195,40 @@ function AppShell() {
             {t("Offline")}
           </T>
         )}
+        {/* The map is the identity and stays the default; the list is its
+            text equivalent, and a way to act without first reading a graph. */}
+        {view.kind === "now" && !onStage && !creating && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              nowMode === "list" ? t("Show the map") : t("Show the list")
+            }
+            onPress={() => setNowMode(nowMode === "list" ? "map" : "list")}
+            style={{
+              borderWidth: 1,
+              borderColor: alpha(tk.lineAxis, 0.55),
+              borderRadius: 999,
+              paddingHorizontal: 10,
+              paddingVertical: 3,
+            }}
+          >
+            <T style={{ fontSize: 11.5, color: tk.inkSoft }}>
+              {nowMode === "list" ? t("Map") : t("List")}
+            </T>
+          </Pressable>
+        )}
         {!compactNav && <PrimaryNavigation variant="header" />}
       </View>
       <View style={{ flex: 1, minHeight: 0 }}>
         {view.kind === "now" && (
           <View style={{ flex: 1, minHeight: 0 }}>
-            <LifeTimeline />
+            {nowMode === "list" ? <NowList /> : <LifeTimeline />}
             <OperationTray />
           </View>
         )}
         {view.kind === "history" && <HistoryView />}
         {view.kind === "merge-review" && <MergeReview mergeId={view.mergeId} />}
+        {view.kind === "brief" && <BriefView branchIds={view.branchIds} />}
         {view.kind === "more" && <MorePage />}
       </View>
       {compactNav && !keyboard.open && <PrimaryNavigation variant="bottom" />}

@@ -341,7 +341,7 @@ try {
   await page.waitForTimeout(1600);
   check(
     "a stage took the whole screen",
-    (await bodyText()).includes(L("What is pulling at you")),
+    (await bodyText()).includes(L("What's on your mind?")),
   );
   check("the map is gone while the stage is up", (await scroller()) === -1);
   // Cancel, not Escape: the first Escape only leaves the focused field.

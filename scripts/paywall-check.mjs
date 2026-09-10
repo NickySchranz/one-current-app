@@ -103,7 +103,7 @@ await page.getByLabel("New thread").first().click();
 await page.waitForTimeout(600);
 check(
   "eleventh thread opens the form, not a paywall",
-  (await page.getByLabel("Name the thread").count()) > 0,
+  (await page.getByLabel("What's on your mind?").count()) > 0,
 );
 check(
   "no upgrade prompt on create",
@@ -112,7 +112,7 @@ check(
 await page.keyboard.press("Escape");
 await page.waitForTimeout(200);
 await page.keyboard.press("Escape");
-await page.getByLabel("Name the thread").waitFor({ state: "detached", timeout: 5000 });
+await page.getByLabel("What's on your mind?").waitFor({ state: "detached", timeout: 5000 });
 await page.waitForTimeout(400);
 
 // 1b. what IS gated: the long view. It stays drawn behind its pill — the

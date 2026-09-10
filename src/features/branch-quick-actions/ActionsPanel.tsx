@@ -3,7 +3,7 @@ import { useAppStore } from "@/stores/app-store";
 import { isActionOpen } from "@/domain/actions/logic";
 import type { PsychologicalBranch } from "@/domain/branches/types";
 import { isClosed } from "@/domain/branches/logic";
-import { decidedToday } from "@/domain/feelings/logic";
+import { handledToday } from "@/domain/feelings/logic";
 import { appNow } from "@/domain/time/clock";
 import { useT } from "@/i18n/i18n";
 import { Button, Hint, Panel, Prompt, T, useInTray } from "@/ui/primitives";
@@ -140,7 +140,7 @@ export function ActionsPanel() {
     pending.some((a) => a.branchesIntegrated[0]?.branchId === b.id);
 
   // Threads still asking for a decision today.
-  const undecided = open.filter((b) => !decidedToday(b, appNow()) && !hasPending(b));
+  const undecided = open.filter((b) => !handledToday(b, appNow()) && !hasPending(b));
 
   // Threads whose decision today was not a planned step.
   const settled = open.filter((b) => !hasPending(b) && !undecided.includes(b));

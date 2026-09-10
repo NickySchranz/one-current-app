@@ -30,8 +30,11 @@ export function statusToLineStyle(status: BranchStatus): LineStyle {
       return { opacity: 0.9, animated: true, emphasized: false, curvesToMain: true, saturation: "normal" };
     case "merge-conflict":
       return { opacity: 1, animated: true, emphasized: true, curvesToMain: true, saturation: "raised" };
-    case "waiting-with-boundaries": // legacy status: shown as a normal open line
-      return { opacity: 0.95, animated: true, emphasized: false, curvesToMain: false, saturation: "normal" };
+    case "waiting-with-boundaries":
+      // Still connected to Now, and deliberately quiet: it is not pulling,
+      // it is not finished, and nothing is being asked of the person until
+      // the review date brings it back.
+      return { opacity: 0.6, animated: false, emphasized: false, curvesToMain: false, saturation: "muted" };
     case "converted-to-project":
       return { opacity: 0.8, animated: false, emphasized: false, curvesToMain: false, saturation: "normal" };
     case "partly-integrated":

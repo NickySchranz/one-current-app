@@ -9,6 +9,30 @@ import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { chromium } from "playwright-core";
 
+/**
+ * The example data contains one situation set to "waiting for something
+ * specific", which is an answer that holds until its review date — so it
+ * coils rather than hanging, and a full send has nothing to do to it. The
+ * geometry checks below are about ropes that ARE still asking, so the
+ * fixture says so explicitly rather than quietly counting one fewer anchor.
+ * The waiting disposition has its own coverage in scripts/domain-check.mjs.
+ */
+const unwait = (page) =>
+  page.evaluate(() => {
+    const key = "one-current/table/branches";
+    const rows = JSON.parse(localStorage.getItem(key) ?? "[]");
+    let changed = 0;
+    for (const b of rows) {
+      if (b.status === "waiting-with-boundaries") {
+        b.status = "active";
+        delete b.waitingContainerId;
+        changed++;
+      }
+    }
+    if (changed) localStorage.setItem(key, JSON.stringify(rows));
+    return changed;
+  });
+
 const DIST = new URL("../dist", import.meta.url).pathname;
 const MIME = {
   ".html": "text/html",
@@ -366,6 +390,7 @@ await page.close();
     });
   // fresh day: he stands at Now, every rope hanging from out of view,
   // the summit far out of sight
+  await unwait(p2);
   await reseed("fresh");
   await p2.reload({ waitUntil: "networkidle" });
   await p2.waitForTimeout(2500);
@@ -375,7 +400,7 @@ await page.close();
   const topsFresh = await anchorTops();
   check(
     topsFresh.length >= 4 && topsFresh.every((t) => t < 0),
-    `every waiting rope hangs from out of view (${topsFresh.length} anchors, worst ${Math.round(Math.max(...topsFresh, -9999))})`,
+    `every rope still awaiting an answer hangs from out of view (${topsFresh.length} anchors, worst ${Math.round(Math.max(...topsFresh, -9999))})`,
   );
   // one rope left: answer it, watching the world only ever move down
   await reseed("one-left");
@@ -1048,6 +1073,9 @@ const readBranches = (pg) =>
     'the pill reads "FULL SEND!"',
   );
   const todayIso = new Date().toISOString().slice(0, 10);
+  await unwait(p4);
+  await p4.reload({ waitUntil: "networkidle" });
+  await p4.waitForTimeout(2000);
   // The ropes still HANGING: one answered today is coiled at its ledge, off
   // the face, and the sweep must leave it alone.
   const openIds = (await readBranches(p4))
@@ -1114,7 +1142,7 @@ const readBranches = (pg) =>
   ).length;
   check(
     chalked === openIds.length && openIds.length >= 4,
-    `a full send chalks every rope, hidden or not (${chalked}/${openIds.length})`,
+    `a full send chalks every rope still asking, hidden or not (${chalked}/${openIds.length})`,
   );
   // And it leaves the coiled ones alone: answered today, they are not on the
   // face any more, so there is nothing there to chalk.
