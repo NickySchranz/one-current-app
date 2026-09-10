@@ -85,6 +85,29 @@ export function zoomLevelForWindow(window: TimeWindow): ZoomLevel {
 export type TimeTick = { date: string; label: string; major: boolean };
 
 /** Generate readable axis ticks for the current zoom level. */
+/**
+ * Date formatters, built once and kept.
+ *
+ * `toLocaleDateString(undefined, opts)` builds a fresh Intl.DateTimeFormat on
+ * every single call, and this file calls it once per tick — so a thirty-day
+ * window constructed thirty formatters, and the axis is regenerated on every
+ * frame of a pan. Profiling put generateTicks at the top of the app's own
+ * costs during a drag, almost all of it here.
+ *
+ * Intl.DateTimeFormat instances are immutable and safe to share, so they are
+ * cached by their options and reused.
+ */
+const FORMATTERS = new Map<string, Intl.DateTimeFormat>();
+function fmt(opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = JSON.stringify(opts);
+  let f = FORMATTERS.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat(undefined, opts);
+    FORMATTERS.set(key, f);
+  }
+  return f;
+}
+
 export function generateTicks(window: TimeWindow, now: Date = new Date()): TimeTick[] {
   const level = zoomLevelForWindow(window);
   const start = parseWindowDate(window.start);
@@ -105,7 +128,7 @@ export function generateTicks(window: TimeWindow, now: Date = new Date()): TimeT
     while (cursor <= end) {
       ticks.push({
         date: iso(cursor),
-        label: cursor.toLocaleDateString(undefined, { month: "short", year: cursor.getMonth() === 0 ? "numeric" : undefined }),
+        label: fmt({ month: "short", year: cursor.getMonth() === 0 ? "numeric" : undefined }).format(cursor),
         major: cursor.getMonth() === 0,
       });
       cursor.setMonth(cursor.getMonth() + 1);
@@ -115,17 +138,19 @@ export function generateTicks(window: TimeWindow, now: Date = new Date()): TimeT
     while (cursor <= end) {
       ticks.push({
         date: iso(cursor),
-        label: cursor.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        label: fmt({ month: "short", day: "numeric" }).format(cursor),
         major: cursor.getDate() <= 7,
       });
       cursor.setDate(cursor.getDate() + 7);
     }
   } else {
+    // iso(now) is a constant for the whole loop; it was being rebuilt per day.
+    const todayIso = iso(now);
     while (cursor <= end) {
-      const isToday = iso(cursor) === iso(now);
+      const isToday = iso(cursor) === todayIso;
       ticks.push({
         date: iso(cursor),
-        label: isToday ? "Today" : cursor.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }),
+        label: isToday ? "Today" : fmt({ weekday: "short", day: "numeric" }).format(cursor),
         major: isToday,
       });
       cursor.setDate(cursor.getDate() + 1);

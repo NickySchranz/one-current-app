@@ -16,11 +16,13 @@ const fallbackT: Translate = (s, vars) => {
   return out;
 };
 
+/** Built once — see the note on FORMATTERS in zoom/time-scale.ts. */
+let MONTH_YEAR: Intl.DateTimeFormat | null = null;
 function monthYear(iso: string): string {
-  return new Date(iso.length > 10 ? iso : iso + "T00:00:00").toLocaleDateString(undefined, {
-    month: "long",
-    year: "numeric",
-  });
+  if (!MONTH_YEAR) {
+    MONTH_YEAR = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
+  }
+  return MONTH_YEAR.format(new Date(iso.length > 10 ? iso : iso + "T00:00:00"));
 }
 
 /**
