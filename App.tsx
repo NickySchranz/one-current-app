@@ -8,6 +8,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { PerformanceMonitor } from "react-native-reanimated";
 import { StatusBar } from "expo-status-bar";
 import { operationDepth, useAppStore } from "@/stores/app-store";
@@ -258,10 +259,18 @@ function AppShell() {
 
 export default function App() {
   return (
-    <ErrorBoundary>
-      <SafeAreaProvider>
-        <AppShell />
-      </SafeAreaProvider>
-    </ErrorBoundary>
+    /**
+     * Gesture Handler's root. The timeline's drag runs on the UI thread as a
+     * worklet, which is what lets the map keep following the finger while the
+     * RN runtime is busy laying the scene out — but none of it works without
+     * this wrapper, and RNGH fails silently without it rather than throwing.
+     */
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ErrorBoundary>
+        <SafeAreaProvider>
+          <AppShell />
+        </SafeAreaProvider>
+      </ErrorBoundary>
+    </GestureHandlerRootView>
   );
 }

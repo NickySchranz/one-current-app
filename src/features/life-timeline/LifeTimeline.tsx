@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
-  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -10,6 +9,8 @@ import {
   type GestureResponderEvent,
   type PressableStateCallbackType,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { scheduleOnRN } from "react-native-worklets";
 import Animated, {
   cancelAnimation,
   runOnJS,
@@ -1355,6 +1356,21 @@ export function LifeTimeline() {
    * the React side is. Only the parts that genuinely have to be rebuilt in
    * React are held to frame cadence here.
    */
+  /**
+   * The drag runs on the UI thread, so the few JS values it needs are
+   * mirrored into shared values rather than read through refs (a worklet
+   * cannot touch a ref). These are written during render, which is exactly
+   * when they can change.
+   */
+  const verticalSV = useSharedValue(false);
+  verticalSV.value = vertical;
+  const stageWSV = useSharedValue(1);
+  stageWSV.value = Math.max(1, size.width);
+  /** rotSV at the moment the finger went down. */
+  const rotStartSV = useSharedValue(0);
+  /** The silhouette bucket React has been told about, compared UI-side. */
+  const lastRotQSV = useSharedValue(0);
+
   const panAccumRef = useRef(0);
   const pendingRotQRef = useRef<number | null>(null);
   const flushRafRef = useRef<number | null>(null);
@@ -1385,108 +1401,138 @@ export function LifeTimeline() {
     [],
   );
 
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_e, gs) => {
-          if (Math.hypot(gs.dx, gs.dy) <= DECIDE_PX) return false;
-          // A drag on a thread never changes its loudness: that is the
-          // panel's job alone (press-and-hold pops it, a second tap opens
-          // it). A dial hidden in a drag made every pan a risk, and on the
-          // summit it fought the one gesture that map is built on — turning
-          // the mountain. So a drag anywhere means the same thing whether it
-          // began on a thread or on bare ground.
-          if (verticalRef.current) {
-            // Summit: one 2D drag — up/down climbs through time while
-            // sideways turns the face (RN-web ScrollViews can't drag-scroll
-            // with a mouse, so the map owns both axes).
-            modeRef.current = "pan";
-            candidateRef.current = null;
-            return true;
-          }
-          if (Math.abs(gs.dx) > Math.abs(gs.dy)) {
-            // Horizontal wins: one finger drags through time.
-            modeRef.current = "pan";
-            candidateRef.current = null;
-            return true;
-          }
-          // Plain vertical drag: the stage scrolls natively.
-          candidateRef.current = null;
-          return false;
-        },
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: (_e, gs) => {
-          lastXRef.current = gs.moveX || gs.x0;
-          lastYRef.current = gs.moveY || gs.y0;
-          hscrollStartRef.current = verticalRef.current ? rotSV.value : scrollXRef.current;
-          measureNode(stageRef.current, (x, y) => {
-            stagePosRef.current = { x, y };
-          });
-        },
-        onPanResponderMove: (_e, gs) => {
-          if (modeRef.current === "pan") {
-            if (verticalRef.current) {
-              // sideways: TURN the face. A drag across the stage is about a
-              // half-turn, so every rope can be brought round without lifting
-              // the finger.
-              rotSV.value =
-                hscrollStartRef.current +
-                (gs.dx / Math.max(1, sizeRef.current.width)) * Math.PI;
-              // step the rock's own shape along with the finger
-              const q = Math.round(rotSV.value / 0.25);
-              if (q !== rotQRef.current) {
-                // Refs stay immediate — everything that reasons about which
-                // ropes are reachable reads them synchronously. Only the React
-                // state waits for the frame.
-                rotQRef.current = q;
-                rotRef.current = rotSV.value;
-                pendingRotQRef.current = q;
-                scheduleFlush();
-              }
-              const dy = gs.moveY - lastYRef.current;
-              if (dy === 0) return;
-              lastYRef.current = gs.moveY;
-              // Dragging beside the date rail scrubs faster than the face.
-              const stageX = gs.moveX - stagePosRef.current.x;
-              const nearDates = stageX > sizeRef.current.width - SUMMIT_RAIL_W - 24;
-              const summit = layoutRef.current as SummitLayout;
-              const timeLen = summit.timeLen ?? 1;
-              // panBy takes a fraction of the STORE window; scale so a px of
-              // finger moves a px of the (shorter) display window.
-              const scale = summit.panScale ?? 1;
-              panByFrame((dy / Math.max(1, timeLen)) * scale * (nearDates ? 4 : 1));
-              return;
-            }
-            const dx = gs.moveX - lastXRef.current;
-            if (dx === 0) return;
-            lastXRef.current = gs.moveX;
-            // Dragging along the date labels scrubs faster than dragging the lanes.
-            const svgY = gs.moveY - stagePosRef.current.y + scrollYRef.current;
-            const nearDates = svgY > layoutRef.current.height - 56;
-            panByFrame((-dx / Math.max(1, layoutRef.current.metrics.width)) * (nearDates ? 4 : 1));
-          }
-        },
-        onPanResponderRelease: () => {
-          if (verticalRef.current && modeRef.current === "pan") {
-            // Settle so a rope ends up facing the viewer, not half round the
-            // side — and let the JS side know which ropes are in front now.
-            settleTurnRef.current();
-          }
-          if (modeRef.current === "pan") {
-            blockTapsUntilRef.current = Date.now() + 350;
-          }
-          resetGesture();
-        },
-        onPanResponderTerminate: () => {
-          // Taken away by the system: commit nothing.
-          if (modeRef.current !== "idle") blockTapsUntilRef.current = Date.now() + 350;
-          resetGesture();
-        },
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- store actions are stable
-    [],
+  /**
+   * The RN-runtime half of the drag. These are the only things a finger on
+   * the map still asks React for, and each is a semantic step rather than a
+   * frame: the rock's silhouette has stepped a bucket, the visible time
+   * window has moved, the gesture is over.
+   */
+  const onRotStep = useCallback(
+    (q: number, live: number) => {
+      rotQRef.current = q;
+      rotRef.current = live;
+      pendingRotQRef.current = q;
+      scheduleFlush();
+    },
+    [scheduleFlush],
   );
+
+  const onDragMove = useCallback(
+    (changeX: number, changeY: number, absX: number, absY: number) => {
+      modeRef.current = "pan";
+      candidateRef.current = null;
+      const stage = stagePosRef.current;
+      if (verticalRef.current) {
+        if (changeY === 0) return;
+        // Dragging beside the date rail scrubs faster than the face.
+        const stageX = absX - stage.x;
+        const nearDates = stageX > sizeRef.current.width - SUMMIT_RAIL_W - 24;
+        const summit = layoutRef.current as SummitLayout;
+        const timeLen = summit.timeLen ?? 1;
+        // panBy takes a fraction of the STORE window; scale so a px of finger
+        // moves a px of the (shorter) display window.
+        const scale = summit.panScale ?? 1;
+        panByFrame((changeY / Math.max(1, timeLen)) * scale * (nearDates ? 4 : 1));
+        return;
+      }
+      if (changeX === 0) return;
+      // Dragging along the date labels scrubs faster than dragging the lanes.
+      const svgY = absY - stage.y + scrollYRef.current;
+      const nearDates = svgY > layoutRef.current.height - 56;
+      panByFrame((-changeX / Math.max(1, layoutRef.current.metrics.width)) * (nearDates ? 4 : 1));
+    },
+    [panByFrame],
+  );
+
+  const onDragEnd = useCallback(() => {
+    if (verticalRef.current && modeRef.current === "pan") {
+      // Settle so a rope ends up facing the viewer, not half round the side —
+      // and let the JS side know which ropes are in front now.
+      settleTurnRef.current();
+    }
+    if (modeRef.current === "pan") {
+      blockTapsUntilRef.current = Date.now() + 350;
+    }
+  }, []);
+
+  const onDragFinalize = useCallback(() => {
+    if (modeRef.current !== "idle") blockTapsUntilRef.current = Date.now() + 350;
+    modeRef.current = "idle";
+    candidateRef.current = null;
+    setScrollLocked(false);
+    cancelHold();
+  }, []);
+
+  /**
+   * The map's drag, on Gesture Handler.
+   *
+   * The important part is where the work happens. PanResponder delivers every
+   * move event to the RN runtime, so the finger could only move the map as
+   * fast as JS could answer — and JS is exactly what is busy while the scene
+   * is being laid out. onUpdate here is a worklet on the UI thread, so the
+   * mountain turns under the finger whether or not React is mid-render.
+   *
+   * The turn itself never needed React: RingG already derives every rope's
+   * column from rotSV in a worklet, so writing rotSV IS the turn.
+   *
+   * The rock's own silhouette is the exception, and deliberately so. `rot`
+   * reshapes it — flank() recomputes the mountain's edge as it comes round —
+   * so it is geometry rebuilt in JS, not a transform, and dropping it from
+   * the drag would turn the ropes while the rock stood still. What moved is
+   * the DECISION: the quantized bucket is compared here, on the UI thread, so
+   * the runtimes are crossed only when the silhouette actually steps (~25
+   * times a full turn) rather than on every frame of the drag.
+   *
+   * Axis arbitration is declarative now. A horizontal map claims the drag
+   * only once it is clearly sideways and fails outright when it is vertical,
+   * which hands the gesture to the native ScrollView cleanly — something the
+   * old onMoveShouldSetPanResponder could only approximate.
+   */
+  const mapGesture = useMemo(() => {
+    let g = Gesture.Pan()
+      .onBegin(() => {
+        "worklet";
+        rotStartSV.value = rotSV.value;
+        lastRotQSV.value = Math.round(rotSV.value / 0.25);
+      })
+      // onChange, not onUpdate: it carries the per-event delta (changeX/Y)
+      // alongside the running translation, which is what the time pan needs.
+      .onChange((e) => {
+        "worklet";
+        if (verticalSV.value) {
+          // Sideways TURNS the face — entirely on this thread, no crossing.
+          rotSV.value = rotStartSV.value + (e.translationX / stageWSV.value) * Math.PI;
+          const q = Math.round(rotSV.value / 0.25);
+          if (q !== lastRotQSV.value) {
+            lastRotQSV.value = q;
+            scheduleOnRN(onRotStep, q, rotSV.value);
+          }
+        }
+        // Time travel still has to reach the store: the window decides which
+        // threads exist and where they sit, which is semantic state rather
+        // than a frame. It crosses as a delta and is coalesced to one commit
+        // per frame on the other side.
+        scheduleOnRN(onDragMove, e.changeX, e.changeY, e.absoluteX, e.absoluteY);
+      })
+      .onEnd(() => {
+        "worklet";
+        scheduleOnRN(onDragEnd);
+      })
+      .onFinalize(() => {
+        "worklet";
+        scheduleOnRN(onDragFinalize);
+      });
+    if (vertical) {
+      // The summit owns both axes: up/down climbs time, sideways turns the
+      // rock, and its horizontal ScrollView must not steal the turn.
+      g = g.activeOffsetX([-DECIDE_PX, DECIDE_PX]).activeOffsetY([-DECIDE_PX, DECIDE_PX]);
+    } else {
+      // Horizontal maps: sideways is ours, vertical belongs to the scroll.
+      g = g.activeOffsetX([-DECIDE_PX, DECIDE_PX]).failOffsetY([-DECIDE_PX, DECIDE_PX]);
+    }
+    return g;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values and the RN-side handlers are stable
+  }, [vertical]);
 
   /** A finished drag must not fire the tap that follows it. */
   const guarded = (fn: () => void) => () => {
@@ -2437,8 +2483,8 @@ export function LifeTimeline() {
           showsHorizontalScrollIndicator
           overScrollMode="never"
         >
+          <GestureDetector gesture={mapGesture}>
           <View
-            {...panResponder.panHandlers}
             onTouchEnd={() => {
               // a candidate that never picked an axis stays a tap — unless a
               // fired hold already consumed this touch
@@ -3197,6 +3243,7 @@ export function LifeTimeline() {
               </G>
             </Svg>
           </View>
+          </GestureDetector>
         </ScrollView>
 
         {/* tokens in flight to the meter, and the +10s that pop off it */}
