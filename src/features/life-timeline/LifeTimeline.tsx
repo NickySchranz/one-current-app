@@ -392,6 +392,8 @@ function GrabPrompt({
 
 /** Movement below this is still a tap; beyond it the gesture picks an axis. */
 const DECIDE_PX = 8;
+/** How far the main line's lean must move before the geometry is rebuilt. */
+const MAIN_SHIFT_STEP = 6;
 /** Scroll offset is rounded to this before it can cause a render. */
 const BAND_PX = 240;
 /** Kept awake this far outside the viewport, so nothing animates into view. */
@@ -406,26 +408,52 @@ const SHIN_PX = 26;
 const SHIN_STEPS = 4;
 
 /**
- * A number that glides to its target over ~a third of a second (ease-out
- * cubic, like the web app's rAF tweens). Instant when motion is reduced.
+ * A number that glides to its target over ~a third of a second, reported to
+ * React only when it crosses a `step`-sized threshold.
+ *
+ * This replaces a version that shipped every single animation frame back to
+ * React via `runOnJS(setValue)`. That is the one thing Reanimated exists to
+ * avoid, and here it was worse than usual: both values it drove were in the
+ * timeline layout memo's dependency array, so a 300ms tween meant eighteen
+ * full `buildTimelineLayout` runs at 60Hz — thirty-six at 120 — each
+ * rebuilding every branch's geometry and re-rendering a four-thousand-line
+ * component.
+ *
+ * The lean genuinely IS a geometry input: it moves `mainY`, and every branch
+ * curve is built against it, so it cannot become a pure transform without
+ * detaching the fork and merge ends from the line they attach to. What it can
+ * stop being is per-frame. At a six-pixel step a 300ms lean costs a handful of
+ * rebuilds instead of a couple of dozen, and six pixels of a gentle ease is
+ * not a difference anyone can see.
+ *
+ * The animation itself still runs on the UI thread; only the reporting is
+ * quantized. Instant when motion is reduced.
  */
-function useEased(target: number, reducedMotion: boolean): number {
+function useEasedStepped(target: number, reducedMotion: boolean, step: number): number {
   const [value, setValue] = useState(target);
   const sv = useSharedValue(target);
+  const lastSent = useSharedValue(target);
   useEffect(() => {
     cancelAnimation(sv);
     if (reducedMotion) {
       sv.value = target;
+      lastSent.value = target;
+      setValue(target);
       return;
     }
     sv.value = withTiming(target, { duration: 300, easing: Easing.out(Easing.cubic) });
-  }, [target, reducedMotion, sv]);
+  }, [target, reducedMotion, sv, lastSent]);
   useAnimatedReaction(
     () => sv.value,
-    (v, prev) => {
-      if (v !== prev) runOnJS(setValue)(v);
+    (v) => {
+      // The final value must always land, or the lean settles a few pixels
+      // short of where the geometry says it should be.
+      const settled = v === target;
+      if (!settled && Math.abs(v - lastSent.value) < step) return;
+      lastSent.value = v;
+      runOnJS(setValue)(v);
     },
-    [],
+    [target, step],
   );
   return value;
 }
@@ -653,7 +681,16 @@ export function LifeTimeline() {
   const traySide = useLayoutStore((s) => s.traySide);
   const insetTarget =
     trayHeight > 0 && !traySide ? Math.min(trayHeight, size.height - 130) : 0;
-  const bottomInset = useEased(insetTarget, reducedMotion);
+  /**
+   * Not eased. This used to glide, which meant eighteen React renders per
+   * tray open — and it was in the layout memo's dependency array while
+   * neither builder reads it (the summit is passed a hardcoded `trayInset: 0`
+   * and the horizontal builder never receives it), so every one of those
+   * rebuilds produced byte-identical geometry. It also resized the SVG canvas
+   * on each of those frames. The canvas is now sized once to where the tray
+   * will be and the sheet slides over it, which is what it looks like anyway.
+   */
+  const bottomInset = insetTarget;
 
   // The draft being created lives on its own screen (CreationScreen) — the
   // map never shows it and never moves for it. It appears here only once
@@ -681,7 +718,7 @@ export function LifeTimeline() {
   const [shiftTarget, setShiftTarget] = useState(0);
   /** What React has actually been told, so an unchanged lean costs nothing. */
   const shiftTargetRef = useRef(0);
-  const mainShift = useEased(shiftTarget, reducedMotion);
+  const mainShift = useEasedStepped(shiftTarget, reducedMotion, MAIN_SHIFT_STEP);
 
   // How split the present is: open lines pull apart, decisions gather them.
   const activeLines = visible.filter((b) => !isClosed(b));
@@ -799,7 +836,9 @@ export function LifeTimeline() {
             // changes and past the save, while the quick menu is still open.
             pinnedBranchIds,
           })),
-    [vertical, visible, size, window_, compact, now, mainShift, topInset, pinnedBranchIds, bottomInset, climbRanks, retiredIds],
+    // bottomInset is deliberately absent: neither builder reads it, so it
+    // only ever invalidated the memo into producing the same geometry again.
+    [vertical, visible, size, window_, compact, now, mainShift, topInset, pinnedBranchIds, climbRanks, retiredIds],
   );
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
