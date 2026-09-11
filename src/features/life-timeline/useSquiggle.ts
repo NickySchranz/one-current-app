@@ -590,21 +590,32 @@ export function useCalmCurrent(opts: {
     return out;
   }, [nowX]);
 
-  const clock = useSharedValue(0);
+  /**
+   * The world's clock when there is one, its own only as a fallback.
+   *
+   * This hook took a `worldClock` parameter, destructured it, and then never
+   * read it — it built a second identical 3600s ramp and used that. The
+   * summit's ropes and the weather and the scenery were all sharing one
+   * clock while the main line quietly ran a second, so "one clock to rule
+   * them" was one clock plus this one. ThemeBackdrop and ThemeScenery
+   * already do it the way it is done here.
+   */
+  const ownClock = useSharedValue(0);
+  const clock = worldClock ?? ownClock;
   useEffect(() => {
-    if (!breathing) {
-      cancelAnimation(clock);
-      clock.value = 0;
+    if (worldClock || !breathing) {
+      cancelAnimation(ownClock);
+      ownClock.value = 0;
       return;
     }
-    clock.value = 0;
-    clock.value = withRepeat(
+    ownClock.value = 0;
+    ownClock.value = withRepeat(
       withTiming(3600, { duration: 3600_000, easing: Easing.linear }),
       -1,
       false,
     );
-    return () => cancelAnimation(clock);
-  }, [breathing, clock]);
+    return () => cancelAnimation(ownClock);
+  }, [worldClock, breathing, ownClock]);
 
   // Each answer eases the line toward its full strength — never a snap.
   // Completing the day earns an exhale: the wave swells past full for a
@@ -639,7 +650,17 @@ export function useCalmCurrent(opts: {
   const surgeSV = useSharedValue(0);
 
   // Quantized time: the whole wave system advances at 30Hz, not display rate.
-  const waveTick = useDerivedValue(() => Math.round(clock.value * 30) / 30, []);
+  /**
+   * Frozen when the line is not breathing. The clock is now the world's, and
+   * the world's clock never stops — so without this gate every consumer of
+   * the tick would keep recomputing thirty times a second to draw a wave of
+   * zero amplitude. Derived values only propagate on change, so holding it
+   * at a constant stops the whole chain behind it.
+   */
+  const waveTick = useDerivedValue(
+    () => (breathing ? Math.round(clock.value * 30) / 30 : 0),
+    [clock, breathing],
+  );
 
   const d = useDerivedValue(() => {
     countPathBuildUI();
@@ -743,7 +764,13 @@ export function useCalmCurrent(opts: {
   // The slow current toward Now: the same 15 → 0 ramp useDashFlow runs.
   const flowOffset = useSharedValue(15);
   useEffect(() => {
-    if (reducedMotion) {
+  // Only the map that is actually on screen runs this. Both current hooks are
+  // mounted at all times and told which one is live — the horizontal one is
+  // handed `nowX: 0` on the summit, the summit one `timeLen: 0` on every
+  // horizontal theme — but this ramp was gated on `reducedMotion` alone, so
+  // the dormant map's dash kept a perpetual animation running behind the
+  // other one, forever, for a line nobody can see.
+    if (reducedMotion || nowX <= 0) {
       cancelAnimation(flowOffset);
       flowOffset.value = 15;
       return;
@@ -755,7 +782,7 @@ export function useCalmCurrent(opts: {
       false,
     );
     return () => cancelAnimation(flowOffset);
-  }, [reducedMotion, dashDurationMs, flowOffset]);
+  }, [reducedMotion, nowX, dashDurationMs, flowOffset]);
 
   // The sacred glow breathes with the wave — never a flat sticker of light —
   // and every answer flashes gold along the whole line for a beat.

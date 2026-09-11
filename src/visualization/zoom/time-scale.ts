@@ -24,18 +24,41 @@ export function addDays(iso: string, days: number): string {
   return new Date(Date.parse(iso) + days * DAY).toISOString().slice(0, 10);
 }
 
+/**
+ * `Date.parse` on an ISO string is not cheap, and these two run three of them
+ * per call: the window's two ends — identical for every branch in a build —
+ * plus the date itself. A layout over forty branches with their moments makes
+ * roughly a thousand such calls, and on a drag that happens every frame.
+ *
+ * The window's ends are memoised against the window object, which the store
+ * replaces only when time actually moves, so they are parsed once per pan
+ * step instead of once per date. Single-entry: builds sweep one window at a
+ * time, so a bigger cache would only cost lookups.
+ */
+let spanKey: TimeWindow | null = null;
+let spanStart = 0;
+let spanLen = 1;
+
+function windowSpan(window: TimeWindow): { start: number; len: number } {
+  if (window !== spanKey) {
+    spanKey = window;
+    spanStart = Date.parse(window.start);
+    spanLen = Math.max(1, Date.parse(window.end) - spanStart);
+  }
+  return { start: spanStart, len: spanLen };
+}
+
 /** Map an ISO date to an x coordinate inside [0, width]. Clamps outside the window. */
 export function dateToX(date: string, window: TimeWindow, width: number): number {
-  const span = Math.max(1, Date.parse(window.end) - Date.parse(window.start));
-  const t = (Date.parse(date) - Date.parse(window.start)) / span;
+  const { start, len } = windowSpan(window);
+  const t = (Date.parse(date) - start) / len;
   return Math.max(0, Math.min(1, t)) * width;
 }
 
 /** Same mapping without clamping: dates before the window map to negative x. */
 export function dateToXRaw(date: string, window: TimeWindow, width: number): number {
-  const span = Math.max(1, Date.parse(window.end) - Date.parse(window.start));
-  const t = (Date.parse(date) - Date.parse(window.start)) / span;
-  return t * width;
+  const { start, len } = windowSpan(window);
+  return ((Date.parse(date) - start) / len) * width;
 }
 
 export function xToDate(x: number, window: TimeWindow, width: number): string {

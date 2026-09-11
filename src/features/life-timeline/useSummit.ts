@@ -205,7 +205,13 @@ export function useSummitCurrent(opts: {
 
   const flowOffset = useSharedValue(15);
   useEffect(() => {
-    if (reducedMotion) {
+  // Only the map that is actually on screen runs this. Both current hooks are
+  // mounted at all times and told which one is live — the horizontal one is
+  // handed `nowX: 0` on the summit, the summit one `timeLen: 0` on every
+  // horizontal theme — but this ramp was gated on `reducedMotion` alone, so
+  // the dormant map's dash kept a perpetual animation running behind the
+  // other one, forever, for a line nobody can see.
+    if (reducedMotion || timeLen <= 0) {
       cancelAnimation(flowOffset);
       flowOffset.value = 15;
       return;
@@ -217,7 +223,7 @@ export function useSummitCurrent(opts: {
       false,
     );
     return () => cancelAnimation(flowOffset);
-  }, [reducedMotion, dashDurationMs, flowOffset]);
+  }, [reducedMotion, timeLen, dashDurationMs, flowOffset]);
 
   const halo = useAnimatedProps<PathProps>(() => {
     const breathe = 0.34 + 0.12 * Math.sin(((2 * Math.PI * 1000) / (periodMs * 1.4)) * waveTick.value);

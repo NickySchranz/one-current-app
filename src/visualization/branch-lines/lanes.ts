@@ -50,15 +50,32 @@ export function assignLanes(
 
   const laneEnds: string[] = []; // last occupied end date per lane
   const result: LaneAssignment[] = [];
+  /**
+   * The earliest end date any lane currently holds. If even that is not
+   * before the item's start, no lane can possibly take it and the scan below
+   * is a guaranteed miss.
+   *
+   * This matters because an OPEN branch ends at "9999-12-31", so on a board
+   * where nothing is integrated — which is the normal state, and exactly the
+   * state a heavy scene is in — `findIndex` walked every lane, failed, and
+   * pushed a new one. Forty threads meant about eight hundred string
+   * comparisons per layout build, and the build runs on every frame of a
+   * drag. Kept deliberately simple: reassigning a lane can leave this value
+   * smaller than the true minimum, which only costs an unnecessary scan, and
+   * never a wrong answer.
+   */
+  let minEnd: string | null = null;
 
   for (const item of items) {
-    let lane = laneEnds.findIndex((end) => end < item.start);
+    const canFit = minEnd !== null && minEnd < item.start;
+    let lane = canFit ? laneEnds.findIndex((end) => end < item.start) : -1;
     if (lane === -1) {
       lane = laneEnds.length;
       laneEnds.push(item.end);
     } else {
       laneEnds[lane] = item.end;
     }
+    if (minEnd === null || item.end < minEnd) minEnd = item.end;
     result.push({
       branchId: item.branch.id,
       lane: signedLane(lane),

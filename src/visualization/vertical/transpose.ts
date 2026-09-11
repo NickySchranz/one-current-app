@@ -479,8 +479,12 @@ export function buildSummitLayout(
    * one would hang its ledge in the sky. */
   const reachAt = (depth: number) =>
     Math.min(faceRadius, Math.max(46, mountainHalfWidth(depth, faceHalf, rockLen) - 30));
+  /** Position in the ring, by id. `indexOf` here was inside the per-geometry
+   * map below, so finding every rope's angle was quadratic in rope count —
+   * about sixteen hundred comparisons at forty threads, per layout build. */
+  const columnIndex = new Map(columnOrder.map((id, i) => [id, i]));
   const angleOf = (id: string) => {
-    const i = columnOrder.indexOf(id);
+    const i = columnIndex.get(id) ?? -1;
     if (i < 0) return 0;
     // Centred on the front (a quiet day needs no turning at all), nudged by
     // half a step so no rope hangs exactly on the route — it would sit on the
