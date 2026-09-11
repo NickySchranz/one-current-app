@@ -1766,7 +1766,11 @@ export function LifeTimeline() {
         const summit = layoutRef.current as SummitLayout;
         const timeLen = summit.timeLen ?? rect.height;
         const scale = summit.panScale ?? 1;
-        panBy((-e.deltaY / Math.max(1, timeLen)) * scale * (nearDates ? 4 : 1));
+        // Coalesced like every other pan. A trackpad delivers wheel events
+        // faster than the display refreshes, and each raw panBy rebuilds the
+        // summit layout for every visible thread — the one path into the
+        // store that was still committing per event rather than per frame.
+        panByFrame((-e.deltaY / Math.max(1, timeLen)) * scale * (nearDates ? 4 : 1));
         return;
       }
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
