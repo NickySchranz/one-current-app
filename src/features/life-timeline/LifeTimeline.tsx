@@ -31,7 +31,10 @@ import { isActionOpen } from "@/domain/actions/logic";
 import { useLayoutStore } from "@/stores/layout-store";
 import { measureNode } from "@/ui/measure";
 import { setWalkthroughPoint, useWalkthroughTarget } from "@/features/tutorial/targets";
-import { countGeometryBuild, countRender } from "@/dev/perf-counters";
+import { countGeometryBuild, countRender, setRenderer } from "@/dev/perf-counters";
+import { SKIA_ROPES } from "@/config/flags";
+import { toRopeSpec, type RopeSpec } from "./canvas/rope-spec";
+import { useSummitRopesCanvas } from "./canvas/useSkiaWorld";
 import { buildTimelineLayout } from "@/visualization/main-line/layout";
 import { buildSummitLayout, dateToScreenY, daySeedOrder, ringOffset, SUMMIT_RAIL_W, type SummitLayout } from "@/visualization/vertical/transpose";
 import { themeOrientation } from "@/visualization/theme";
@@ -2155,6 +2158,39 @@ export function LifeTimeline() {
    * between two rows, and each name is given the space actually free beside it
    * — a full title whenever it fits, a shortened one only when crowded.
    */
+  /**
+   * What the canvas needs to know about the ropes. Keyed to the world, not
+   * to motion: the turn, the climb and the sway are all shared values the
+   * canvas reads itself, so this list is rebuilt only when the layout is.
+   */
+  const wantsSkiaRopes = SKIA_ROPES && vertical;
+  const SummitRopes = useSummitRopesCanvas(wantsSkiaRopes);
+  useEffect(() => {
+    setRenderer(SummitRopes ? "skia" : "svg");
+  }, [SummitRopes]);
+  const ropeSpecs = useMemo<RopeSpec[]>(() => {
+    if (!SummitRopes) return [];
+    const now_ = new Date(nowTick);
+    return layout.geometries
+      .filter((g) => !(g as { ropeGone?: boolean }).ropeGone)
+      .map((g) => {
+        const b = byId.get(g.branchId);
+        return toRopeSpec(
+          g as never,
+          b,
+          // branchColor takes a BRANCH, not a geometry: a geometry carries
+          // `branchId`, so handing it one made the id hash read undefined.
+          // Saturation and opacity come off the geometry's own style, the
+          // same two values BranchLine paints with, so a muted or fading
+          // thread reads identically whichever renderer draws it.
+          branchColor({ id: g.branchId, type: b?.type ?? "unknown" }, theme, g.style.saturation),
+          g.style.opacity,
+          now_,
+        );
+      });
+    // nowTick only to date the loudness; it steps every half minute, not per frame.
+  }, [SummitRopes, layout.geometries, byId, theme, nowTick]);
+
   const nameRows = useMemo(() => {
     const out = new Map<string, { row: number; maxW: number }>();
     if (!vertical || !sm) return out;
@@ -2506,6 +2542,29 @@ export function LifeTimeline() {
           if (!measured) setMeasured(true);
         }}
       >
+        {/* Every rope, on one Skia canvas. Above the SVG so the ropes sit in
+            front of the rock, and pointer-transparent so the hit targets,
+            labels and the climber underneath still take every touch — they
+            are the parts that need to be real views. Absent until CanvasKit
+            has loaded, and the SVG ropes carry on until it does. */}
+        {SummitRopes && size.width > 0 && (
+          <View
+            pointerEvents="none"
+            style={{ position: "absolute", left: 0, top: 0, zIndex: 2 }}
+          >
+            <SummitRopes
+              ropes={ropeSpecs}
+              climb={climbSV}
+              rot={rotSV}
+              pan={null}
+              clock={worldClock}
+              width={size.width}
+              height={size.height}
+              reducedMotion={reducedMotion}
+            />
+          </View>
+        )}
+
         {/* the theme's ambient weather, behind the transparent canvas: it
             warms, brightens and settles as the day gathers itself */}
         <View
@@ -2996,6 +3055,7 @@ export function LifeTimeline() {
                     }
                     timeLen={sm?.rockLen ?? 0}
                     viewportH={size.height}
+                    strokesOff={!!SummitRopes}
                     wave={vertical ? null : calmCurrent.wave}
                     // No wave on the summit: the route is straight and still,
                     // so the dots that sit on it must be too (they compute

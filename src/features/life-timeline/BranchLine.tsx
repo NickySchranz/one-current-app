@@ -103,6 +103,12 @@ type Props = {
   timeLen?: number;
   /** Canvas height. A rope thousands of px long only draws what fits. */
   viewportH?: number;
+  /**
+   * The rope's strokes are being drawn somewhere else (the Skia canvas), so
+   * draw everything EXCEPT them: the hit target, the marks, the label, the
+   * endpoint. Those stay native views for touch and for screen readers.
+   */
+  strokesOff?: boolean;
   /** Summit: the route's wave — only the fork/merge dots ride it. */
   routeWave?: WaveHandles | null;
   /**
@@ -214,6 +220,7 @@ export const BranchLine = memo(function BranchLine({
   routeWave = null,
   climbOffset = null,
   viewportH = 0,
+  strokesOff = false,
   interactive = true,
   hidden = false,
   clock = null,
@@ -268,7 +275,10 @@ export const BranchLine = memo(function BranchLine({
   // and faster the louder it is. Both ends stay anchored; a decision today
   // quiets it. The hit path keeps the true geometry and feeds the sampler.
   const loudness = Math.max(1, Math.min(5, g.loudness));
-  const trembling = !hidden && lineTrembles({
+  // `strokesOff` joins `hidden` here rather than only skipping the render:
+  // both mean "nothing to draw", and the expensive half is the sampling, not
+  // the node.
+  const trembling = !hidden && !strokesOff && lineTrembles({
     branch,
     inWindow: g.inWindow,
     level: loudness,
@@ -520,7 +530,7 @@ export const BranchLine = memo(function BranchLine({
       >
 
       {/* soft halo behind the line of the action being viewed */}
-      {highlighted && (
+      {highlighted && !strokesOff && (
         <AnimatedPath
           animatedProps={strokes.halo}
           stroke={color}
@@ -539,7 +549,7 @@ export const BranchLine = memo(function BranchLine({
       {/* branchColor speaks hsl(), which mix() can't parse — the rope's dark
           layers are translucent black over/under the core instead, so they
           shade whatever color the thread wears. */}
-      {vertical && !born && (
+      {vertical && !born && !strokesOff && (
         <AnimatedPath
           animatedProps={strokes.underlay}
           stroke="#141b22"
@@ -562,23 +572,25 @@ export const BranchLine = memo(function BranchLine({
         node carrying almost nothing and the reapplication becomes cheap.
         Identical rendering; far less work per frame.
       */}
-      <G
-        stroke={color}
-        strokeWidth={
-          vertical
-            ? g.thickness + (focused || highlighted ? 2.2 : 1.2)
-            : focused || highlighted
-              ? g.thickness + 1.25
-              : g.thickness
-        }
-        opacity={g.style.opacity}
-        fill="none"
-        strokeLinecap="round"
-        pointerEvents="none"
-      >
-        <AnimatedPath animatedProps={strokes.line} />
-      </G>
-      {vertical && !born && (
+      {!strokesOff && (
+        <G
+          stroke={color}
+          strokeWidth={
+            vertical
+              ? g.thickness + (focused || highlighted ? 2.2 : 1.2)
+              : focused || highlighted
+                ? g.thickness + 1.25
+                : g.thickness
+          }
+          opacity={g.style.opacity}
+          fill="none"
+          strokeLinecap="round"
+          pointerEvents="none"
+        >
+          <AnimatedPath animatedProps={strokes.line} />
+        </G>
+      )}
+      {vertical && !born && !strokesOff && (
         <AnimatedPath
           animatedProps={strokes.bands}
           stroke="#141b22"

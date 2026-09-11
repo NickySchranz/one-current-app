@@ -25,6 +25,15 @@ await new Promise((r) => server.listen(4178, r));
 const browser = await chromium.launch({
   executablePath: `${process.env.HOME}/.cache/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell`,
   args: ["--no-sandbox"],
+  // This box has no root, so chromium's shared libraries live in the cache
+  // directory rather than on the system path. Without this the shell dies at
+  // launch with "libnspr4.so: cannot open shared object file" and the whole
+  // script fails before its first assertion — which reads exactly like a
+  // broken app. summit-check, live-check and share-export already carry it.
+  env: {
+    ...process.env,
+    LD_LIBRARY_PATH: `${process.env.HOME}/.cache/one-current-chromium-libs/usr/lib/x86_64-linux-gnu`,
+  },
 });
 const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
 const errors = [];

@@ -24,3 +24,15 @@ export const CAPTURE_TESTING = process.env.EXPO_PUBLIC_SHOW_TESTING === "1";
  * inlines away.
  */
 export const PERF_COUNTERS = __DEV__ || process.env.EXPO_PUBLIC_PERF === "1";
+
+/**
+ * Draw the summit's ropes on a Skia canvas instead of as SVG paths.
+ *
+ * On by default: the benchmark (scripts/renderer-bench.mjs, table in PERF.md)
+ * puts Skia at about a fifth of SVG's script cost with a flat node count, and
+ * more importantly a redraw touches no DOM — which is what a pan costs today.
+ * Set EXPO_PUBLIC_SKIA=0 to fall back to the SVG ropes; the two are kept
+ * A/B-able so the harness can measure them against each other, and so a
+ * browser without CanvasKit still gets a correct map rather than a blank one.
+ */
+export const SKIA_ROPES = process.env.EXPO_PUBLIC_SKIA !== "0";
