@@ -113,11 +113,24 @@ const ropeColumns = (pg) =>
   });
 
 /** The climber's live box: he moves up the rope, so nothing may cache it. */
+/** Pip is one <path> per colour since the sprite collapse (see
+ *  src/features/life-timeline/sprite-path.ts — "Rects 138 -> 12"), so the old
+ *  "a group with more than twelve direct rects" stopped finding him and every
+ *  climber assertion here failed against an app that was working fine. */
 const pipBox = (pg) =>
   pg.evaluate(() => {
-    const sprite = [...document.querySelectorAll("svg g")].find(
-      (g) => g.querySelectorAll(":scope > rect").length > 12,
-    );
+    const sprite = (() => {
+      // Pip is one <path> per colour since the sprite collapse; pick the
+      // DENSEST such group, because creature heads on the ropes are sprites
+      // too and a simple threshold finds whichever comes first in the tree.
+      let best = null;
+      let most = 8;
+      for (const g of document.querySelectorAll("svg g")) {
+        const n = g.querySelectorAll(":scope > path").length;
+        if (n > most) { most = n; best = g; }
+      }
+      return best;
+    })();
     if (!sprite) return null;
     const r = sprite.getBoundingClientRect();
     return {
@@ -807,9 +820,18 @@ const emptyX = (pg) =>
   // and walks back to Now
   const climberX = () =>
     p2.evaluate(() => {
-      const sprite = [...document.querySelectorAll("svg g")].find(
-        (g) => g.querySelectorAll(":scope > rect").length > 12,
-      );
+      const sprite = (() => {
+      // Pip is one <path> per colour since the sprite collapse; pick the
+      // DENSEST such group, because creature heads on the ropes are sprites
+      // too and a simple threshold finds whichever comes first in the tree.
+      let best = null;
+      let most = 8;
+      for (const g of document.querySelectorAll("svg g")) {
+        const n = g.querySelectorAll(":scope > path").length;
+        if (n > most) { most = n; best = g; }
+      }
+      return best;
+    })();
       const nowEl = [...document.querySelectorAll("text")].find((t) => t.textContent === "Now");
       return {
         pip: sprite ? Math.round(sprite.getBoundingClientRect().left) : null,
@@ -869,9 +891,18 @@ const emptyX = (pg) =>
 /** Where the rope's own visible stroke sits at the climber's altitude. */
 const ropeXAtPip = (pg) =>
   pg.evaluate(() => {
-    const sprite = [...document.querySelectorAll("svg g")].find(
-      (g) => g.querySelectorAll(":scope > rect").length > 12,
-    );
+    const sprite = (() => {
+      // Pip is one <path> per colour since the sprite collapse; pick the
+      // DENSEST such group, because creature heads on the ropes are sprites
+      // too and a simple threshold finds whichever comes first in the tree.
+      let best = null;
+      let most = 8;
+      for (const g of document.querySelectorAll("svg g")) {
+        const n = g.querySelectorAll(":scope > path").length;
+        if (n > most) { most = n; best = g; }
+      }
+      return best;
+    })();
     if (!sprite) return null;
     const box = sprite.getBoundingClientRect();
     const row = box.top + box.height * 0.4; // roughly his hands
@@ -993,9 +1024,18 @@ const readBranches = (pg) =>
     const after = await readBranches(p3);
     const afterBox = await pipBox(p3);
     const heldId = await p3.evaluate(() => {
-      const sprite = [...document.querySelectorAll("svg g")].find(
-        (g) => g.querySelectorAll(":scope > rect").length > 12,
-      );
+      const sprite = (() => {
+      // Pip is one <path> per colour since the sprite collapse; pick the
+      // DENSEST such group, because creature heads on the ropes are sprites
+      // too and a simple threshold finds whichever comes first in the tree.
+      let best = null;
+      let most = 8;
+      for (const g of document.querySelectorAll("svg g")) {
+        const n = g.querySelectorAll(":scope > path").length;
+        if (n > most) { most = n; best = g; }
+      }
+      return best;
+    })();
       return sprite ? 1 : 0;
     });
     const dropped = before.filter((b) => {

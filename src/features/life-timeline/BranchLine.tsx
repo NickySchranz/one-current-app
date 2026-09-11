@@ -101,6 +101,8 @@ type Props = {
   orientation?: "horizontal" | "vertical";
   /** Summit: time-axis length, for mapping screen y to route arc length. */
   timeLen?: number;
+  /** Canvas height. A rope thousands of px long only draws what fits. */
+  viewportH?: number;
   /** Summit: the route's wave — only the fork/merge dots ride it. */
   routeWave?: WaveHandles | null;
   /**
@@ -211,6 +213,7 @@ export const BranchLine = memo(function BranchLine({
   timeLen = 0,
   routeWave = null,
   climbOffset = null,
+  viewportH = 0,
   interactive = true,
   hidden = false,
   clock = null,
@@ -281,6 +284,10 @@ export const BranchLine = memo(function BranchLine({
     (g.style.emphasized || branch.id === emphasizedId || highlighted);
 
   const strokes = useBranchStrokes({
+    // The rope rides the mountain, so the climb decides which slice of it is
+    // on screen and therefore worth building.
+    climbOffset,
+    viewportH,
     trembling,
     level: loudness,
     basePath: g.path,

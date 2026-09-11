@@ -2956,6 +2956,7 @@ export function LifeTimeline() {
                       Math.cos(g.angle + rotQ * 0.25) <= -0.12
                     }
                     timeLen={sm?.rockLen ?? 0}
+                    viewportH={size.height}
                     wave={vertical ? null : calmCurrent.wave}
                     // No wave on the summit: the route is straight and still,
                     // so the dots that sit on it must be too (they compute

@@ -34,6 +34,8 @@ const SWAY_AMP = [0, 0, 5, 8, 11, 14]; // px at the freest point
 const SWAY_HZ = [0, 0, 0.28, 0.4, 0.55, 0.75]; // pendulum cycles per second
 const KROPE = (2 * Math.PI) / 900; // slight phase lag down the rope's length
 const FORK_CLAMP = 26; // px above the fork that re-seat on the route
+/** How far past the canvas edge a rope keeps drawing, so it enters from off. */
+const SWAY_MARGIN = 120;
 
 export type StrokeMode = "slither" | "sway";
 
@@ -174,6 +176,11 @@ export function useBranchStrokes(opts: {
    * ticks only while something is actually trembling.
    */
   clock?: SharedValue<number> | null;
+  /** The mountain's slide. A rope rides it, so it decides which slice of the
+   * rope is actually on screen this frame. */
+  climbOffset?: SharedValue<number> | null;
+  /** Canvas height, for the same reason. */
+  viewportH?: number;
 }): BranchStrokeProps {
   const {
     trembling,
@@ -191,6 +198,8 @@ export function useBranchStrokes(opts: {
     mode = "slither",
     swayPhase = 0,
     clock: clockIn = null,
+    climbOffset = null,
+    viewportH = 0,
   } = opts;
 
   const riding = wave != null && !reducedMotion && (attachStart || attachEnd);
@@ -202,6 +211,18 @@ export function useBranchStrokes(opts: {
     () => (trembling || riding ? samplePath(basePath, mode === "sway" ? 20 : 6) : []),
     [trembling, riding, basePath, mode],
   );
+  /**
+   * A rope is a straight line, so its points climb monotonically in y and the
+   * visible slice can be found by bisection rather than a scan. Precomputed
+   * once per geometry; the worklet only does the two searches.
+   */
+  const ptYs = useMemo(() => {
+    if (mode !== "sway" || pts.length === 0) return null;
+    const ys = new Float64Array(pts.length);
+    for (let i = 0; i < pts.length; i++) ys[i] = pts[i].y;
+    // samplePath walks the path in order; a rope's line may run either way.
+    return { ys, ascending: ys[ys.length - 1] >= ys[0] };
+  }, [pts, mode]);
   const total = pts.length > 0 ? pts[pts.length - 1].s : 0;
 
   // For riding-without-trembling, only the attached ends ever move: freeze
@@ -289,11 +310,54 @@ export function useBranchStrokes(opts: {
     const waveT = wave ? wave.tick.value : 0;
     const t = tick.value;
     if (mode === "sway") {
-      // Summit never rides the calm wave (wave is null there), so this is
-      // always the full rebuild — same cost class as a loud slither. No
-      // frozen middle is possible: every point below the anchor moves.
+      // Summit never rides the calm wave (wave is null there), so every
+      // point below the anchor moves and no frozen middle is possible.
+      //
+      // What IS possible is not drawing the rope that is not on screen. A
+      // waiting rope hangs from above the summit, and the summit rises with
+      // the number of ropes (`peakAbove = n·step + headroom`), so at forty
+      // threads a rope is ~20,000px long — about a thousand sample points —
+      // of which the ~900px inside the canvas is all anyone can see. The
+      // rest was being sampled, trigonometry'd, rounded, concatenated into a
+      // ~15KB string and handed to three SVG nodes thirty times a second, to
+      // be clipped. Total sampled geometry was quadratic in thread count for
+      // a viewport that never changes size.
+      //
+      // The points climb monotonically in y (a rope is a straight line), so
+      // the visible slice is two bisections. MARGIN keeps the stroke entering
+      // from off-screen rather than starting at the edge.
+      let lo = 0;
+      let hi = pts.length - 1;
+      if (ptYs && viewportH > 0) {
+        const shift = climbOffset ? climbOffset.value : 0;
+        const top = -SWAY_MARGIN - shift;
+        const bottom = viewportH + SWAY_MARGIN - shift;
+        const { ys, ascending } = ptYs;
+        const first = ascending ? top : bottom;
+        const last = ascending ? bottom : top;
+        // lower bound of `first`
+        let a0 = 0;
+        let b0 = pts.length - 1;
+        while (a0 < b0) {
+          const m = (a0 + b0) >> 1;
+          if (ascending ? ys[m] < first : ys[m] > first) a0 = m + 1;
+          else b0 = m;
+        }
+        // upper bound of `last`
+        let a1 = a0;
+        let b1 = pts.length - 1;
+        while (a1 < b1) {
+          const m = (a1 + b1 + 1) >> 1;
+          if (ascending ? ys[m] <= last : ys[m] >= last) a1 = m;
+          else b1 = m - 1;
+        }
+        lo = Math.max(0, a0 - 1);
+        hi = Math.min(pts.length - 1, a1 + 1);
+        // Entirely off screen: nothing to draw, and nothing to spend.
+        if (hi <= lo) return "";
+      }
       let out = "";
-      for (let i = 0; i < pts.length; i++) {
+      for (let i = lo; i <= hi; i++) {
         const p = pts[i];
         const a = total - p.s; // arc distance below the top anchor
         const seat = attachStart ? Math.min(1, p.s / FORK_CLAMP) : 1;

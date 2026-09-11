@@ -20,9 +20,18 @@ async function run(tag, viewport) {
   // find him structurally: a dense pixel-sprite group with a real bounding box.
   const pip = () =>
     page.evaluate(() => {
-      const g = [...document.querySelectorAll("svg g")].find(
-        (el) => el.querySelectorAll("polygon, rect").length > 80,
-      );
+      const g = (() => {
+      // Pip is one <path> per colour since the sprite collapse; pick the
+      // DENSEST such group, because creature heads on the ropes are sprites
+      // too and a simple threshold finds whichever comes first in the tree.
+      let best = null;
+      let most = 8;
+      for (const g of document.querySelectorAll("svg g")) {
+        const n = g.querySelectorAll(":scope > path").length;
+        if (n > most) { most = n; best = g; }
+      }
+      return best;
+    })();
       if (!g) return "pip:ABSENT";
       const r = g.getBoundingClientRect();
       return r.width > 0 && r.height > 0 ? `pip:visible@${Math.round(r.x)},${Math.round(r.y)}` : "pip:zero-size";
