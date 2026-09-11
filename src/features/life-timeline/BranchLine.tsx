@@ -109,6 +109,13 @@ type Props = {
    * endpoint. Those stay native views for touch and for screen readers.
    */
   strokesOff?: boolean;
+  /**
+   * Un-committed time pan, in pixels. The moment dots are the only thing on a
+   * rope that a summit pan actually moves — everything else about it is
+   * independent of the window (measured: a fifty-percent pan changes no other
+   * coordinate) — so they carry the transient and nothing is rebuilt.
+   */
+  panOffset?: SharedValue<number> | null;
   /** Summit: the route's wave — only the fork/merge dots ride it. */
   routeWave?: WaveHandles | null;
   /**
@@ -221,6 +228,7 @@ export const BranchLine = memo(function BranchLine({
   climbOffset = null,
   viewportH = 0,
   strokesOff = false,
+  panOffset = null,
   interactive = true,
   hidden = false,
   clock = null,
@@ -261,6 +269,15 @@ export const BranchLine = memo(function BranchLine({
   const marksRide = useAnimatedProps(
     () => ({ translateY: climbOffset && marksOnRock ? climbOffset.value : 0 }),
     [climbOffset, marksOnRock],
+  );
+  /** The moments also ride the un-committed pan; see `panOffset`. */
+  const momentsRide = useAnimatedProps(
+    () => ({
+      translateY:
+        (climbOffset && marksOnRock ? climbOffset.value : 0) +
+        (panOffset ? panOffset.value : 0),
+    }),
+    [climbOffset, marksOnRock, panOffset],
   );
 
   // Local closures over the id-keyed stable handlers (recreated only when
@@ -635,7 +652,7 @@ export const BranchLine = memo(function BranchLine({
       )}
 
       {/* moments along the branch */}
-      <AnimatedG animatedProps={marksRide}>
+      <AnimatedG animatedProps={momentsRide}>
       {g.momentPoints.map((p) => (
         <Circle
           key={p.moment.id}

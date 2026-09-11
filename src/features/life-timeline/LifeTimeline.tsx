@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
   Platform,
@@ -396,6 +396,18 @@ function GrabPrompt({
 
 /** Movement below this is still a tap; beyond it the gesture picks an axis. */
 const DECIDE_PX = 8;
+
+/**
+ * How far the summit may travel on a transform before the store is told.
+ *
+ * Each commit rebuilds the layout and reconciles every thread, so the point
+ * is to make them rare; the reason it can be this coarse is that a pan
+ * changes nothing about a rope, so between commits the world on screen is
+ * exactly the world the geometry describes, moved. Half a viewport would do
+ * as well — a hundred and twenty pixels keeps the date rail's ticks honest
+ * without paying much for it.
+ */
+const REBASE_PX = 120;
 /** How far the main line's lean must move before the geometry is rebuilt. */
 const MAIN_SHIFT_STEP = 6;
 /** Scroll offset is rounded to this before it can cause a render. */
@@ -934,6 +946,28 @@ export function LifeTimeline() {
   // all share a single continuous animation instead of four identical ramps —
   // and sharing it is what lets the climber swing in step with his rope.
   const worldClock = useSharedValue(0);
+  /**
+   * The summit's time pan, in un-committed pixels.
+   *
+   * A vertical drag on the summit moves almost nothing. Built the layout at
+   * two windows half a span apart and compared it coordinate by coordinate:
+   * every rope's anchor, free end, column, length and label are identical.
+   * The only things a pan moves are the gridlines, the date rail, the today
+   * band and the moment dots — and all four move by the same number of
+   * pixels. Yet every frame of a drag was committing a window to the store,
+   * rebuilding the whole summit layout and reconciling forty-four threads
+   * across a thousand SVG nodes to redraw a few lines a few pixels lower.
+   *
+   * So the finger moves this, on the UI thread, and those four things ride
+   * it. The store hears about it once every REBASE_PX of travel, and once
+   * more when the finger lifts.
+   */
+  const panSV = useSharedValue(0);
+  /** How much of `panSV` the store has already been told about. */
+  const panSentSV = useSharedValue(0);
+  /** Has this gesture already announced itself to the JS side? */
+  const panningSV = useSharedValue(false);
+
   useEffect(() => {
     if (reducedMotion) {
       cancelAnimation(worldClock);
@@ -1186,6 +1220,12 @@ export function LifeTimeline() {
   };
 
   /** The mountains beyond this one: the further away, the slower they pass. */
+  /** The un-committed pan, as a transform. Half-pixel like every other. */
+  const panRide = useAnimatedProps(
+    () => ({ translateY: Math.round(panSV.value * 2) / 2 }),
+    [panSV],
+  );
+
   const farProps = useAnimatedProps(
     () => ({ translateY: Math.round(climbSV.value * 0.2 * 2) / 2 }),
     [climbSV],
@@ -1508,6 +1548,64 @@ export function LifeTimeline() {
     [scheduleFlush],
   );
 
+  /**
+   * Hand the store what the finger has travelled so far, once.
+   *
+   * The subtraction cannot happen here: the window is React state and the
+   * gridlines only move when the new one is rendered, so taking the pixels
+   * off the transient in the same breath would snap the world back for a
+   * frame. `panCommittedRef` records what has been handed over, and the
+   * layout effect below takes it off once the render carrying it has landed.
+   */
+  const panCommittedRef = useRef(0);
+  const rebase = useCallback((px: number) => {
+    if (px === 0) return;
+    const summit = layoutRef.current as SummitLayout;
+    const timeLen = summit.timeLen ?? 1;
+    const scale = summit.panScale ?? 1;
+    const before = useAppStore.getState().window;
+    panBy((px / Math.max(1, timeLen)) * scale);
+    const after = useAppStore.getState().window;
+    if (!before || !after || after.start === before.start) {
+      // Clamped at the edge of time: the window did not move, so the
+      // transient must not keep growing or the world would slide off its own
+      // geometry with nothing behind it.
+      panSV.value = 0;
+      return;
+    }
+    panCommittedRef.current += px;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values are stable
+  }, [panBy]);
+
+  /**
+   * Take the committed pixels off the transient, now that the render which
+   * carries them has been laid out. Before paint, so the two never disagree
+   * on screen.
+   */
+  useLayoutEffect(() => {
+    if (panCommittedRef.current === 0) return;
+    panSV.value -= panCommittedRef.current;
+    panSentSV.value -= panCommittedRef.current;
+    panCommittedRef.current = 0;
+  });
+
+
+  /** A summit drag has started moving. Announced once, not per event. */
+  const markPanning = useCallback(() => {
+    modeRef.current = "pan";
+    candidateRef.current = null;
+  }, []);
+
+  /** Commit the remainder: the finger has lifted, or the map is going away. */
+  const rebaseRest = useCallback(() => {
+    const rest = panSV.value - panSentSV.value;
+    if (rest !== 0) {
+      panSentSV.value += rest;
+      rebase(rest);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values are stable
+  }, [rebase]);
+
   const onDragMove = useCallback(
     (changeX: number, changeY: number, absX: number, absY: number) => {
       modeRef.current = "pan";
@@ -1536,6 +1634,9 @@ export function LifeTimeline() {
   );
 
   const onDragEnd = useCallback(() => {
+    // Whatever travel has not been handed over yet becomes a real window, so
+    // the world always settles on geometry rather than on a transform.
+    if (verticalRef.current) rebaseRest();
     if (verticalRef.current && modeRef.current === "pan") {
       // Settle so a rope ends up facing the viewer, not half round the side —
       // and let the JS side know which ropes are in front now.
@@ -1585,12 +1686,23 @@ export function LifeTimeline() {
         "worklet";
         rotStartSV.value = rotSV.value;
         lastRotQSV.value = Math.round(rotSV.value / 0.25);
+        panSentSV.value = panSV.value;
+        panningSV.value = false;
       })
       // onChange, not onUpdate: it carries the per-event delta (changeX/Y)
       // alongside the running translation, which is what the time pan needs.
       .onChange((e) => {
         "worklet";
         if (verticalSV.value) {
+          // The JS side still has to know a drag is under way — it is what
+          // arms the turn's settle on release and disarms the tap that would
+          // otherwise follow. Once per gesture, not once per event: dropping
+          // it entirely left the mountain un-settled after a turn and the
+          // thread names laid out for a face that had moved.
+          if (!panningSV.value) {
+            panningSV.value = true;
+            scheduleOnRN(markPanning);
+          }
           // Sideways TURNS the face — entirely on this thread, no crossing.
           rotSV.value = rotStartSV.value + (e.translationX / stageWSV.value) * Math.PI;
           const q = Math.round(rotSV.value / 0.25);
@@ -1598,11 +1710,26 @@ export function LifeTimeline() {
             lastRotQSV.value = q;
             scheduleOnRN(onRotStep, q, rotSV.value);
           }
+          // And up/down moves time WITHOUT crossing either. Everything a
+          // summit pan actually moves rides panSV; the store hears about it
+          // once every REBASE_PX, not once a frame.
+          if (e.changeY !== 0) {
+            // The same test the JS side has always made: stagePosRef is
+            // never written, so the stage's left edge is the window's.
+            const nearDates = e.absoluteX > stageWSV.value - SUMMIT_RAIL_W - 24;
+            panSV.value += e.changeY * (nearDates ? 4 : 1);
+            const over = panSV.value - panSentSV.value;
+            if (over >= REBASE_PX || over <= -REBASE_PX) {
+              panSentSV.value += over;
+              scheduleOnRN(rebase, over);
+            }
+          }
+          return;
         }
-        // Time travel still has to reach the store: the window decides which
-        // threads exist and where they sit, which is semantic state rather
-        // than a frame. It crosses as a delta and is coalesced to one commit
-        // per frame on the other side.
+        // Horizontal maps: time travel still has to reach the store, because
+        // there the window decides where every fork sits and the geometry
+        // really is rebuilt. It crosses as a delta and is coalesced to one
+        // commit per frame on the other side.
         scheduleOnRN(onDragMove, e.changeX, e.changeY, e.absoluteX, e.absoluteY);
       })
       .onEnd(() => {
@@ -2844,38 +2971,49 @@ export function LifeTimeline() {
                   opacity={0.05}
                 />
               )}
-              {vertical &&
-                sm &&
-                (() => {
-                  const todayY = dateToScreenY(today, layout.window, sm.timeLen, sm.axisLen);
-                  if (todayY - sm.nowScreenY <= 0) return null;
-                  return (
-                    <Rect
-                      x={0}
-                      y={sm.nowScreenY}
-                      width={svgWidth}
-                      height={todayY - sm.nowScreenY}
-                      fill={tk.accent}
-                      opacity={0.05}
+              {/* The TIME frame, and the whole of what a summit pan moves: the
+                  day band, the gridlines, and (in BranchLine) the moment dots.
+                  They ride the un-committed pan so that a drag is a transform
+                  rather than a window commit and a layout rebuild. */}
+              {vertical && sm && (
+                <AnimatedOptionG animatedProps={panRide}>
+                  {(() => {
+                    const todayY = dateToScreenY(today, layout.window, sm.timeLen, sm.axisLen);
+                    if (todayY - sm.nowScreenY <= 0) return null;
+                    return (
+                      <Rect
+                        x={0}
+                        y={sm.nowScreenY}
+                        width={svgWidth}
+                        height={todayY - sm.nowScreenY}
+                        fill={tk.accent}
+                        opacity={0.05}
+                      />
+                    );
+                  })()}
+                  {ticks.map((tick) => (
+                    <Line
+                      key={tick.date}
+                      x1={0}
+                      y1={dateToScreenY(tick.date, layout.window, sm.timeLen, sm.axisLen)}
+                      x2={svgWidth}
+                      y2={dateToScreenY(tick.date, layout.window, sm.timeLen, sm.axisLen)}
+                      stroke={tk.lineAxis}
                     />
-                  );
-                })()}
+                  ))}
+                </AnimatedOptionG>
+              )}
 
               {/* axis gridlines — full canvas, including the scroll headroom;
                   their date labels live on the pinned strip (bottom edge, or
                   the right-hand rail on the summit map) */}
-              {ticks.map((tick) => {
-                if (vertical && sm) {
-                  const y = dateToScreenY(tick.date, layout.window, sm.timeLen, sm.axisLen);
+              {!vertical &&
+                ticks.map((tick) => {
+                  const x = dateToX(tick.date, layout.window, layout.metrics.width);
                   return (
-                    <Line key={tick.date} x1={0} y1={y} x2={svgWidth} y2={y} stroke={tk.lineAxis} />
+                    <Line key={tick.date} x1={x} y1={0} x2={x} y2={svgHeight} stroke={tk.lineAxis} />
                   );
-                }
-                const x = dateToX(tick.date, layout.window, layout.metrics.width);
-                return (
-                  <Line key={tick.date} x1={x} y1={0} x2={x} y2={svgHeight} stroke={tk.lineAxis} />
-                );
-              })}
+                })}
 
               {/* the summit route: the same gathering current, standing up.
                   The ledge marks Now; the pennant climbs with the day. */}
@@ -3186,6 +3324,10 @@ export function LifeTimeline() {
                     // takes — the draw-in is a dash sweep on the stroke, and
                     // there is at most one of them at a time.
                     strokesOff={vertical ? !!SummitRopes : !!BranchLines && !isBorn}
+                    // The moments are the only part of a rope a summit pan
+                    // moves, so they carry the transient and the rope itself
+                    // is never rebuilt for it.
+                    panOffset={vertical ? panSV : null}
                     wave={vertical ? null : calmCurrent.wave}
                     // No wave on the summit: the route is straight and still,
                     // so the dots that sit on it must be too (they compute
@@ -3772,10 +3914,13 @@ export function LifeTimeline() {
               unplated — the rock is sized to clear this strip (see faceHalfFor),
               so the numbers sit against sky, not rock. */}
           <Svg width={SUMMIT_RAIL_W} height={size.height}>
-            <G>
+            <AnimatedOptionG animatedProps={panRide}>
               {ticks.map((tick) => {
                 const y = dateToScreenY(tick.date, layout.window, sm.timeLen, sm.axisLen);
-                if (y < -20 || y > size.height + 20) return null;
+                // Room for the un-committed pan: the strip carries a whole
+                // rebase of travel, so a tick culled at the edge cannot leave
+                // a gap the transform then slides into view.
+                if (y < -20 - REBASE_PX || y > size.height + 20 + REBASE_PX) return null;
                 // The day's NUMBER, taken from the date itself — the localized
                 // label is "5 Sat" here but "Sat 5" or "Sa., 5." elsewhere, so
                 // the digits must not be parsed out of it. Wider zoom levels
@@ -3805,7 +3950,7 @@ export function LifeTimeline() {
                   </SvgText>
                 );
               })}
-            </G>
+            </AnimatedOptionG>
           </Svg>
         </View>
         )}
