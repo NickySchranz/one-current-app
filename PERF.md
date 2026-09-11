@@ -75,6 +75,30 @@ Skia addresses the first by removing string serialisation and the SVG
 attribute path; cubic-Bézier ropes address it independently by removing the
 quadratic. The second is fixed by never telling React the finger moved.
 
+## After this branch — same scene, same machine
+
+| scene | phase | p50 frame | script | renders/s | geometry/s | commits/s | dropped |
+|---|---|---|---|---|---|---|---|
+| riverbed | idle | 16.7 ms (60fps) | 24.1% | 0.8 | 0.0 | 0.0 | 0 |
+| riverbed | drag | 33.3 ms (30fps) | 68.3% | 14.6 | 10.7 | 10.7 | 151 |
+| summit | idle | **16.7 ms (60fps)** | **15.5%** | 0.0 | 0.0 | 0.0 | **0** |
+| summit | drag | 33.3 ms (30fps) | 75.3% | 18.7 | 9.2 | 9.2 | 164 |
+
+**Idle is fixed on the scene that was broken.** The summit went from 15fps to
+60, script from 38.6% to 15.5%, and from 99 dropped frames in six seconds to
+none — by drawing only the slice of each rope that is on screen. No renderer
+change was involved.
+
+**Dragging is not fixed**, and the numbers say exactly why: ten window commits
+and ten full geometry rebuilds a second, with fifteen to nineteen React
+renders behind them. Every touch event still crosses to the RN runtime and
+commits a canonical window. That is the outstanding work.
+
+Riverbed's idle script rose slightly (21.4% → 24.1%). Some of that is the
+counters themselves — `countPathBuildUI` increments a shared value on every
+path build, and that scene builds ~900 a second. The counters are not free,
+and every "after" number here includes their cost.
+
 ## The renderer decision — SVG vs Skia, measured
 
 `node scripts/renderer-bench.mjs --ropes N`, after

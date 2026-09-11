@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -12,7 +12,6 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { PerformanceMonitor } from "react-native-reanimated";
 import { PERF_COUNTERS } from "@/config/flags";
 import { PerfOverlay } from "@/dev/PerfOverlay";
-import { RopeBenchScreen } from "@/dev/RopeBench";
 import { StatusBar } from "expo-status-bar";
 import { operationDepth, useAppStore } from "@/stores/app-store";
 import { hasTokens } from "@/api/client";
@@ -273,9 +272,20 @@ function AppShell() {
   );
 }
 
+/** Lazy so the benchmark never sits in a production graph. */
+const RopeBenchScreen = lazy(() =>
+  import("@/dev/RopeBench").then((m) => ({ default: m.RopeBenchScreen })),
+);
+
 export default function App() {
   const bench = benchMode();
-  if (bench) return <RopeBenchScreen mode={bench} />;
+  if (bench) {
+    return (
+      <Suspense fallback={null}>
+        <RopeBenchScreen mode={bench} />
+      </Suspense>
+    );
+  }
   return (
     /**
      * Gesture Handler's root. The timeline's drag runs on the UI thread as a

@@ -14,7 +14,6 @@ import {
   type CreateBranchInput, effectiveLoudness, isClosed, isOpen } from "@/domain/branches/logic";
 import type { LoudnessSource } from "@/domain/branches/types";
 import { countWindowCommit, exposeStressLoader } from "@/dev/perf-counters";
-import { stressBranches } from "@/db/stress-data";
 import { applyWaitingToBranch, createWaitingContainer, isReviewDue } from "@/domain/waiting/logic";
 import type { WaitingContainer } from "@/domain/waiting/types";
 import { advanceSkew, appNow, getSkewMs, setRate, setSkewMs } from "@/domain/time/clock";
@@ -876,6 +875,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async loadStressData(count = 44) {
+    // Imported here rather than at the top so the fixture never reaches a
+    // production graph — it exists only for the harness.
+    const { stressBranches } = await import("@/db/stress-data");
     const branches = stressBranches(count);
     await repo.deleteEverything();
     await repo.saveBranches(branches);
