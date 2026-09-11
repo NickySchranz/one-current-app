@@ -2186,10 +2186,11 @@ export function LifeTimeline() {
           branchColor({ id: g.branchId, type: b?.type ?? "unknown" }, theme, g.style.saturation),
           g.style.opacity,
           now_,
+          reducedMotion,
         );
       });
     // nowTick only to date the loudness; it steps every half minute, not per frame.
-  }, [SummitRopes, layout.geometries, byId, theme, nowTick]);
+  }, [SummitRopes, layout.geometries, byId, theme, nowTick, reducedMotion]);
 
   const nameRows = useMemo(() => {
     const out = new Map<string, { row: number; maxW: number }>();

@@ -40,6 +40,10 @@ const MIME = {
   ".css": "text/css",
   ".json": "application/json",
   ".ico": "image/x-icon",
+  // WebAssembly.instantiateStreaming refuses anything but application/wasm,
+  // and CanvasKit then falls back to a slow ArrayBuffer path after logging a
+  // console error — which every check here counts as an app error.
+  ".wasm": "application/wasm",
 };
 const server = createServer(async (req, res) => {
   const path = req.url === "/" ? "/index.html" : req.url.split("?")[0];
@@ -120,13 +124,24 @@ const ropeColumns = (pg) =>
 const pipBox = (pg) =>
   pg.evaluate(() => {
     const sprite = (() => {
-      // Pip is one <path> per colour since the sprite collapse; pick the
-      // DENSEST such group, because creature heads on the ropes are sprites
-      // too and a simple threshold finds whichever comes first in the tree.
+      // Pip is one <path> per colour since the sprite collapse, and each of
+      // those paths is a run of pixel squares: "M x y h s v s h-s z".
+      //
+      // Counting direct <path> children alone does NOT find him. The rock's
+      // texture, the distant cliffs and the ropes are all groups of paths and
+      // several are far denser, so "the densest group" picks the mountain and
+      // reports a box thousands of pixels tall — every climber assertion then
+      // measures the scenery. Match the sprite's own idiom instead, and take
+      // the biggest such group: the creature heads on the ropes are sprites
+      // too, but small ones.
+      const PIXELS = /^M[\d.]+ [\d.]+h[\d.]+v[\d.]+h-[\d.]+z/;
       let best = null;
-      let most = 8;
+      let most = 2;
       for (const g of document.querySelectorAll("svg g")) {
-        const n = g.querySelectorAll(":scope > path").length;
+        let n = 0;
+        for (const p of g.querySelectorAll(":scope > path")) {
+          if (PIXELS.test(p.getAttribute("d") ?? "")) n++;
+        }
         if (n > most) { most = n; best = g; }
       }
       return best;
@@ -821,13 +836,24 @@ const emptyX = (pg) =>
   const climberX = () =>
     p2.evaluate(() => {
       const sprite = (() => {
-      // Pip is one <path> per colour since the sprite collapse; pick the
-      // DENSEST such group, because creature heads on the ropes are sprites
-      // too and a simple threshold finds whichever comes first in the tree.
+      // Pip is one <path> per colour since the sprite collapse, and each of
+      // those paths is a run of pixel squares: "M x y h s v s h-s z".
+      //
+      // Counting direct <path> children alone does NOT find him. The rock's
+      // texture, the distant cliffs and the ropes are all groups of paths and
+      // several are far denser, so "the densest group" picks the mountain and
+      // reports a box thousands of pixels tall — every climber assertion then
+      // measures the scenery. Match the sprite's own idiom instead, and take
+      // the biggest such group: the creature heads on the ropes are sprites
+      // too, but small ones.
+      const PIXELS = /^M[\d.]+ [\d.]+h[\d.]+v[\d.]+h-[\d.]+z/;
       let best = null;
-      let most = 8;
+      let most = 2;
       for (const g of document.querySelectorAll("svg g")) {
-        const n = g.querySelectorAll(":scope > path").length;
+        let n = 0;
+        for (const p of g.querySelectorAll(":scope > path")) {
+          if (PIXELS.test(p.getAttribute("d") ?? "")) n++;
+        }
         if (n > most) { most = n; best = g; }
       }
       return best;
@@ -892,13 +918,24 @@ const emptyX = (pg) =>
 const ropeXAtPip = (pg) =>
   pg.evaluate(() => {
     const sprite = (() => {
-      // Pip is one <path> per colour since the sprite collapse; pick the
-      // DENSEST such group, because creature heads on the ropes are sprites
-      // too and a simple threshold finds whichever comes first in the tree.
+      // Pip is one <path> per colour since the sprite collapse, and each of
+      // those paths is a run of pixel squares: "M x y h s v s h-s z".
+      //
+      // Counting direct <path> children alone does NOT find him. The rock's
+      // texture, the distant cliffs and the ropes are all groups of paths and
+      // several are far denser, so "the densest group" picks the mountain and
+      // reports a box thousands of pixels tall — every climber assertion then
+      // measures the scenery. Match the sprite's own idiom instead, and take
+      // the biggest such group: the creature heads on the ropes are sprites
+      // too, but small ones.
+      const PIXELS = /^M[\d.]+ [\d.]+h[\d.]+v[\d.]+h-[\d.]+z/;
       let best = null;
-      let most = 8;
+      let most = 2;
       for (const g of document.querySelectorAll("svg g")) {
-        const n = g.querySelectorAll(":scope > path").length;
+        let n = 0;
+        for (const p of g.querySelectorAll(":scope > path")) {
+          if (PIXELS.test(p.getAttribute("d") ?? "")) n++;
+        }
         if (n > most) { most = n; best = g; }
       }
       return best;
@@ -907,11 +944,35 @@ const ropeXAtPip = (pg) =>
     const box = sprite.getBoundingClientRect();
     const row = box.top + box.height * 0.4; // roughly his hands
     const centre = box.left + box.width / 2;
+    /* Both numbers come out of THIS evaluate, in one breath.
+     *
+     * They used to be two round trips — his box, then the rope's x — and with
+     * the SVG renderer that was harmless, because both were reads of a frame
+     * the browser had already painted. The canvas scene answers live off the
+     * world clock, so the second call sampled a rope a few milliseconds further
+     * through its swing than the climber it was being compared with, and the
+     * gap read 6px of drift that nobody could see. */
     // Each visible rope's x AT that row, found by bisection on arc length
     // (the ropes are near-vertical, so y is monotonic along them); then the
     // one whose column is his is the one closest to his centre.
     let best = null;
     let bestDx = Infinity;
+    // The canvas renderer draws the ropes in Skia and there is no path to
+    // read, so the scene answers for itself: each rope publishes the same
+    // function the canvas draws with (see canvas/SummitRopesCanvas.tsx).
+    // Without this the swing assertions report -Infinity against an app whose
+    // ropes are swaying perfectly well.
+    if (window.__ocRopes && window.__ocRopes.size) {
+      for (const at of window.__ocRopes.values()) {
+        const x = at(row);
+        if (x === null) continue;
+        if (Math.abs(x - centre) < bestDx) {
+          bestDx = Math.abs(x - centre);
+          best = x;
+        }
+      }
+      return bestDx <= 40 ? { x: best, cx: centre } : null;
+    }
     for (const el of document.querySelectorAll("path")) {
       const stroke = el.getAttribute("stroke");
       if (!stroke || stroke === "transparent" || stroke === "none") continue;
@@ -943,7 +1004,7 @@ const ropeXAtPip = (pg) =>
         best = x;
       }
     }
-    return bestDx <= 40 ? best : null;
+    return bestDx <= 40 ? { x: best, cx: centre } : null;
   });
 
 const readBranches = (pg) =>
@@ -989,11 +1050,12 @@ const readBranches = (pg) =>
     let ropeLo = Infinity, ropeHi = -Infinity;
     let gapLo = Infinity, gapHi = -Infinity;
     for (let i = 0; i < 70; i++) {
-      const [rx, pip] = [await ropeXAtPip(p3), await pipBox(p3)];
-      if (rx !== null && pip) {
+      const held = await ropeXAtPip(p3);
+      if (held) {
+        const rx = held.x;
         ropeLo = Math.min(ropeLo, rx);
         ropeHi = Math.max(ropeHi, rx);
-        const gap = pip.cx - rx;
+        const gap = held.cx - rx;
         gapLo = Math.min(gapLo, gap);
         gapHi = Math.max(gapHi, gap);
       }
@@ -1025,13 +1087,24 @@ const readBranches = (pg) =>
     const afterBox = await pipBox(p3);
     const heldId = await p3.evaluate(() => {
       const sprite = (() => {
-      // Pip is one <path> per colour since the sprite collapse; pick the
-      // DENSEST such group, because creature heads on the ropes are sprites
-      // too and a simple threshold finds whichever comes first in the tree.
+      // Pip is one <path> per colour since the sprite collapse, and each of
+      // those paths is a run of pixel squares: "M x y h s v s h-s z".
+      //
+      // Counting direct <path> children alone does NOT find him. The rock's
+      // texture, the distant cliffs and the ropes are all groups of paths and
+      // several are far denser, so "the densest group" picks the mountain and
+      // reports a box thousands of pixels tall — every climber assertion then
+      // measures the scenery. Match the sprite's own idiom instead, and take
+      // the biggest such group: the creature heads on the ropes are sprites
+      // too, but small ones.
+      const PIXELS = /^M[\d.]+ [\d.]+h[\d.]+v[\d.]+h-[\d.]+z/;
       let best = null;
-      let most = 8;
+      let most = 2;
       for (const g of document.querySelectorAll("svg g")) {
-        const n = g.querySelectorAll(":scope > path").length;
+        let n = 0;
+        for (const p of g.querySelectorAll(":scope > path")) {
+          if (PIXELS.test(p.getAttribute("d") ?? "")) n++;
+        }
         if (n > most) { most = n; best = g; }
       }
       return best;

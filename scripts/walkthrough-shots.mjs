@@ -21,13 +21,24 @@ async function run(tag, viewport) {
   const pip = () =>
     page.evaluate(() => {
       const g = (() => {
-      // Pip is one <path> per colour since the sprite collapse; pick the
-      // DENSEST such group, because creature heads on the ropes are sprites
-      // too and a simple threshold finds whichever comes first in the tree.
+      // Pip is one <path> per colour since the sprite collapse, and each of
+      // those paths is a run of pixel squares: "M x y h s v s h-s z".
+      //
+      // Counting direct <path> children alone does NOT find him. The rock's
+      // texture, the distant cliffs and the ropes are all groups of paths and
+      // several are far denser, so "the densest group" picks the mountain and
+      // reports a box thousands of pixels tall — every climber assertion then
+      // measures the scenery. Match the sprite's own idiom instead, and take
+      // the biggest such group: the creature heads on the ropes are sprites
+      // too, but small ones.
+      const PIXELS = /^M[\d.]+ [\d.]+h[\d.]+v[\d.]+h-[\d.]+z/;
       let best = null;
-      let most = 8;
+      let most = 2;
       for (const g of document.querySelectorAll("svg g")) {
-        const n = g.querySelectorAll(":scope > path").length;
+        let n = 0;
+        for (const p of g.querySelectorAll(":scope > path")) {
+          if (PIXELS.test(p.getAttribute("d") ?? "")) n++;
+        }
         if (n > most) { most = n; best = g; }
       }
       return best;

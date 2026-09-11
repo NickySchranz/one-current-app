@@ -4,7 +4,7 @@ import { extname, join } from "node:path";
 import { chromium } from "playwright-core";
 
 const DIST = "/home/nicky/one-current-app/dist";
-const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".ico": "image/x-icon" };
+const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".ico": "image/x-icon", ".wasm": "application/wasm" };
 const server = createServer(async (req, res) => {
   const path = req.url === "/" ? "/index.html" : req.url.split("?")[0];
   try {

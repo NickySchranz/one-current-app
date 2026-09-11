@@ -1,6 +1,6 @@
 import type { BranchGeometry } from "@/visualization/branch-lines/paths";
 import type { PsychologicalBranch } from "@/domain/branches/types";
-import { effectiveLoudness } from "@/domain/branches/logic";
+import { lineTrembles, phaseFromId } from "../BranchLine";
 
 /**
  * Everything the canvas needs about one rope, flattened to numbers.
@@ -25,8 +25,10 @@ export type RopeSpec = {
   level: number;
   /** Per-rope offset so a face of ropes never sways in sync. */
   phase: number;
-  /** Answered today: coiled at its ledge, and it rides the mountain. */
-  coiled: boolean;
+  /** Loud enough to move at all. A quiet rope hangs dead straight. */
+  trembles: boolean;
+  /** The rope hangs on the rock, so it travels with the climb. */
+  rides: boolean;
   colour: string;
   /** Base opacity before the turn fades it round the back. */
   opacity: number;
@@ -66,20 +68,27 @@ export function cssToHex(colour: string): string {
   return `#${hex(r)}${hex(g)}${hex(b)}`;
 }
 
-/** Stable per-rope phase, matching the SVG path's own seeded offset. */
-export function ropePhase(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
-  return ((Math.abs(h) % 628) / 100) % (Math.PI * 2);
-}
-
+/**
+ * Every number here is read from the SAME place BranchLine and the climber's
+ * grip read it.
+ *
+ * Three of them were not, and the checks caught it: a phase of my own
+ * invention instead of `phaseFromId`, `effectiveLoudness` instead of the
+ * geometry's own clamped loudness, and the climb applied only to coiled
+ * ropes when in fact every rope hangs on the rock and travels with it. The
+ * rope swayed beautifully and the climber held a rope that was somewhere
+ * else — 23px adrift at the widest. The sway formula agreeing is not enough;
+ * its arguments have to agree too.
+ */
 export function toRopeSpec(
   g: BranchGeometry & { angle?: number; radius?: number; coiled?: boolean },
   branch: PsychologicalBranch | undefined,
   colour: string,
   opacity: number,
   now: Date,
+  reducedMotion: boolean,
 ): RopeSpec {
+  const level = Math.max(1, Math.min(5, g.loudness));
   return {
     id: g.branchId,
     ax: g.forkX,
@@ -87,9 +96,12 @@ export function toRopeSpec(
     radius: g.radius ?? 0,
     bottom: g.forkY,
     top: g.endY,
-    level: branch ? effectiveLoudness(branch, now) : 3,
-    phase: ropePhase(g.branchId),
-    coiled: !!g.coiled,
+    level,
+    phase: phaseFromId(g.branchId),
+    trembles:
+      !!branch &&
+      lineTrembles({ branch, inWindow: g.inWindow, level, reducedMotion, now, born: false }),
+    rides: g.reachesNow,
     colour: cssToHex(colour),
     opacity,
     thickness: g.thickness,

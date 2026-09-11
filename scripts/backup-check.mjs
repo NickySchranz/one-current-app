@@ -15,6 +15,10 @@ const MIME = {
   ".css": "text/css",
   ".json": "application/json",
   ".ico": "image/x-icon",
+  // WebAssembly.instantiateStreaming refuses anything but application/wasm,
+  // and CanvasKit then falls back to a slow ArrayBuffer path after logging a
+  // console error — which every check here counts as an app error.
+  ".wasm": "application/wasm",
 };
 const server = createServer(async (req, res) => {
   const path = req.url === "/" ? "/index.html" : req.url.split("?")[0];

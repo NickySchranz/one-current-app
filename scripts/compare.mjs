@@ -11,6 +11,10 @@ const MIME = {
   ".css": "text/css",
   ".json": "application/json",
   ".ico": "image/x-icon",
+  // WebAssembly.instantiateStreaming refuses anything but application/wasm,
+  // and CanvasKit then falls back to a slow ArrayBuffer path after logging a
+  // console error — which every check here counts as an app error.
+  ".wasm": "application/wasm",
   ".svg": "image/svg+xml",
   ".png": "image/png",
 };

@@ -11,7 +11,7 @@ import { chromium } from "playwright-core";
 import { captureSituation } from "./promo-lib.mjs";
 
 const DIST = new URL("../dist", import.meta.url).pathname;
-const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".ico": "image/x-icon" };
+const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".ico": "image/x-icon", ".wasm": "application/wasm" };
 const server = createServer(async (req, res) => {
   const path = req.url === "/" ? "/index.html" : req.url.split("?")[0];
   try {
