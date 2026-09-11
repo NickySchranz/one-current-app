@@ -10,6 +10,8 @@ import {
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { PerformanceMonitor } from "react-native-reanimated";
+import { PERF_COUNTERS } from "@/config/flags";
+import { PerfOverlay } from "@/dev/PerfOverlay";
 import { StatusBar } from "expo-status-bar";
 import { operationDepth, useAppStore } from "@/stores/app-store";
 import { hasTokens } from "@/api/client";
@@ -253,6 +255,9 @@ function AppShell() {
           busy. BOTH dipping together is the timeline being rebuilt — that is
           the number this work was aimed at. */}
       {__DEV__ && <PerformanceMonitor />}
+      {/* Frame rates say whether a frame was dropped; these say what React
+          was doing while it was drawn. Both, or neither. */}
+      {PERF_COUNTERS && <PerfOverlay />}
     </View>
   );
 }

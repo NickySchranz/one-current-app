@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { countPathBuildUI } from "@/dev/perf-counters";
 import {
   cancelAnimation,
   interpolateColor,
@@ -279,6 +280,7 @@ export function useBranchStrokes(opts: {
     [clock, tickRate],
   );
   const d = useDerivedValue(() => {
+    countPathBuildUI();
     if (pts.length === 0) return basePath;
     const ampP = wave ? Math.min(1.35, wave.progressSV.value + wave.surgeSV.value) : 0;
     const waveOn = riding && ampP > 0.01;
@@ -576,6 +578,7 @@ export function useCalmCurrent(opts: {
   const waveTick = useDerivedValue(() => Math.round(clock.value * 30) / 30, []);
 
   const d = useDerivedValue(() => {
+    countPathBuildUI();
     const ampP = Math.min(1.35, progressSV.value + surgeSV.value);
     if (ampP <= 0.01 || xs.length < 2) return `M 0 ${mainY} L ${nowX} ${mainY}`;
     const freqP = progressSV.value;

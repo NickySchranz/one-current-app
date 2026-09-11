@@ -13,6 +13,8 @@ import {
   trackLoudness,
   type CreateBranchInput, effectiveLoudness, isClosed, isOpen } from "@/domain/branches/logic";
 import type { LoudnessSource } from "@/domain/branches/types";
+import { countWindowCommit, exposeStressLoader } from "@/dev/perf-counters";
+import { stressBranches } from "@/db/stress-data";
 import { applyWaitingToBranch, createWaitingContainer, isReviewDue } from "@/domain/waiting/logic";
 import type { WaitingContainer } from "@/domain/waiting/types";
 import { advanceSkew, appNow, getSkewMs, setRate, setSkewMs } from "@/domain/time/clock";
@@ -251,6 +253,8 @@ type AppState = {
   ): Promise<void>;
   /** Record today as a day the user was here, and work out how long they were away. */
   notePresence(): Promise<void>;
+  /** Replace everything with the heavy performance scene (perf builds only). */
+  loadStressData(count?: number): Promise<void>;
   /** Set the return card aside without answering it. */
   greetReturn(): void;
   /** Note today's wholeness. Called as the chip computes it; last write wins,
@@ -871,6 +875,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (next) await repo.saveBranch(next);
   },
 
+  async loadStressData(count = 44) {
+    const branches = stressBranches(count);
+    await repo.deleteEverything();
+    await repo.saveBranches(branches);
+    set({ branches, merges: [], actions: [], lessons: [], waiting: [] });
+  },
+
   async notePresence() {
     const today = todayIso();
     if (get().presentDays.includes(today)) return;
@@ -1436,7 +1447,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   panBy(fraction) {
     const w = get().window;
     if (!w) return;
-    set({ window: panWindow(w, fraction, todayIso()) });
+    const next = panWindow(w, fraction, todayIso());
+    // A clamped pan at the future limit used to return a fresh object with
+    // identical contents, and the Zustand selector compares by identity —
+    // so pushing against the edge re-rendered the timeline every frame for
+    // no movement at all.
+    if (next.start === w.start && next.end === w.end) return;
+    countWindowCommit();
+    set({ window: next });
   },
   setTypeFilter: (typeFilter) => set({ typeFilter }),
   setStatusFilter: (statusFilter) => set({ statusFilter }),
@@ -1663,6 +1681,9 @@ export const useAppStore = create<AppState>((set, get) => ({
  * every /me, undoing the unlock. The toggle can only ever grant, never
  * revoke, and only where SHOW_TESTING is compiled in.
  */
+// The harness drives the heavy scene through this rather than the UI.
+exposeStressLoader((count) => useAppStore.getState().loadStressData(count));
+
 export const selectEffectivePro = (s: { isPro: boolean; serverPro: boolean | null }): boolean =>
   (SHOW_TESTING && s.isPro) || (s.serverPro ?? false);
 

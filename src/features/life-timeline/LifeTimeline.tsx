@@ -31,6 +31,7 @@ import { isActionOpen } from "@/domain/actions/logic";
 import { useLayoutStore } from "@/stores/layout-store";
 import { measureNode } from "@/ui/measure";
 import { setWalkthroughPoint, useWalkthroughTarget } from "@/features/tutorial/targets";
+import { countGeometryBuild, countRender } from "@/dev/perf-counters";
 import { buildTimelineLayout } from "@/visualization/main-line/layout";
 import { buildSummitLayout, dateToScreenY, daySeedOrder, ringOffset, SUMMIT_RAIL_W, type SummitLayout } from "@/visualization/vertical/transpose";
 import { themeOrientation } from "@/visualization/theme";
@@ -444,6 +445,9 @@ let shownClimb: { sig: string; dist: number } | null = null;
 let lastGripRope: string | null = null;
 
 export function LifeTimeline() {
+  // Counted first thing in the body, so the number is renders of THIS
+  // component — the one whose render drags the whole scene behind it.
+  countRender();
   const branches = useAppStore((s) => s.branches);
   const pinnedBranchIds = useAppStore((s) => s.pinnedBranchIds);
   const window_ = useAppStore((s) => s.window);
@@ -756,6 +760,7 @@ export function LifeTimeline() {
 
   const layout = useMemo(
     () =>
+      (countGeometryBuild(),
       vertical
         ? buildSummitLayout(visible, {
             stageWidth: size.width,
@@ -793,7 +798,7 @@ export function LifeTimeline() {
             // Lines created this session keep their lane — through "since when?"
             // changes and past the save, while the quick menu is still open.
             pinnedBranchIds,
-          }),
+          })),
     [vertical, visible, size, window_, compact, now, mainShift, topInset, pinnedBranchIds, bottomInset, climbRanks, retiredIds],
   );
   const layoutRef = useRef(layout);
