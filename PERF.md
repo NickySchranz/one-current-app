@@ -74,3 +74,51 @@ window, and rebuilds the whole scene.
 Skia addresses the first by removing string serialisation and the SVG
 attribute path; cubic-Bézier ropes address it independently by removing the
 quadratic. The second is fixed by never telling React the finger moved.
+
+## The renderer decision — SVG vs Skia, measured
+
+`node scripts/renderer-bench.mjs --ropes N`, after
+`EXPO_PUBLIC_PERF=1 npx expo export --platform web --clear && cp public/canvaskit.wasm dist/`.
+
+Twenty-plus ropes hanging past the viewport, swaying with the app's own
+`swayOffsetAt`, three strokes each exactly as `BranchLine` paints them, and
+nothing else on screen. SVG samples the visible slice and serialises a `d`
+string to three native nodes; Skia builds one `SkPath` of cubics and paints it
+three times.
+
+| ropes | SVG script | Skia script | SVG fps | Skia fps | SVG nodes | Skia nodes | SVG layout |
+|---|---|---|---|---|---|---|---|
+| 60 | 12.4% | **2.6%** | 60.0 | 60.0 | 223 | 44 | 49 ms |
+| 140 | 25.8% | **5.1%** | 60.0 | 60.0 | 463 | 44 | 83 ms |
+| 320 | 64.6% | **9.5%** | 50.7 | **60.0** | 1003 | 44 | 166 ms |
+
+**Skia wins, by about five times in script cost, and it scales.** Node count
+stays at 44 regardless of scene size, layout cost is zero rather than growing,
+and it still holds 60fps where SVG has started dropping frames.
+
+This is measured under **software rasterisation** — headless Chromium here has
+no GPU and falls back to SwiftShader, which is the condition that should most
+favour the browser's own SVG rasteriser. A real GPU should widen the gap, not
+narrow it. It has not been measured on one; see the limitations below.
+
+### The near-miss, recorded because it would have decided the opposite
+
+The first run of this benchmark said Skia was **four times worse** — 25.6fps
+against SVG's 60 at sixty ropes. The cause was one line in the benchmark, not
+in Skia: `Skia.Path.Make()` inside the per-frame derived value, allocating a
+fresh path thirty times a second per rope. Reusing one path per rope and
+calling `reset()` took Skia from 49.1% script to 2.6% at the same scene.
+
+Phase 20 of the brief warns about exactly this. Had the result been reported
+without checking it, the conclusion would have been backwards.
+
+## Limitations of everything above
+
+- Chromium on Linux, **software rasterisation, no GPU**. Useful for ranking
+  causes and for before/after on one machine. Not device figures.
+- **Not measured on iOS or Android.** There is no `ios/` or `android/`
+  directory and no `eas.json` in this repo; Skia is a native dependency and
+  needs `expo prebuild` or a dev client. `npx expo run:ios --device` shows the
+  same counters via `src/dev/PerfOverlay.tsx`, so the numbers are reachable
+  there — they have not been read here, and nothing above should be presented
+  as a device result.

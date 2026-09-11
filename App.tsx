@@ -12,6 +12,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { PerformanceMonitor } from "react-native-reanimated";
 import { PERF_COUNTERS } from "@/config/flags";
 import { PerfOverlay } from "@/dev/PerfOverlay";
+import { RopeBenchScreen } from "@/dev/RopeBench";
 import { StatusBar } from "expo-status-bar";
 import { operationDepth, useAppStore } from "@/stores/app-store";
 import { hasTokens } from "@/api/client";
@@ -36,6 +37,16 @@ import { WalkthroughOverlay } from "@/features/tutorial/WalkthroughOverlay";
 import { ReturnCard } from "@/features/return/ReturnCard";
 import { WholenessMoment } from "@/features/life-timeline/WholenessMoment";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
+
+/**
+ * `?bench=svg` / `?bench=skia` renders nothing but the rope scene, so the
+ * probe measures renderer cost with no app around it. Perf builds only.
+ */
+function benchMode(): "svg" | "skia" | null {
+  if (!PERF_COUNTERS || Platform.OS !== "web" || typeof window === "undefined") return null;
+  const m = new URLSearchParams(window.location.search).get("bench");
+  return m === "svg" || m === "skia" ? m : null;
+}
 
 function AppShell() {
   const ready = useAppStore((s) => s.ready);
@@ -263,6 +274,8 @@ function AppShell() {
 }
 
 export default function App() {
+  const bench = benchMode();
+  if (bench) return <RopeBenchScreen mode={bench} />;
   return (
     /**
      * Gesture Handler's root. The timeline's drag runs on the UI thread as a

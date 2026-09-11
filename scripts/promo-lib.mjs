@@ -27,6 +27,12 @@ const MIME = {
   ".css": "text/css",
   ".json": "application/json",
   ".ico": "image/x-icon",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  // WebAssembly.instantiateStreaming refuses anything else, and CanvasKit
+  // then fails with an opaque "PictureRecorder of undefined" once something
+  // tries to draw. Serving it as octet-stream looks like a working load.
+  ".wasm": "application/wasm",
 };
 
 export function serveDist(dist, port, stripPrefix = "") {
