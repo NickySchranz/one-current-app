@@ -36,6 +36,17 @@ const KROPE = (2 * Math.PI) / 900; // slight phase lag down the rope's length
 const FORK_CLAMP = 26; // px above the fork that re-seat on the route
 /** How far past the canvas edge a rope keeps drawing, so it enters from off. */
 const SWAY_MARGIN = 120;
+/**
+ * px of a branch's arc, from its fork or merge point, that rides the wave.
+ *
+ * It lives up here with the other tables because `waveWeightAt` is a worklet
+ * that closes over it. The Reanimated plugin builds a worklet's closure where
+ * the function is DEFINED, not where it is called, so a worklet declared
+ * above its own constants captures them in the temporal dead zone and the
+ * whole bundle dies on load with "Cannot access 'T' before initialization" —
+ * a blank page, nowhere near the line that caused it.
+ */
+const WAVE_BLEND = 46;
 
 export type StrokeMode = "slither" | "sway";
 
@@ -98,6 +109,43 @@ export function swayOffsetAt(
  * the formula rather than published out of the rope — which keeps the rope's
  * live rotation out of his column (see `ringX` vs `RingG`).
  */
+/**
+ * The travelling slither, at arc distance `s` along a line of length `total`.
+ *
+ * The horizontal themes' equivalent of `swayOffsetAt`, and exported for the
+ * same reason: the canvas renderer has to reproduce it exactly. Sharing the
+ * formula but not its arguments is how the summit's canvas rope ended up
+ * swaying 23px away from the climber holding it — so there is one function
+ * and both renderers call it.
+ */
+export function slitherOffsetAt(
+  s: number,
+  total: number,
+  level: number,
+  t: number,
+): number {
+  "worklet";
+  const taper = Math.min(1, s / TAPER, (total - s) / TAPER);
+  if (taper <= 0) return 0;
+  const amp = lerpTable(AMP, level);
+  const k = (2 * Math.PI) / lerpTable(LAMBDA, level);
+  const omega = 2 * Math.PI * lerpTable(SPEED, level);
+  return amp * taper * Math.sin(k * s - omega * t);
+}
+
+/** How far a point rides the main line's calm wave: 1 at an attached end. */
+export function waveWeightAt(
+  s: number,
+  total: number,
+  attachStart: boolean,
+  attachEnd: boolean,
+): number {
+  "worklet";
+  const wS = attachStart ? Math.max(0, 1 - s / WAVE_BLEND) : 0;
+  const wE = attachEnd ? Math.max(0, 1 - (total - s) / WAVE_BLEND) : 0;
+  return Math.max(wS, wE);
+}
+
 export type SwayRide = {
   clock: SharedValue<number>;
   /** The mountain's travel: screen y − this = the rope's rest frame. */
@@ -368,9 +416,6 @@ export function useBranchStrokes(opts: {
       }
       return out;
     }
-    const amp = trembling ? lerpTable(AMP, level) : 0;
-    const k = (2 * Math.PI) / lerpTable(LAMBDA, level);
-    const omega = 2 * Math.PI * lerpTable(SPEED, level);
     if (!trembling && waveOn && rideSplit) {
       // Fast path: bend only the attached ends around the frozen middle.
       let out = "";
@@ -392,14 +437,11 @@ export function useBranchStrokes(opts: {
     let out = "";
     for (let i = 0; i < pts.length; i++) {
       const p = pts[i];
-      const taper = Math.min(1, p.s / TAPER, (total - p.s) / TAPER);
-      const off = amp * taper * Math.sin(k * p.s - omega * t);
+      const off = trembling ? slitherOffsetAt(p.s, total, level, t) : 0;
       let x = p.x + p.nx * off;
       let y = p.y + p.ny * off;
       if (waveOn) {
-        const wS = attachStart ? Math.max(0, 1 - p.s / WAVE_BLEND) : 0;
-        const wE = attachEnd ? Math.max(0, 1 - (total - p.s) / WAVE_BLEND) : 0;
-        const w = Math.max(wS, wE);
+        const w = waveWeightAt(p.s, total, attachStart, attachEnd);
         if (w > 0) {
           y -= w * calmWaveOffset(p.x, waveT, ampP, freqP, waveNowX, wavePeriodMs);
         }
@@ -482,8 +524,6 @@ const CALM_LAMBDA_SOFT = 220; // px per cycle at the first answer of the day
 const CALM_LAMBDA = 170; // px per cycle once everything is answered — the calm frequency
 const CALM_TAPER = 48; // px of fade at each end
 const MAIN_STROKE = 3.25; // the line's resting width; it gains up to +1px with progress
-/** px of a branch's arc, from its fork or merge point, that rides the wave. */
-const WAVE_BLEND = 46;
 
 /**
  * The main line's wave as a function — one formula shared by the line

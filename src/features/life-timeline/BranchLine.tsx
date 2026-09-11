@@ -605,7 +605,7 @@ export const BranchLine = memo(function BranchLine({
 
       {/* subtle directional movement toward the present (the rope's twist
           ridges replace it on the summit) */}
-      {!vertical && !born && g.style.animated && (
+      {!vertical && !born && !strokesOff && g.style.animated && (
         <G
           stroke={color}
           strokeWidth={Math.max(1.5, g.thickness - 1)}

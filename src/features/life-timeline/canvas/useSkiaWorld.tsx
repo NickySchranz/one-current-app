@@ -1,7 +1,9 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { Platform } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
+import type { WaveHandles } from "../useSquiggle";
 import type { RopeSpec } from "./rope-spec";
+import type { LineSpec } from "./line-spec";
 
 export type SummitRopesProps = {
   ropes: RopeSpec[];
@@ -9,6 +11,20 @@ export type SummitRopesProps = {
   rot: SharedValue<number> | null;
   pan: SharedValue<number> | null;
   clock: SharedValue<number>;
+  width: number;
+  height: number;
+  reducedMotion: boolean;
+};
+
+export type BranchLinesProps = {
+  lines: LineSpec[];
+  clock: SharedValue<number>;
+  wave: WaveHandles | null;
+  waveNowX: number;
+  wavePeriodMs: number;
+  scrollY: SharedValue<number> | null;
+  dimExcept: string | null;
+  keepId: string | null;
   width: number;
   height: number;
   reducedMotion: boolean;
@@ -34,8 +50,11 @@ export type SummitRopesProps = {
  * means the opening screen never waits on a WebAssembly download — the map
  * is the first route.
  */
-export function useSummitRopesCanvas(enabled: boolean): ComponentType<SummitRopesProps> | null {
-  const [comp, setComp] = useState<ComponentType<SummitRopesProps> | null>(null);
+function useSkiaComponent<P>(
+  enabled: boolean,
+  load: () => Promise<ComponentType<P>>,
+): ComponentType<P> | null {
+  const [comp, setComp] = useState<ComponentType<P> | null>(null);
 
   useEffect(() => {
     if (!enabled || comp) return;
@@ -46,18 +65,37 @@ export function useSummitRopesCanvas(enabled: boolean): ComponentType<SummitRope
           const { LoadSkiaWeb } = await import("@shopify/react-native-skia/lib/module/web");
           await LoadSkiaWeb();
         }
-        const mod = await import("./SummitRopesCanvas");
-        if (live) setComp(() => mod.SummitRopesCanvas as ComponentType<SummitRopesProps>);
+        const next = await load();
+        if (live) setComp(() => next);
       } catch {
         // No CanvasKit — an old browser, a blocked fetch, a missing wasm on
-        // the host. The SVG ropes are still there and still correct; the app
-        // is simply not faster. Never a blank map.
+        // the host. The SVG strokes are still there and still correct; the
+        // app is simply not faster. Never a blank map.
       }
     })();
     return () => {
       live = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `load` is a fresh closure every render by design
   }, [enabled, comp]);
 
   return enabled ? comp : null;
+}
+
+export function useSummitRopesCanvas(enabled: boolean): ComponentType<SummitRopesProps> | null {
+  return useSkiaComponent<SummitRopesProps>(
+    enabled,
+    async () =>
+      (await import("./SummitRopesCanvas"))
+        .SummitRopesCanvas as ComponentType<SummitRopesProps>,
+  );
+}
+
+export function useBranchLinesCanvas(enabled: boolean): ComponentType<BranchLinesProps> | null {
+  return useSkiaComponent<BranchLinesProps>(
+    enabled,
+    async () =>
+      (await import("./BranchLinesCanvas"))
+        .BranchLinesCanvas as ComponentType<BranchLinesProps>,
+  );
 }

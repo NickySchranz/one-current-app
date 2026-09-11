@@ -32,9 +32,10 @@ import { useLayoutStore } from "@/stores/layout-store";
 import { measureNode } from "@/ui/measure";
 import { setWalkthroughPoint, useWalkthroughTarget } from "@/features/tutorial/targets";
 import { countGeometryBuild, countRender, setRenderer } from "@/dev/perf-counters";
-import { SKIA_ROPES } from "@/config/flags";
+import { SKIA_LINES, SKIA_ROPES } from "@/config/flags";
 import { toRopeSpec, type RopeSpec } from "./canvas/rope-spec";
-import { useSummitRopesCanvas } from "./canvas/useSkiaWorld";
+import { toLineSpec, type LineSpec } from "./canvas/line-spec";
+import { useBranchLinesCanvas, useSummitRopesCanvas } from "./canvas/useSkiaWorld";
 import { buildTimelineLayout } from "@/visualization/main-line/layout";
 import { buildSummitLayout, dateToScreenY, daySeedOrder, ringOffset, SUMMIT_RAIL_W, type SummitLayout } from "@/visualization/vertical/transpose";
 import { themeOrientation } from "@/visualization/theme";
@@ -632,6 +633,8 @@ export function LifeTimeline() {
   const stageRef = useRef<View>(null);
   const scrollRef = useRef<ScrollView>(null);
   const scrollYRef = useRef(0);
+  /** The same scroll, for the line canvas, which is pinned and carries it. */
+  const mapScrollY = useSharedValue(0);
   /** Summit scrolls sideways: the lane columns overflow the stage width. */
   const scrollXRef = useRef(0);
   const [scrollH, setScrollH] = useState(0);
@@ -2169,9 +2172,10 @@ export function LifeTimeline() {
    */
   const wantsSkiaRopes = SKIA_ROPES && vertical;
   const SummitRopes = useSummitRopesCanvas(wantsSkiaRopes);
+  const BranchLines = useBranchLinesCanvas(SKIA_LINES && !vertical);
   useEffect(() => {
-    setRenderer(SummitRopes ? "skia" : "svg");
-  }, [SummitRopes]);
+    setRenderer(SummitRopes || BranchLines ? "skia" : "svg");
+  }, [SummitRopes, BranchLines]);
   const ropeSpecs = useMemo<RopeSpec[]>(() => {
     if (!SummitRopes) return [];
     const now_ = new Date(nowTick);
@@ -2195,6 +2199,80 @@ export function LifeTimeline() {
       });
     // nowTick only to date the loudness; it steps every half minute, not per frame.
   }, [SummitRopes, layout.geometries, byId, theme, nowTick, reducedMotion]);
+
+  /**
+   * The same, for the horizontal maps' thread lines.
+   *
+   * Sampling the geometry is the expensive half, and it depends only on the
+   * path string — so it happens here, once per layout, instead of thirty
+   * times a second inside the renderer. A line that neither slithers nor
+   * rides the main wave is not sampled at all: it never changes shape.
+   */
+  const lineSpecs = useMemo<LineSpec[]>(() => {
+    if (!BranchLines) return [];
+    const now_ = new Date(nowTick);
+    const out: LineSpec[] = [];
+    for (const g of layout.geometries) {
+      const b = byId.get(g.branchId);
+      if (!b) continue;
+      const level = Math.max(1, Math.min(5, g.loudness));
+      const highlighted = g.branchId === focusedBranchId || g.branchId === armedBranchId;
+      const dimmed = !!focusedBranchId && g.branchId !== focusedBranchId;
+      const emphasized =
+        !restingToday(b, now_) &&
+        !decidedToday(b, now_) &&
+        !dimmed &&
+        (g.style.emphasized || g.branchId === top?.id || highlighted);
+      const spec = toLineSpec(
+        g,
+        branchColor(b, theme, emphasized ? "raised" : g.style.saturation),
+        {
+          trembles: lineTrembles({
+            branch: b,
+            inWindow: g.inWindow,
+            level,
+            reducedMotion,
+            now: now_,
+            born: false,
+          }),
+          attachStart: g.forkVisible,
+          attachEnd: g.endsOnMain,
+          flows: g.inWindow && g.style.animated,
+          flowMs: emphasized ? 1400 : tk.flowDuration,
+          flowDash: tk.flowDash,
+          haloed: highlighted,
+          emphasized: highlighted,
+        },
+      );
+      if (spec) out.push(spec);
+    }
+    return out;
+  }, [
+    BranchLines,
+    layout.geometries,
+    byId,
+    theme,
+    tk,
+    nowTick,
+    reducedMotion,
+    focusedBranchId,
+    armedBranchId,
+    top?.id,
+  ]);
+
+  /**
+   * While Pip holds one thread the rest stand back — the same rule the SVG
+   * group applies per line, hoisted to one value the canvas can take as a
+   * prop. It must not live in `lineSpecs`: that carries sampled geometry,
+   * and Pip moves far too often to re-sample the map for it.
+   */
+  const canvasDimExcept =
+    showMascot &&
+    mascot.visible &&
+    mascot.pos.x > -900 &&
+    operation.kind !== "viewing-integrated"
+      ? (mascot.pendingBranchId ?? mascot.inspectedBranchId)
+      : null;
 
   const nameRows = useMemo(() => {
     const out = new Map<string, { row: number; maxW: number }>();
@@ -2570,6 +2648,41 @@ export function LifeTimeline() {
           </View>
         )}
 
+        {/* Every thread line, on one Skia canvas.
+            
+            It is pinned to the STAGE and carries the scroll itself, rather
+            than living inside the scrolling content. A canvas the size of the
+            content is a canvas the size of the content to repaint: at
+            forty-four threads that is some three million pixels a frame, and
+            it took the map from 60fps to four — script cost collapsed and the
+            rasteriser drowned. One viewport's worth, translated, draws the
+            same picture for a third of the fill.
+
+            It sits UNDER the SVG on purpose: the moments, the fork and end
+            dots and the labels sit ON the line and have to stay in front of
+            it. The gridlines now cross over a line rather than under it,
+            which is the one visible difference and a faint one. */}
+        {BranchLines && size.width > 0 && (
+          <View
+            pointerEvents="none"
+            style={{ position: "absolute", left: 0, top: 0, zIndex: 0 }}
+          >
+            <BranchLines
+              lines={lineSpecs}
+              clock={worldClock}
+              wave={calmCurrent.wave}
+              waveNowX={layout.nowX}
+              wavePeriodMs={wavePeriodMs}
+              scrollY={mapScrollY}
+              dimExcept={canvasDimExcept}
+              keepId={focusedBranchId ?? armedBranchId}
+              width={size.width}
+              height={size.height}
+              reducedMotion={reducedMotion}
+            />
+          </View>
+        )}
+
         {/* the theme's ambient weather, behind the transparent canvas: it
             warms, brightens and settles as the day gathers itself */}
         <View
@@ -2611,6 +2724,9 @@ export function LifeTimeline() {
           style={{
             flex: 1,
             minHeight: 0,
+            // Above the pinned line canvas, which is the layer the SVG's dots
+            // and labels have to cover.
+            zIndex: 1,
             // the summit's first paint waits for the stage measurement (see
             // `measured`) — otherwise the mountain settles into place in view
             opacity: vertical && !measured ? 0 : 1,
@@ -2625,6 +2741,7 @@ export function LifeTimeline() {
           }}
           onScroll={(e) => {
             scrollYRef.current = e.nativeEvent.contentOffset.y;
+            mapScrollY.value = e.nativeEvent.contentOffset.y;
             scrollXRef.current = e.nativeEvent.contentOffset.x;
             const b = Math.round(e.nativeEvent.contentOffset.y / BAND_PX);
             setScrollBand((prev) => (prev === b ? prev : b));
@@ -3011,6 +3128,9 @@ export function LifeTimeline() {
                     ? 0.38
                     : 1;
                 const mascotHighlight = mascotActive && branch.id === mascot.pendingBranchId;
+                const isBorn =
+                  !reducedMotion &&
+                  (born?.branchId === branch.id || integrated?.branchId === branch.id);
                 return (
                   <RingG
                     key={g.branchId}
@@ -3060,7 +3180,12 @@ export function LifeTimeline() {
                     }
                     timeLen={sm?.rockLen ?? 0}
                     viewportH={size.height}
-                    strokesOff={!!SummitRopes}
+                    // The canvas draws the stroke layers; the SVG keeps the
+                    // hit path, the dots, the moments and the label. A line
+                    // drawing ITSELF IN stays on the SVG for the 1.1s it
+                    // takes — the draw-in is a dash sweep on the stroke, and
+                    // there is at most one of them at a time.
+                    strokesOff={vertical ? !!SummitRopes : !!BranchLines && !isBorn}
                     wave={vertical ? null : calmCurrent.wave}
                     // No wave on the summit: the route is straight and still,
                     // so the dots that sit on it must be too (they compute
@@ -3080,10 +3205,7 @@ export function LifeTimeline() {
                     highlighted={isUserFocused || mascotHighlight}
                     dimmed={!!focusedBranchId && branch.id !== focusedBranchId}
                     // Draws itself in: newly created, or just folded home.
-                    born={
-                      !reducedMotion &&
-                      (born?.branchId === branch.id || integrated?.branchId === branch.id)
-                    }
+                    born={isBorn}
                     reducedMotion={reducedMotion}
                     onSelect={selectBranch}
                     onSelectMoment={selectBranchMoment}
