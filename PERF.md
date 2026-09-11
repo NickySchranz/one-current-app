@@ -172,6 +172,43 @@ The checks can see the canvas because each rope publishes the function it
 draws with (`window.__ocRopes`, testing builds only), reporting the frame that
 was actually drawn. Scraping a path string would simply have stopped working.
 
+## The same canvas on the horizontal maps — and why it is off
+
+`EXPO_PUBLIC_SKIA_LINES=1` against the default, same commit, same 44-thread
+riverbed:
+
+| phase | script | style recalc | SVG nodes | p50 | p95 | dropped |
+|---|---|---|---|---|---|---|
+| idle, SVG | 22.8% | 159 ms | 1021 | 16.7 ms | 16.8 ms | 0 |
+| idle, Skia | **18.3%** | **64 ms** | 924 | 16.7 ms | 16.8 ms | 3 |
+| drag, SVG | 65.7% | 199 ms | 1004 | 33.3 ms | **50 ms** | **135** |
+| drag, Skia | **62.0%** | **113 ms** | 903 | 33.3 ms | 67 ms | 170 |
+
+Close to a wash: it trades script for fill. A dozen full-width wavy lines are
+a great deal more stroke area than a handful of short ropes, and this box
+rasterises in software. **The default follows the measurement that exists**,
+not the one that probably applies on a phone — the code is there, behind
+`EXPO_PUBLIC_SKIA_LINES`, for whoever can run it on a GPU.
+
+Four things found while building it, which hold regardless of the flag:
+
+- **A worklet declared above its own constants captures them in the temporal
+  dead zone.** The Reanimated plugin builds a worklet's closure where the
+  function is *defined*, not where it is called. `waveWeightAt` sitting above
+  `WAVE_BLEND` killed the whole bundle on load with "Cannot access 'T' before
+  initialization" — a blank page, nowhere near the cause.
+- **`DashPathEffect` over a long polyline is ruinous.** A one-pixel dot every
+  twelve, over a couple of hundred segments, re-measured and re-split on every
+  draw. Ablating that one layer took idle from **116 ms a frame to 16.7 ms**
+  with nothing else changed. The dashes are emitted as dashes now, with butt
+  caps, which halved the drag's p95 again.
+- **A canvas the size of the scrolling content is repainted at the size of the
+  content** — three million pixels a frame, and the map ran at 4 fps. It is one
+  viewport now, pinned, with the scroll as its camera.
+- **A change guard is only as good as its coarsest input.** The main wave's
+  strength is a live spring; an unrounded copy of it in the guard meant the
+  guard never held.
+
 ## Limitations of everything above
 
 - Chromium on Linux, **software rasterisation, no GPU**. Useful for ranking
