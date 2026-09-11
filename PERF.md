@@ -136,6 +136,42 @@ calling `reset()` took Skia from 49.1% script to 2.6% at the same scene.
 Phase 20 of the brief warns about exactly this. Had the result been reported
 without checking it, the conclusion would have been backwards.
 
+## The canvas in the real app — same code, Skia off vs on
+
+`EXPO_PUBLIC_SKIA=0` against the default, both from the same commit, same
+44-thread summit, same machine:
+
+| phase | script | style recalc | layout | SVG nodes | p50 frame |
+|---|---|---|---|---|---|
+| idle, SVG | 15.8% | 129 ms | 94 ms | 1198 | 16.7 ms (60fps) |
+| idle, Skia | **9.2%** | **55 ms** | 67 ms | **1029** | 16.7 ms (60fps) |
+| drag, SVG | 75.0% | 271 ms | 166 ms | 1214 | 33.3 ms (30fps) |
+| drag, Skia | **70.4%** | **166 ms** | 128 ms | 1044 | 33.3 ms (30fps) |
+
+Idle is close to half the script cost and under half the style recalculation.
+The drag is barely moved, and that is the honest reading: the canvas removes
+what the ropes cost to *draw*, and the drag is not spending its time drawing.
+It is spending it in React, rebuilding the layout nine times a second and
+reconciling forty-four threads across a thousand SVG nodes that are still
+there — labels, moments, hit areas, the rock. Until the pan stops committing a
+window per frame, a faster renderer cannot show up on that row.
+
+Two findings from getting the canvas to parity, both of which a screenshot
+would have hidden:
+
+- **CanvasKit cannot read `hsl()`.** Its colour parser takes hex, `rgb()` and
+  the named colours; `branchColor` speaks `hsl(h s% l%)`. An unparseable
+  string does not throw — it comes back as opaque black. Every rope drew as a
+  heavy black cord and looked twice its weight.
+- **Sharing the sway formula is not the same as sharing its arguments.** The
+  canvas rope agreed with `swayOffsetAt` and disagreed about the phase seed,
+  the loudness and whether a hanging rope rides the mountain. The climber
+  ended up 23px off the rope he was holding; he is now within 1px.
+
+The checks can see the canvas because each rope publishes the function it
+draws with (`window.__ocRopes`, testing builds only), reporting the frame that
+was actually drawn. Scraping a path string would simply have stopped working.
+
 ## Limitations of everything above
 
 - Chromium on Linux, **software rasterisation, no GPU**. Useful for ranking
