@@ -55,9 +55,32 @@ function useSkiaComponent<P>(
   load: () => Promise<ComponentType<P>>,
 ): ComponentType<P> | null {
   const [comp, setComp] = useState<ComponentType<P> | null>(null);
+  /** Once the GPU has dropped us, do not keep climbing back onto it. */
+  const [lost, setLost] = useState(false);
+
+  /**
+   * A canvas whose WebGL context has gone draws NOTHING, and on the summit
+   * that is every rope — the worst failure available here, and one mobile
+   * Safari hands out freely when memory is tight or the tab comes back from
+   * the background. The SVG ropes are still in the tree, one prop away, so
+   * the answer is to stop being a canvas: dropping the component re-arms
+   * `strokesOff={false}` and the map draws itself the old way.
+   */
+  useEffect(() => {
+    if (!comp || Platform.OS !== "web" || typeof document === "undefined") return;
+    const canvas = document.querySelector("canvas");
+    if (!canvas) return;
+    const onLost = (e: Event) => {
+      e.preventDefault();
+      setLost(true);
+      setComp(null);
+    };
+    canvas.addEventListener("webglcontextlost", onLost);
+    return () => canvas.removeEventListener("webglcontextlost", onLost);
+  }, [comp]);
 
   useEffect(() => {
-    if (!enabled || comp) return;
+    if (!enabled || comp || lost) return;
     let live = true;
     void (async () => {
       try {
@@ -77,7 +100,7 @@ function useSkiaComponent<P>(
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `load` is a fresh closure every render by design
-  }, [enabled, comp]);
+  }, [enabled, comp, lost]);
 
   return enabled ? comp : null;
 }

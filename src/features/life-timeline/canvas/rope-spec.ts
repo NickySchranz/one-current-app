@@ -80,6 +80,19 @@ export function cssToHex(colour: string): string {
  * else — 23px adrift at the widest. The sway formula agreeing is not enough;
  * its arguments have to agree too.
  */
+/**
+ * A tenth of a pixel, which is finer than the canvas can draw and coarser
+ * than the noise.
+ *
+ * The geometry is built out of `Date.parse` arithmetic, so a coordinate that
+ * has not moved comes back a hundredth of a pixel from where it was. Compared
+ * exactly, that makes every rope look changed on every build — and since the
+ * draw worklet closes over its spec, "changed" means rebuilding forty-four
+ * worklets to draw exactly what was already on screen. Measured: it took the
+ * summit's drag from a 50ms p95 to 133ms with stalls past 200ms.
+ */
+const q = (n: number) => Math.round(n * 10) / 10;
+
 export function toRopeSpec(
   g: BranchGeometry & { angle?: number; radius?: number; coiled?: boolean },
   branch: PsychologicalBranch | undefined,
@@ -91,11 +104,11 @@ export function toRopeSpec(
   const level = Math.max(1, Math.min(5, g.loudness));
   return {
     id: g.branchId,
-    ax: g.forkX,
+    ax: q(g.forkX),
     angle: g.angle ?? 0,
-    radius: g.radius ?? 0,
-    bottom: g.forkY,
-    top: g.endY,
+    radius: q(g.radius ?? 0),
+    bottom: q(g.forkY),
+    top: q(g.endY),
     level,
     phase: phaseFromId(g.branchId),
     trembles:
@@ -103,7 +116,7 @@ export function toRopeSpec(
       lineTrembles({ branch, inWindow: g.inWindow, level, reducedMotion, now, born: false }),
     rides: g.reachesNow,
     colour: cssToHex(colour),
-    opacity,
-    thickness: g.thickness,
+    opacity: q(opacity),
+    thickness: q(g.thickness),
   };
 }

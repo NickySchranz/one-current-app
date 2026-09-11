@@ -68,6 +68,10 @@ const STEP = 6;
  */
 const LANE_SLACK = 90;
 
+/** See the note beside `q` in rope-spec.ts: fine enough to draw, coarse
+ *  enough to see through the float noise the date arithmetic leaves. */
+const q = (n: number) => Math.round(n * 10) / 10;
+
 export function toLineSpec(
   g: BranchGeometry,
   colour: string,
@@ -104,9 +108,9 @@ export function toLineSpec(
     d: g.path,
     pts,
     count: sampled.length,
-    total: sampled.length > 0 ? sampled[sampled.length - 1].s : 0,
-    minY: g.laneY - LANE_SLACK,
-    maxY: g.laneY + LANE_SLACK,
+    total: q(sampled.length > 0 ? sampled[sampled.length - 1].s : 0),
+    minY: q(g.laneY - LANE_SLACK),
+    maxY: q(g.laneY + LANE_SLACK),
     level: Math.max(1, Math.min(5, g.loudness)),
     trembles: opts.trembles,
     attachStart: opts.attachStart,
@@ -115,10 +119,10 @@ export function toLineSpec(
     flowMs: opts.flowMs,
     flowDash: opts.flowDash,
     colour: cssToHex(colour),
-    opacity: g.style.opacity,
+    opacity: q(g.style.opacity),
     // The same widths BranchLine paints: a focused or highlighted line gains
     // a little, and the flow dashes run a pixel thinner than the core.
-    width: g.thickness + (opts.emphasized ? 1.25 : 0),
+    width: q(g.thickness + (opts.emphasized ? 1.25 : 0)),
     haloed: opts.haloed,
   };
 }

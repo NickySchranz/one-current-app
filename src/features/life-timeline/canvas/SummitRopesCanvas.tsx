@@ -179,7 +179,15 @@ function Rope({
       path.cubicTo(x1 + (x2 - x0) / 6, y1 + dy / 3, x2 - (x3 - x1) / 6, y2 - dy / 3, x2, y2);
     }
     return path;
-  }, [tick, rot, pan, climb, path, still, lastT, lastTurn, lastShift]);
+    // `spec` belongs in here.
+    //
+    // A derived value's worklet closes over what its dependency array names,
+    // and this body reads a couple of dozen fields off the spec. Leaving it
+    // out meant a rope answered today — which changes whether it rides the
+    // mountain, and both its ends — kept being DRAWN from the spec it was
+    // first given, until something unrelated happened to rebuild the worklet
+    // and it snapped into place. That is the flicker.
+  }, [spec, tick, rot, pan, climb, path, still, lastT, lastTurn, lastShift]);
 
   useRopeProbe(spec, lastT, lastTurn, lastShift);
 
@@ -189,7 +197,7 @@ function Rope({
     const facing = Math.cos(spec.angle + turn);
     const seen = facing <= -0.12 ? 0 : Math.min(1, (facing + 0.12) / 0.45);
     return spec.opacity * seen;
-  }, [rot]);
+  }, [spec, rot]);
 
   // One geometry, three paints — the underlay, the core and the highlight
   // were three SVG nodes each carrying their own copy of the same string.

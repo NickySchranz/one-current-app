@@ -219,7 +219,10 @@ function Line({
       else path.lineTo(x, y);
     }
     return path;
-  }, [tick, wave, scrollY, path, still, slithers, rides, height, xy, lastT, lastWave]);
+    // `spec` belongs in here — see the note in SummitRopesCanvas: the worklet
+    // closes over what this array names, and this body reads the spec's
+    // geometry, level and lane throughout.
+  }, [spec, tick, wave, scrollY, path, still, slithers, rides, height, xy, lastT, lastWave]);
 
   useLineProbe(spec, drawn);
 
