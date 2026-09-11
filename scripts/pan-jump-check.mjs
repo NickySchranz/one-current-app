@@ -18,18 +18,25 @@
 import { serveDist, launchBrowser } from "./promo-lib.mjs";
 const server = await serveDist(new URL("../dist", import.meta.url).pathname, 4392, "");
 const browser = await launchBrowser();
-const ctx = await browser.newContext({ viewport: { width: 1200, height: 900 } });
-await ctx.addInitScript(() => {
-  localStorage.setItem("one-current-auth", JSON.stringify({ email: "p@onecurrentapp.com" }));
-  localStorage.setItem("one-current-tutorial-v1", "done");
-  localStorage.setItem("one-current-pro", "1");
-  localStorage.setItem("one-current-theme", "summit");
-});
-const page = await ctx.newPage();
-page.on("pageerror", (e) => console.log("PAGEERROR:", e.message.split("\n")[0]));
-await page.goto("http://localhost:4392/", { waitUntil: "networkidle" });
-await page.waitForTimeout(2600);
+let failed = false;
+const check = (ok, msg) => { console.log(`${ok ? "ok  " : "FAIL"}  ${msg}`); if (!ok) failed = true; };
 
+async function openMap(theme) {
+  const ctx = await browser.newContext({ viewport: { width: 1200, height: 900 } });
+  await ctx.addInitScript((t) => {
+    localStorage.setItem("one-current-auth", JSON.stringify({ email: "p@onecurrentapp.com" }));
+    localStorage.setItem("one-current-tutorial-v1", "done");
+    localStorage.setItem("one-current-pro", "1");
+    localStorage.setItem("one-current-theme", t);
+  }, theme);
+  const p = await ctx.newPage();
+  p.on("pageerror", (e) => console.log("PAGEERROR:", e.message.split("\n")[0]));
+  await p.goto("http://localhost:4392/", { waitUntil: "networkidle" });
+  await p.waitForTimeout(2600);
+  return p;
+}
+
+const page = await openMap("summit");
 // Watch the date rail's own text nodes: they are the time frame made visible.
 await page.evaluate(() => {
   window.__ys = [];
@@ -72,11 +79,64 @@ for (let i = 1; i < moving.length; i++) {
   biggest = Math.max(biggest, Math.abs(d));
 }
 const travel = moving[0] - moving[moving.length - 1];
-let failed = false;
-const check = (ok, msg) => { console.log(`${ok ? "ok  " : "FAIL"}  ${msg}`); if (!ok) failed = true; };
-check(travel > 300, `the drag really pans the time frame (${travel.toFixed(0)}px over ${moving.length} frames)`);
-check(back === 0, `no frame goes backwards at a rebase (${back}, worst ${worst.toFixed(1)}px)`);
-check(biggest <= 12, `and none of them steps further than the finger did (${biggest.toFixed(1)}px)`);
+check(travel > 300, `summit: the drag really pans the time frame (${travel.toFixed(0)}px over ${moving.length} frames)`);
+check(back === 0, `summit: no frame goes backwards at a rebase (${back}, worst ${worst.toFixed(1)}px)`);
+check(biggest <= 12, `summit: and none steps further than the finger did (${biggest.toFixed(1)}px)`);
+await page.close();
+
+/* The horizontal maps do the same thing sideways, and with more riding on it:
+   there the WHOLE world is drawn through one transform over a gutter of
+   overscanned geometry, so a rebase that lands a frame late would slide every
+   thread on the map, not a few gridlines. The date strip along the bottom is
+   the time frame made visible, so follow one of its labels. */
+{
+  const p = await openMap("riverbed");
+  await p.evaluate(() => {
+    window.__xs = [];
+    const tick = () => {
+      const row = {};
+      for (const el of document.querySelectorAll("div")) {
+        if (el.children.length === 0 && /^\d+ \w|^Today$/.test(el.textContent ?? "")) {
+          row[el.textContent] = Math.round(el.getBoundingClientRect().left * 10) / 10;
+        }
+      }
+      window.__xs.push(row);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  // Rightwards, into the PAST: that direction is unbounded, so the trace is
+  // about the rebase and not about meeting the end of time.
+  await p.mouse.move(300, 450);
+  await p.mouse.down();
+  for (let i = 1; i <= 120; i++) {
+    await p.mouse.move(300 + i * 4, 450);
+    await p.waitForTimeout(8);
+  }
+  await p.mouse.up();
+  await p.waitForTimeout(600);
+  const rows = await p.evaluate(() => window.__xs);
+  const labels = Object.keys(rows[0] ?? {}).filter((k) => rows.every((r) => r[k] !== undefined));
+  if (labels.length === 0) {
+    check(false, "riverbed: no date label survived the whole drag");
+  } else {
+    const label = labels[Math.floor(labels.length / 2)];
+    const xs = rows.map((r) => r[label]);
+    const mov = xs.slice(xs.findIndex((v, i) => i > 0 && v !== xs[i - 1]));
+    let hback = 0, hworst = 0, hbig = 0;
+    for (let i = 1; i < mov.length; i++) {
+      const d = mov[i] - mov[i - 1];
+      if (d < -0.6) { hback++; hworst = Math.max(hworst, -d); console.log(`   jump at frame ${i}/${mov.length} (${d.toFixed(1)}px)`); }
+      hbig = Math.max(hbig, Math.abs(d));
+    }
+    const htravel = mov[mov.length - 1] - mov[0];
+    check(htravel > 300, `riverbed: the drag really pans the time frame (${htravel.toFixed(0)}px, following ${JSON.stringify(label)})`);
+    check(hback === 0, `riverbed: no frame goes backwards at a rebase (${hback}, worst ${hworst.toFixed(1)}px)`);
+    check(hbig <= 12, `riverbed: and none steps further than the finger did (${hbig.toFixed(1)}px)`);
+  }
+  await p.close();
+}
+
 await browser.close(); server.close();
 console.log(failed ? "pan-jump-check: FAILED" : "pan-jump-check: all good");
 process.exit(failed ? 1 : 0);

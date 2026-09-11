@@ -15,6 +15,7 @@ import Animated, {
   cancelAnimation,
   runOnJS,
   useAnimatedProps,
+  useAnimatedStyle,
   useAnimatedReaction,
   useDerivedValue,
   useFrameCallback,
@@ -39,7 +40,7 @@ import { useBranchLinesCanvas, useSummitRopesCanvas } from "./canvas/useSkiaWorl
 import { buildTimelineLayout } from "@/visualization/main-line/layout";
 import { buildSummitLayout, dateToScreenY, daySeedOrder, ringOffset, SUMMIT_RAIL_W, type SummitLayout } from "@/visualization/vertical/transpose";
 import { themeOrientation } from "@/visualization/theme";
-import { generateTicks, dateToX, addDays } from "@/visualization/zoom/time-scale";
+import { generateTicks, dateToX, addDays, MAX_FUTURE_FRACTION } from "@/visualization/zoom/time-scale";
 import { describeTimeline } from "@/visualization/a11y/describe";
 import { effectiveLoudness, isClosed, mostActivated } from "@/domain/branches/logic";
 import { decidedToday, energySplit, handledToday } from "@/domain/feelings/logic";
@@ -813,6 +814,37 @@ export function LifeTimeline() {
     return () => clearTimeout(t);
   }, [vertical, handledSig, reducedMotion]);
 
+  /**
+   * The horizontal maps are built WIDER than the stage, by one rebase at each
+   * edge, and drawn shifted left by that much so the stage shows the middle.
+   *
+   * This is what lets a drag be a transform. A horizontal pan is a pure
+   * translation of the world — measured: lanes, labels, `mainY`, the canvas
+   * height and `nowX` are all identical between a plain build and an
+   * overscanned one, and the only coordinates that differ are the forks
+   * `dateToX` was clamping to the left edge, which is precisely what the
+   * gutter is for. Without the gutter a transform would drag a blank strip
+   * into view; with it there is always another rebase of world waiting on
+   * both sides.
+   *
+   * The summit needs none of this: nothing on it moves with the window
+   * except the gridlines, the rail and the moment dots, and they are drawn
+   * the full height of the canvas already.
+   */
+  const overscan = vertical ? 0 : REBASE_PX;
+  const overscanRef = useRef(overscan);
+  overscanRef.current = overscan;
+  const buildWindow = useMemo(() => {
+    if (overscan === 0 || size.width <= 0 || !window_) return window_;
+    const a = Date.parse(window_.start);
+    const b = Date.parse(window_.end);
+    const perPx = (b - a) / Math.max(1, size.width);
+    return {
+      start: new Date(a - overscan * perPx).toISOString(),
+      end: new Date(b + overscan * perPx).toISOString(),
+    };
+  }, [window_, overscan, size.width]);
+
   const layout = useMemo(
     () =>
       (countGeometryBuild(),
@@ -840,9 +872,9 @@ export function LifeTimeline() {
             ledgeY: Number.MAX_SAFE_INTEGER,
           })
         : buildTimelineLayout(visible, {
-            width: size.width,
+            width: size.width + 2 * overscan,
             height: size.height,
-            window: window_,
+            window: buildWindow,
             compact,
             now,
             mainShift,
@@ -856,7 +888,7 @@ export function LifeTimeline() {
           })),
     // bottomInset is deliberately absent: neither builder reads it, so it
     // only ever invalidated the memo into producing the same geometry again.
-    [vertical, visible, size, window_, compact, now, mainShift, topInset, pinnedBranchIds, climbRanks, retiredIds],
+    [vertical, visible, size, window_, buildWindow, overscan, compact, now, mainShift, topInset, pinnedBranchIds, climbRanks, retiredIds],
   );
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -866,6 +898,15 @@ export function LifeTimeline() {
   const nowPt = sm
     ? { x: sm.routeX, y: sm.nowScreenY }
     : { x: layout.nowX, y: layout.mainY };
+  /**
+   * Now, in the STAGE's coordinates rather than the built world's.
+   *
+   * Inside the SVG everything is drawn through the camera group, so world
+   * coordinates are right there. The overlays that live in React Native views
+   * — the flying tokens, the bloom, the bonk bar — are not, and the gutter
+   * would put them one rebase to the right of the thread they belong to.
+   */
+  const screenNowX = nowPt.x - overscan;
 
   // ── The climb ──────────────────────────────────────────────────────────
   // The climber does not move. He and the Now point hold their place on
@@ -963,7 +1004,9 @@ export function LifeTimeline() {
    * more when the finger lifts.
    */
   const panSV = useSharedValue(0);
-  /** How much of `panSV` the store has already been told about. */
+  /** The same, sideways: the horizontal maps' un-committed pan, in pixels. */
+  const panXSV = useSharedValue(0);
+  /** How much of the transient the store has already been told about. */
   const panSentSV = useSharedValue(0);
   /** Has this gesture already announced itself to the JS side? */
   const panningSV = useSharedValue(false);
@@ -1224,6 +1267,19 @@ export function LifeTimeline() {
   const panRide = useAnimatedProps(
     () => ({ translateY: Math.round(panSV.value * 2) / 2 }),
     [panSV],
+  );
+  /**
+   * The horizontal world's camera: the gutter it is drawn shifted by, plus
+   * whatever the finger has moved since the last rebase.
+   */
+  const worldRide = useAnimatedProps(
+    () => ({ translateX: Math.round(panXSV.value * 2) / 2 }),
+    [panXSV],
+  );
+  /** The pinned date strip lives outside the SVG and carries it by hand. */
+  const stripRide = useAnimatedStyle(
+    () => ({ transform: [{ translateX: Math.round(panXSV.value * 2) / 2 }] }),
+    [panXSV],
   );
 
   const farProps = useAnimatedProps(
@@ -1497,6 +1553,20 @@ export function LifeTimeline() {
   verticalSV.value = vertical;
   const stageWSV = useSharedValue(1);
   stageWSV.value = Math.max(1, size.width);
+  /** The canvas's height, for the "am I over the date strip" test. */
+  const layoutHSV = useSharedValue(1);
+  layoutHSV.value = layout.height;
+  /**
+   * How much FORWARD pan is left, in pixels, before the window hits the limit
+   * on how far past today it may look.
+   *
+   * The transient has to know this itself. Letting it run past the limit and
+   * discovering at the rebase that the store refused means the world has
+   * already been drawn a whole rebase further than it can go, and putting it
+   * right is a visible snap. Clamped on the UI thread, the finger simply
+   * meets the end of time and stops.
+   */
+  const panRoomSV = useSharedValue(0);
   /** rotSV at the moment the finger went down. */
   const rotStartSV = useSharedValue(0);
   /** The silhouette bucket React has been told about, compared UI-side. */
@@ -1557,23 +1627,67 @@ export function LifeTimeline() {
    * frame. `panCommittedRef` records what has been handed over, and the
    * layout effect below takes it off once the render carrying it has landed.
    */
-  const panCommittedRef = useRef(0);
+  /**
+   * How much of the raw finger travel the window being rendered stands for.
+   *
+   * This is the whole trick, and the first two attempts at it were wrong.
+   *
+   * A rebase changes two things that must agree: the window every date is
+   * measured against, and the transform standing in for the travel not yet
+   * committed. React owns the first and Reanimated the second, and they do
+   * not land on the same frame — so reducing the transient after the commit
+   * flicked the whole map back a rebase and forward again, one frame, about
+   * one drag in five. Waiting for the right render did not fix it; the two
+   * writes are simply not simultaneous.
+   *
+   * So the transient is never reduced. It accumulates raw travel, and REACT
+   * subtracts what it has already committed — in the same render as the
+   * window, because it is derived from the window. The two can no longer
+   * disagree, because there is only one of them.
+   */
+  const panPairRef = useRef<{ w: unknown; px: number }>({ w: null, px: 0 });
+  const panPendingRef = useRef<{ w: unknown; px: number } | null>(null);
+  if (window_ !== panPairRef.current.w) {
+    panPairRef.current =
+      panPendingRef.current && panPendingRef.current.w === window_
+        ? panPendingRef.current
+        : // Somebody else moved the window — Return to Now, a zoom, a new
+          // day. Re-pair against the live travel so nothing shifts.
+          { w: window_, px: vertical ? panSV.value : panXSV.value };
+  }
+  const panCommitted = panPairRef.current.px;
+  /** What React has already accounted for, taken off in the same render. */
+  const panBase = -Math.round(panCommitted * 2) / 2;
   const rebase = useCallback((px: number) => {
     if (px === 0) return;
-    const summit = layoutRef.current as SummitLayout;
-    const timeLen = summit.timeLen ?? 1;
-    const scale = summit.panScale ?? 1;
+    const l = layoutRef.current;
     const before = useAppStore.getState().window;
-    panBy((px / Math.max(1, timeLen)) * scale);
+    if (verticalRef.current) {
+      const summit = l as SummitLayout;
+      panBy((px / Math.max(1, summit.timeLen ?? 1)) * (summit.panScale ?? 1));
+    } else {
+      // Sideways: the world follows the finger, so the WINDOW goes the other
+      // way. The overscan gutter is what makes this a transform at all.
+      //
+      // The divisor is the STAGE's width, not the built canvas's. `panBy`
+      // takes a fraction of the store's window, and the store's window is the
+      // stage — the built one is wider by the gutter at the same scale. Using
+      // the built width under-pans by exactly the gutter's share, which came
+      // out as an eighteen-pixel step sideways at every rebase.
+      panBy(-px / Math.max(1, l.metrics.width - 2 * overscanRef.current));
+    }
     const after = useAppStore.getState().window;
     if (!before || !after || after.start === before.start) {
-      // Clamped at the edge of time: the window did not move, so the
-      // transient must not keep growing or the world would slide off its own
-      // geometry with nothing behind it.
-      panSV.value = 0;
+      // The store refused. panRoomSV should have stopped the finger before
+      // this, so reaching here means the limit moved underneath the gesture;
+      // take back exactly what was offered rather than leaving the world
+      // drawn somewhere its geometry does not go.
+      if (verticalRef.current) panSV.value -= px;
+      else panXSV.value -= px;
+      panSentSV.value -= px;
       return;
     }
-    panCommittedRef.current += px;
+    panPendingRef.current = { w: after, px: panPairRef.current.px + px };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values are stable
   }, [panBy]);
 
@@ -1582,12 +1696,7 @@ export function LifeTimeline() {
    * carries them has been laid out. Before paint, so the two never disagree
    * on screen.
    */
-  useLayoutEffect(() => {
-    if (panCommittedRef.current === 0) return;
-    panSV.value -= panCommittedRef.current;
-    panSentSV.value -= panCommittedRef.current;
-    panCommittedRef.current = 0;
-  });
+
 
 
   /** A summit drag has started moving. Announced once, not per event. */
@@ -1598,7 +1707,8 @@ export function LifeTimeline() {
 
   /** Commit the remainder: the finger has lifted, or the map is going away. */
   const rebaseRest = useCallback(() => {
-    const rest = panSV.value - panSentSV.value;
+    const live = verticalRef.current ? panSV : panXSV;
+    const rest = live.value - panSentSV.value;
     if (rest !== 0) {
       panSentSV.value += rest;
       rebase(rest);
@@ -1636,7 +1746,7 @@ export function LifeTimeline() {
   const onDragEnd = useCallback(() => {
     // Whatever travel has not been handed over yet becomes a real window, so
     // the world always settles on geometry rather than on a transform.
-    if (verticalRef.current) rebaseRest();
+    rebaseRest();
     if (verticalRef.current && modeRef.current === "pan") {
       // Settle so a rope ends up facing the viewer, not half round the side —
       // and let the JS side know which ropes are in front now.
@@ -1686,7 +1796,6 @@ export function LifeTimeline() {
         "worklet";
         rotStartSV.value = rotSV.value;
         lastRotQSV.value = Math.round(rotSV.value / 0.25);
-        panSentSV.value = panSV.value;
         panningSV.value = false;
       })
       // onChange, not onUpdate: it carries the per-event delta (changeX/Y)
@@ -1717,7 +1826,10 @@ export function LifeTimeline() {
             // The same test the JS side has always made: stagePosRef is
             // never written, so the stage's left edge is the window's.
             const nearDates = e.absoluteX > stageWSV.value - SUMMIT_RAIL_W - 24;
-            panSV.value += e.changeY * (nearDates ? 4 : 1);
+            panSV.value = Math.min(
+              panRoomSV.value,
+              panSV.value + e.changeY * (nearDates ? 4 : 1),
+            );
             const over = panSV.value - panSentSV.value;
             if (over >= REBASE_PX || over <= -REBASE_PX) {
               panSentSV.value += over;
@@ -1726,11 +1838,26 @@ export function LifeTimeline() {
           }
           return;
         }
-        // Horizontal maps: time travel still has to reach the store, because
-        // there the window decides where every fork sits and the geometry
-        // really is rebuilt. It crosses as a delta and is coalesced to one
-        // commit per frame on the other side.
-        scheduleOnRN(onDragMove, e.changeX, e.changeY, e.absoluteX, e.absoluteY);
+        // Horizontal maps: the same deal, sideways. The world is built a
+        // rebase wider at each edge, so the finger moves a transform and the
+        // store hears about it once the transform has used up its gutter.
+        if (e.changeX === 0) return;
+        if (!panningSV.value) {
+          panningSV.value = true;
+          scheduleOnRN(markPanning);
+        }
+        // Dragging along the date labels scrubs faster than dragging the lanes.
+        const overDates =
+          e.absoluteY + mapScrollY.value > layoutHSV.value - 56;
+        panXSV.value = Math.max(
+          -panRoomSV.value,
+          panXSV.value + e.changeX * (overDates ? 4 : 1),
+        );
+        const overX = panXSV.value - panSentSV.value;
+        if (overX >= REBASE_PX || overX <= -REBASE_PX) {
+          panSentSV.value += overX;
+          scheduleOnRN(rebase, overX);
+        }
       })
       .onEnd(() => {
         "worklet";
@@ -1929,7 +2056,11 @@ export function LifeTimeline() {
   // the recent week with the right edge at the furthest future we extend.
   // Summit trims the DISPLAY window (Now pinned near the top), so being
   // "away" is judged against the untrimmed store window.
-  const navWindow = sm?.baseWindow ?? layout.window;
+  // The STORE's window, never the built one: the horizontal maps are built a
+  // rebase wider at each edge, so judging "have I moved away from Now" against
+  // `layout.window` compares a nine-and-a-half-day span against the eight-day
+  // resting view and puts the button up on a map that has not moved at all.
+  const navWindow = sm?.baseWindow ?? window_ ?? layout.window;
   const today = now.toISOString().slice(0, 10);
   const span = Date.parse(navWindow.end) - Date.parse(navWindow.start);
   const restingEnd = Date.parse(today) + span / 2;
@@ -1938,6 +2069,19 @@ export function LifeTimeline() {
     Math.abs(span - 8 * DAY) > 0.75 * DAY;
 
   const todayX = dateToX(today, layout.window, layout.metrics.width);
+
+  // px of forward travel still available; see panRoomSV.
+  panRoomSV.value = (() => {
+    if (!window_) return 0;
+    const wSpan = Date.parse(window_.end) - Date.parse(window_.start);
+    if (wSpan <= 0) return 0;
+    const left = Date.parse(today) + wSpan * MAX_FUTURE_FRACTION - Date.parse(window_.end);
+    if (left <= 0) return 0;
+    const frac = left / wSpan;
+    return sm
+      ? (frac * (sm.timeLen ?? 1)) / (sm.panScale ?? 1)
+      : frac * layout.metrics.width;
+  })();
 
   // Every decision gathers around the main line past Now — steps still ahead,
   // steps already done today (✓), and even "nothing can be done", which is a
@@ -2731,7 +2875,7 @@ export function LifeTimeline() {
   const svgHeight = vertical ? size.height : layout.height + Math.round(bottomInset) + 84;
   // The summit turns instead of scrolling sideways, so its canvas is exactly
   // the stage: the old `laneSpan + 84` left 84px of phantom horizontal travel.
-  const svgWidth = size.width;
+  const svgWidth = size.width + 2 * overscan;
 
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
@@ -2956,10 +3100,13 @@ export function LifeTimeline() {
                   />
                 </AnimatedOptionG>
               )}
-              {/* No camera here. On the summit the TIME frame — main line,
-                  Now, its dates, the climber — holds its place on screen; only
-                  the mountain layer below moves (climbProps). */}
-              <G>
+              {/* The horizontal world's camera. On the summit there is none:
+                  the TIME frame — main line, Now, its dates, the climber —
+                  holds its place on screen and only the mountain layer below
+                  moves (climbProps), so `overscan` is zero there and `panSV`
+                  is carried by the four things that actually move. */}
+              <G transform={`translate(${-overscan + panBase} 0)`}>
+              <AnimatedOptionG animatedProps={worldRide}>
               {/* today softly glows: where life is happening */}
               {!vertical && layout.nowX - todayX > 0 && (
                 <Rect
@@ -2976,6 +3123,7 @@ export function LifeTimeline() {
                   They ride the un-committed pan so that a drag is a transform
                   rather than a window commit and a layout rebuild. */}
               {vertical && sm && (
+                <G transform={`translate(0 ${panBase})`}>
                 <AnimatedOptionG animatedProps={panRide}>
                   {(() => {
                     const todayY = dateToScreenY(today, layout.window, sm.timeLen, sm.axisLen);
@@ -3002,6 +3150,7 @@ export function LifeTimeline() {
                     />
                   ))}
                 </AnimatedOptionG>
+                </G>
               )}
 
               {/* axis gridlines — full canvas, including the scroll headroom;
@@ -3691,6 +3840,7 @@ export function LifeTimeline() {
                     />
                   );
                 })()}
+              </AnimatedOptionG>
               </G>
             </Svg>
           </View>
@@ -3750,7 +3900,7 @@ export function LifeTimeline() {
             {!reducedMotion && (
               <CelebrationBurst
                 theme={theme}
-                nowX={nowPt.x - scrollXRef.current}
+                nowX={screenNowX - scrollXRef.current}
                 mainY={anchorRestY}
                 shimmer={tk.shimmer}
                 accent={tk.accent}
@@ -3805,7 +3955,7 @@ export function LifeTimeline() {
           >
             <CelebrationBurst
               theme={theme}
-              nowX={vertical ? nowPt.x - scrollXRef.current : nowPt.x}
+              nowX={vertical ? screenNowX - scrollXRef.current : screenNowX}
               mainY={vertical ? anchorRestY : nowPt.y}
               shimmer={tk.shimmer}
               accent={tk.accent}
@@ -3838,7 +3988,7 @@ export function LifeTimeline() {
                 x0={
                   vertical
                     ? nowPt.x - scrollXRef.current - 3
-                    : layout.nowX * (0.1 + (0.8 * i) / Math.max(1, bloom.count - 1))
+                    : screenNowX * (0.1 + (0.8 * i) / Math.max(1, bloom.count - 1))
                 }
                 y0={
                   vertical
@@ -3875,9 +4025,16 @@ export function LifeTimeline() {
             backgroundColor: alpha(tk.bg, 0.88),
           }}
         >
+          {/* The labels ride the pan; the plate they sit on does not, or the
+              strip itself would slide off the edge of the stage. */}
+          <View style={{ position: "absolute", left: panBase, right: -panBase, top: 0, bottom: 0 }}>
+          <Animated.View style={[{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0 }, stripRide]}>
           {ticks.map((tick) => {
-            const x = dateToX(tick.date, layout.window, layout.metrics.width);
-            if (x < -40 || x > size.width + 8) return null;
+            // Built-world coordinates, like everything else; the strip carries
+            // the same camera as the map so a date label never parts company
+            // with its gridline.
+            const x = dateToX(tick.date, layout.window, layout.metrics.width) - overscan;
+            if (x < -40 - overscan || x > size.width + 8 + overscan) return null;
             return (
               <T
                 key={tick.date}
@@ -3895,6 +4052,8 @@ export function LifeTimeline() {
               </T>
             );
           })}
+          </Animated.View>
+          </View>
         </View>
         )}
         {vertical && sm && (
@@ -3914,6 +4073,7 @@ export function LifeTimeline() {
               unplated — the rock is sized to clear this strip (see faceHalfFor),
               so the numbers sit against sky, not rock. */}
           <Svg width={SUMMIT_RAIL_W} height={size.height}>
+            <G transform={`translate(0 ${panBase})`}>
             <AnimatedOptionG animatedProps={panRide}>
               {ticks.map((tick) => {
                 const y = dateToScreenY(tick.date, layout.window, sm.timeLen, sm.axisLen);
@@ -3951,6 +4111,7 @@ export function LifeTimeline() {
                 );
               })}
             </AnimatedOptionG>
+            </G>
           </Svg>
         </View>
         )}
@@ -4395,7 +4556,7 @@ export function LifeTimeline() {
                     index={0}
                     x0={x0}
                     y0={y0}
-                    dx={(vertical ? nowPt.x - scrollXRef.current : layout.nowX - 24) - x0}
+                    dx={(vertical ? screenNowX - scrollXRef.current : screenNowX - 24) - x0}
                     dy={nowPt.y - g.labelY}
                   >
                     <Tag label={burn.lesson} quality />
@@ -4435,7 +4596,7 @@ export function LifeTimeline() {
                     index={i}
                     x0={x0}
                     y0={y0}
-                    dx={(vertical ? nowPt.x - scrollXRef.current : layout.nowX - 24) - x0}
+                    dx={(vertical ? screenNowX - scrollXRef.current : screenNowX - 24) - x0}
                     dy={nowPt.y - g.labelY}
                   >
                     <Tag label={t(f)} quality />

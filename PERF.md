@@ -209,6 +209,65 @@ Four things found while building it, which hold regardless of the flag:
   strength is a live spring; an unrounded copy of it in the guard meant the
   guard never held.
 
+## The pan — the row nothing else could move
+
+Both maps' drags were committing a window to the store every frame, and each
+commit rebuilt the layout and reconciled every thread. The summit turned out
+not to need the rebuild at all: build the layout at two windows half a span
+apart and every rope's anchor, free end, column, length and label is
+byte-identical. A summit pan moves four things — gridlines, date rail, today
+band, moment dots — and all four move by the same number of pixels. The
+horizontal maps are the same story with one wrinkle: there the world really
+does move, but as a **pure translation**, with lanes, labels, `mainY`, canvas
+height and `nowX` all unchanged. The only coordinates that differ are the
+forks `dateToX` was clamping at the edge — which is what the overscan gutter
+is for.
+
+So the finger moves a shared value, the world is a transform, and the store
+hears about it once every 120px of travel.
+
+| scene | measure | before | after |
+|---|---|---|---|
+| summit drag | p50 | 33.3 ms (30fps) | **16.7 ms (60fps)** |
+| | script | 70.4% | **40.5%** |
+| | commits/s | 8.6 | **2.2** |
+| riverbed drag | p50 | 33.3 ms (30fps) | **16.7 ms (60fps)** |
+| | p95 | 50.0 ms | **33.4 ms** |
+| | script | 65.7% | **43.4%** |
+| | commits/s | 11.6 | **1.8** |
+
+Riverbed's idle cost rose slightly (22.8% → 24.0%): the canvas is built a
+rebase wider at each edge, so there is more geometry that is never seen.
+
+### The flick, and why the obvious fix does not work
+
+A rebase changes two things that have to agree: the window every date is
+measured against, and the transform standing in for the travel not yet
+committed. **React owns the first and Reanimated the second, and they do not
+land on the same frame.** Reducing the transient after the commit flicked the
+whole map back a rebase and forward again — one frame, invisible to any
+screenshot, and about one drag in five. Waiting for the render that carried
+the new window did not fix it; the two writes are simply not simultaneous.
+
+The fix is to stop having two owners. The transient is never reduced: it
+accumulates raw finger travel, and **React** subtracts what it has already
+committed, derived from the window itself, so the two cannot disagree because
+there is only one of them.
+
+`scripts/pan-jump-check.mjs` is the only thing that can see this. It follows
+**one** date, frame by frame, through a 480px drag on both maps. Two things
+matter about how it does that: it must follow a single label, because after a
+rebase the set of ticks has changed and "the first one" is a different day (an
+earlier version reported 116px jumps that were not there), and it must sample
+every frame, because the failure is one frame long.
+
+Two other things it caught: `panBy` takes a fraction of the **store's** window,
+so converting pixels against the built canvas's width under-panned by exactly
+the gutter's share — an 18px step at every rebase. And the transient has to
+know how much forward travel is left before the window hits its future limit;
+discovering at the rebase that the store refused means the world has already
+been drawn somewhere it cannot go.
+
 ## Limitations of everything above
 
 - Chromium on Linux, **software rasterisation, no GPU**. Useful for ranking
