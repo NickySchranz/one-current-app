@@ -137,6 +137,14 @@ function Line({
     () => [{ translateY: scrollY ? -Math.round(scrollY.value * 2) / 2 : 0 }],
     [scrollY],
   );
+  /**
+   * The line's description, held in a shared value rather than closed over —
+   * see the note beside `specSV` in SummitRopesCanvas. Naming it in a
+   * dependency array tears down and rebuilds the mapper that feeds this
+   * worklet its clock; leaving it out draws from a spec that has moved on.
+   */
+  const specSV = useSharedValue(spec);
+  if (specSV.value !== spec) specSV.value = spec;
   const rides = !reducedMotion && !!wave && (spec.attachStart || spec.attachEnd);
   const slithers = !reducedMotion && spec.trembles;
   const still = spec.count === 0;
@@ -164,6 +172,7 @@ function Line({
   const lastWave = useSharedValue(Number.NaN);
 
   const drawn = useDerivedValue<SkPathType>(() => {
+    const spec = specSV.value;
     const shiftNow = scrollY ? -Math.round(scrollY.value * 2) / 2 : 0;
     // Off the viewport there is nothing to draw and nothing to fill. The
     // canvas is one viewport tall and the content is several, so at
@@ -222,7 +231,7 @@ function Line({
     // `spec` belongs in here — see the note in SummitRopesCanvas: the worklet
     // closes over what this array names, and this body reads the spec's
     // geometry, level and lane throughout.
-  }, [spec, tick, wave, scrollY, path, still, slithers, rides, height, xy, lastT, lastWave]);
+  }, [specSV, tick, wave, scrollY, path, still, slithers, rides, height, xy, lastT, lastWave]);
 
   useLineProbe(spec, drawn);
 

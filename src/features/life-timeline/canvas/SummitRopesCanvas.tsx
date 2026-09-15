@@ -95,10 +95,29 @@ function Rope({
   // what made the first run of the benchmark say Skia was the slower of the
   // two.
   const path = useMemo(() => Skia.Path.Make(), []);
-  const still = reducedMotion || !spec.trembles;
+  /**
+   * The rope's description, held in a shared value rather than closed over.
+   *
+   * A derived value's dependency array decides when Reanimated STOPS and
+   * RESTARTS its mapper, and the mapper is the subscription that feeds the
+   * world clock to this worklet. Naming `spec` there made every change to a
+   * rope tear down and rebuild that subscription — correct where it worked,
+   * and on iOS Safari the ropes simply stopped swaying the first time a pan
+   * rebuilt the layout and never started again. Leaving it OUT is worse
+   * still: the worklet then draws from the spec it was born with, so a rope
+   * answered today keeps hanging where it used to.
+   *
+   * A shared value is neither. The worklet reads the current spec every
+   * frame, the dependency array never changes, and nothing is ever torn
+   * down.
+   */
+  const specSV = useSharedValue(spec);
+  if (specSV.value !== spec) specSV.value = spec;
+  const stillSV = useSharedValue(reducedMotion || !spec.trembles);
+  stillSV.value = reducedMotion || !spec.trembles;
   const tick = useDerivedValue(
-    () => (still ? 0 : Math.round(clock.value * 30) / 30),
-    [clock, still],
+    () => (stillSV.value ? 0 : Math.round(clock.value * 30) / 30),
+    [clock, stillSV],
   );
 
   /**
@@ -117,6 +136,8 @@ function Rope({
   const lastShift = useSharedValue(Number.NaN);
 
   const drawn = useDerivedValue<SkPathType>(() => {
+    const spec = specSV.value;
+    const still = stillSV.value;
     const t = tick.value;
     const turn = rot ? rot.value : 0;
     // Every rope hangs on the rock and travels with it — coiled at its ledge
@@ -187,17 +208,18 @@ function Rope({
     // mountain, and both its ends — kept being DRAWN from the spec it was
     // first given, until something unrelated happened to rebuild the worklet
     // and it snapped into place. That is the flicker.
-  }, [spec, tick, rot, pan, climb, path, still, lastT, lastTurn, lastShift]);
+  }, [specSV, stillSV, tick, rot, pan, climb, path, lastT, lastTurn, lastShift]);
 
   useRopeProbe(spec, lastT, lastTurn, lastShift);
 
   // Round the back of the mountain the rope is gone, and not in the way.
   const faded = useDerivedValue(() => {
+    const s = specSV.value;
     const turn = rot ? rot.value : 0;
-    const facing = Math.cos(spec.angle + turn);
+    const facing = Math.cos(s.angle + turn);
     const seen = facing <= -0.12 ? 0 : Math.min(1, (facing + 0.12) / 0.45);
-    return spec.opacity * seen;
-  }, [spec, rot]);
+    return s.opacity * seen;
+  }, [specSV, rot]);
 
   // One geometry, three paints — the underlay, the core and the highlight
   // were three SVG nodes each carrying their own copy of the same string.

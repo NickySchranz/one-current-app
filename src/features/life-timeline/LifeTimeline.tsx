@@ -3207,7 +3207,22 @@ export function LifeTimeline() {
           // Summit: the 2D pan gesture owns both axes (a scroll-enabled
           // ScrollView steals horizontally-initiated drags before the
           // responder can claim them); programmatic scrollTo still works.
-          scrollEnabled={vertical ? false : !scrollLocked}
+          /**
+           * Never toggled by a drag.
+           *
+           * This used to follow `scrollLocked`, which a touch on any thread
+           * sets on the way down and clears on release — so an ordinary pan
+           * flipped the scroller's `overflow-y` from auto to hidden and back
+           * again, the second time at the exact moment the window commits.
+           * Chromium does not care; Safari relays the scroller out and you
+           * see a flick that lands in the right place, which is what "a
+           * little animation glitch on release" was.
+           *
+           * Nothing needs it any more: `failOffsetY` hands a vertical drag
+           * back, and `touch-action` (on the detector) says the vertical axis
+           * is the browser's. The summit still owns both axes outright.
+           */
+          scrollEnabled={!vertical}
           onLayout={(e) => {
             const h = e.nativeEvent.layout.height;
             setScrollH((prev) => (prev === h ? prev : h));
