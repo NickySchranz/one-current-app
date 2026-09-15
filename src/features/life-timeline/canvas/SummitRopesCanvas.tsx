@@ -90,11 +90,27 @@ function Rope({
   height: number;
   reducedMotion: boolean;
 }) {
-  // One path for this rope's lifetime, rewound and refilled each frame. A
-  // fresh Skia.Path.Make() per frame costs about twenty times this — it is
-  // what made the first run of the benchmark say Skia was the slower of the
-  // two.
-  const path = useMemo(() => Skia.Path.Make(), []);
+  /**
+   * TWO paths, used turn and turn about.
+   *
+   * One path, rewound and refilled, is what this used to be — and a fresh
+   * `Skia.Path.Make()` per frame costs about twenty times that, which is what
+   * made the first run of the benchmark say Skia was the slower of the two
+   * renderers (PERF.md records the near miss). So the path is still reused.
+   *
+   * But handing back the SAME object every frame tells the renderer nothing.
+   * react-native-skia only repaints when its picture is re-recorded, and it
+   * re-records when a value it is given CHANGES — by identity. With one path
+   * there is no change to see, so the ropes only ever redrew when something
+   * made React re-render the tree: turning the mountain does that, and
+   * resting does not. On a phone the ropes swayed while the mountain was
+   * being turned and stopped dead the moment it settled.
+   *
+   * Alternating between two costs nothing and says the true thing: this frame
+   * is not the last one.
+   */
+  const paths = useMemo(() => [Skia.Path.Make(), Skia.Path.Make()], []);
+  const which = useSharedValue(0);
   /**
    * The rope's description, held in a shared value rather than closed over.
    *
@@ -148,17 +164,21 @@ function Rope({
     // Round the back of the mountain nothing of this rope is drawn, so
     // nothing of it needs building either — and at rest that is half of them.
     if (Math.cos(spec.angle + turn) <= -0.12) {
-      if (!path.isEmpty()) path.reset();
+      const shown = paths[which.value];
+      if (!shown.isEmpty()) shown.reset();
       lastT.value = Number.NaN;
-      return path;
+      return shown;
     }
     if (t === lastT.value && turn === lastTurn.value && shift === lastShift.value) {
-      return path;
+      return paths[which.value];
     }
     lastT.value = t;
     lastTurn.value = turn;
     lastShift.value = shift;
     countPathBuildUI();
+    // The other buffer: a new identity for a new frame.
+    which.value = 1 - which.value;
+    const path = paths[which.value];
 
     // The rope's live column: its resting x plus how far the turn carries it.
     const dx = Math.sin(spec.angle + turn) * spec.radius - Math.sin(spec.angle) * spec.radius;
@@ -208,7 +228,7 @@ function Rope({
     // mountain, and both its ends — kept being DRAWN from the spec it was
     // first given, until something unrelated happened to rebuild the worklet
     // and it snapped into place. That is the flicker.
-  }, [specSV, stillSV, tick, rot, pan, climb, path, lastT, lastTurn, lastShift]);
+  }, [specSV, stillSV, tick, rot, pan, climb, paths, which, lastT, lastTurn, lastShift]);
 
   useRopeProbe(spec, lastT, lastTurn, lastShift);
 

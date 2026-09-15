@@ -89,12 +89,22 @@ function flank(
     // seeded by DEPTH, so the same rock keeps the same edge for ever…
     const k = Math.round(d / GRID);
     const jy = (seeded(k, salt + 1) - 0.5) * 16;
-    // …and shaped by the rock's surface at the angle now facing this edge, so
-    // turning the mountain turns its outline with it
-    const edgeAngle = rot + (side === 1 ? Math.PI / 2 : -Math.PI / 2);
+    /**
+     * …and, on the RIGHT, shaped by the rock's surface at the angle now
+     * facing that edge, so turning the mountain turns its outline with it.
+     *
+     * The right edge is the one you see, against sky, and it should roll. The
+     * left is meant to be off the screen — the rock reaches ninety pixels past
+     * it on purpose, so only one side ever shows an edge — but near the peak
+     * the rock narrows and the left edge IS in frame, and there a bulge of up
+     * to twenty-six pixels swinging with the turn reads as the whole mountain
+     * drifting sideways rather than rotating in place. So the left keeps the
+     * fixed, depth-seeded outline it has at rest.
+     */
+    const edgeAngle = rot + Math.PI / 2;
     const jx =
       (seeded(k, salt) - 0.5) * Math.min(10, hw * 0.08) +
-      surfaceBulge(edgeAngle + k * 0.21, d) * Math.min(26, hw * 0.09);
+      (side === 1 ? surfaceBulge(edgeAngle + k * 0.21, d) * Math.min(26, hw * 0.09) : 0);
     pts.push({
       x: Math.round(routeX + side * (hw + jx)),
       y: Math.round(y + jy),

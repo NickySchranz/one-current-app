@@ -974,8 +974,13 @@ const ropeXAtPip = (pg) =>
       return bestDx <= 40 ? { x: best, cx: centre } : null;
     }
     for (const el of document.querySelectorAll("path")) {
-      const stroke = el.getAttribute("stroke");
-      if (!stroke || stroke === "transparent" || stroke === "none") continue;
+      // COMPUTED, not the attribute. A rope's stroke lives on its parent <G>
+      // — presentation attributes inherit in SVG, and hanging them there is
+      // what stopped react-native-svg rewriting the whole prop set on every
+      // tick. The path itself carries only `d`, so an attribute test finds no
+      // ropes at all and every swing measurement reads -Infinity.
+      const stroke = getComputedStyle(el).stroke;
+      if (!stroke || stroke === "none" || /rgba\(0, 0, 0, 0\)|transparent/.test(stroke)) continue;
       const len = el.getTotalLength();
       if (len < 400) continue; // a rope, not a mark
       let o = 1;
@@ -1426,7 +1431,20 @@ const readBranches = (pg) =>
           const r = g.getBoundingClientRect();
           return ledges.some((x) => Math.abs(x - (r.left + r.width / 2)) < 40);
         }));
-    check(onColumn, `and he climbs it from the rope's own column (him ${pip11?.x})`);
+    /* KNOWN RED, and it is not the harness.
+     *
+     * He climbs at the front of the ring using the radius a WAITING rope has,
+     * and the rope he just answered has coiled — a ledge takes the shallower
+     * reach its own depth allows, so it sits a hundred and seventy-five pixels
+     * away from him. The two disagree about which column the rope is on.
+     *
+     * It passed before only by luck: the ring used to crowd its ropes near the
+     * front, so some other rope was usually within the forty pixels this
+     * allows. Spread evenly, the nearest is eighty away. */
+    check(
+      onColumn,
+      `and he climbs it from the rope's own column (him ${pip11?.x}, ropes [${cols11.join(",")}])`,
+    );
   }
   await p6.screenshot({ path: "/tmp/summit-11-stageclimb.png" });
   await p6.close();

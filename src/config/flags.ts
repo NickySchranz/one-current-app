@@ -28,14 +28,30 @@ export const PERF_COUNTERS = __DEV__ || process.env.EXPO_PUBLIC_PERF === "1";
 /**
  * Draw the summit's ropes on a Skia canvas instead of as SVG paths.
  *
- * On by default: the benchmark (scripts/renderer-bench.mjs, table in PERF.md)
- * puts Skia at about a fifth of SVG's script cost with a flat node count, and
- * more importantly a redraw touches no DOM — which is what a pan costs today.
- * Set EXPO_PUBLIC_SKIA=0 to fall back to the SVG ropes; the two are kept
- * A/B-able so the harness can measure them against each other, and so a
- * browser without CanvasKit still gets a correct map rather than a blank one.
+ * OFF, and the reason is a correction rather than a preference.
+ *
+ * The canvas was turned on because it measured at half the SVG renderer's
+ * idle cost. That measurement was wrong, and the way it was wrong is worth
+ * keeping: react-native-skia repaints when a value it is handed CHANGES by
+ * identity, and the canvas handed back the same mutated path object every
+ * frame. So it was not repainting the sway at all — it redrew only when
+ * something made React re-render, which is why on a phone the ropes swayed
+ * while the mountain was being turned and stopped dead the moment it settled.
+ * The cheap number was the cost of a canvas that was not drawing.
+ *
+ * Made to draw properly (see the two paths in SummitRopesCanvas), the same
+ * scene measures, at 44 threads:
+ *
+ *              idle p50        idle script   drag p50     dropped (idle)
+ *   Skia       33.3ms (30fps)  49.5%         116.7ms      159
+ *   SVG        16.7ms (60fps)  13.5%          16.7ms        0
+ *
+ * So the SVG ropes are not the fallback; they are the faster renderer here.
+ * The canvas stays behind this flag — it is written, correct, and might yet
+ * win on hardware with a GPU, which this box does not have — but nothing
+ * ships on it. `EXPO_PUBLIC_SKIA=1` turns it on to measure.
  */
-export const SKIA_ROPES = process.env.EXPO_PUBLIC_SKIA !== "0";
+export const SKIA_ROPES = process.env.EXPO_PUBLIC_SKIA === "1";
 
 /**
  * Draw the horizontal themes' thread lines on a Skia canvas.

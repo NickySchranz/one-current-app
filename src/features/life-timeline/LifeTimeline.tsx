@@ -1629,6 +1629,9 @@ export function LifeTimeline() {
   const panAccumRef = useRef(0);
   const pendingRotQRef = useRef<number | null>(null);
   const flushRafRef = useRef<number | null>(null);
+  /** Which way this wheel gesture went, and when it last said so. */
+  const wheelAxisRef = useRef<"x" | "y" | null>(null);
+  const wheelAxisAtRef = useRef(0);
   const scheduleFlush = useCallback(() => {
     if (flushRafRef.current !== null) return;
     flushRafRef.current = requestAnimationFrame(() => {
@@ -1885,6 +1888,10 @@ export function LifeTimeline() {
     // that.
     rebaseRest();
     letGo();
+    // A gesture the browser took over, or one that failed its axis test after
+    // activating, reaches here and not onEnd — and used to leave the face
+    // stopped between ropes.
+    if (verticalRef.current && modeRef.current === "pan") settleTurnRef.current();
     if (modeRef.current !== "idle") blockTapsUntilRef.current = Date.now() + 350;
     modeRef.current = "idle";
     candidateRef.current = null;
@@ -2163,12 +2170,29 @@ export function LifeTimeline() {
     const rect0 = () => el.getBoundingClientRect();
     const onWheel = (e: WheelEvent) => {
       if (verticalRef.current) {
-        // Summit: the vertical wheel climbs through time; a sideways one TURNS
-        // the mountain, bringing the ropes round the back into view.
-        if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) {
+        /**
+         * Summit: the vertical wheel climbs through time; a sideways one TURNS
+         * the mountain, bringing the ropes round the back into view.
+         *
+         * The axis is decided once and held for the gesture. A strict
+         * comparison per event meant a trackpad swipe with a few pixels of
+         * vertical wobble — which is every trackpad swipe — fell through into
+         * the time branch on those events, so scrolling sideways alternated
+         * between turning the mountain and scrubbing time. A margin, and a
+         * short memory of which way this gesture went, keeps it one thing.
+         */
+        const now_ = Date.now();
+        if (now_ - wheelAxisAtRef.current > 220) wheelAxisRef.current = null;
+        wheelAxisAtRef.current = now_;
+        if (wheelAxisRef.current === null && (e.deltaX !== 0 || e.deltaY !== 0)) {
+          wheelAxisRef.current = Math.abs(e.deltaX) > Math.abs(e.deltaY) * 1.2 ? "x" : "y";
+        }
+        if (wheelAxisRef.current === "x") {
           e.preventDefault();
+          // The same direction and reach a finger has: dragging the face left
+          // turns it left. It used to run backwards, and at 0.6×.
           rotSV.value =
-            rotSV.value - (e.deltaX / Math.max(1, rect0().width)) * Math.PI * 0.6;
+            rotSV.value + (e.deltaX / Math.max(1, rect0().width)) * Math.PI;
           if (turnSettleRef.current !== null) clearTimeout(turnSettleRef.current);
           turnSettleRef.current = setTimeout(() => {
             turnSettleRef.current = null;
@@ -3267,6 +3291,26 @@ export function LifeTimeline() {
               // fired hold already consumed this touch
               if (modeRef.current === "idle") endGesture();
             }}
+            /**
+             * The camera, split across two OWNERS AND TWO ELEMENTS.
+             *
+             * React puts the gutter and everything it has already committed
+             * here, on the container; Reanimated puts the un-committed travel
+             * on a group inside the SVG. They used to be nested transforms on
+             * two <G>s, one written by each — and a rebase writes them in the
+             * same commit, so they cannot disagree about WHERE the world is,
+             * but writing the parent's attribute can disturb the child's, and
+             * one frame of the pre-drag world is what that looks like.
+             *
+             * The pinned date strip below has always been built this way — an
+             * outer view carrying the base, an inner one carrying the
+             * transform — and has never flickered. Now the world matches it.
+             */
+            style={
+              vertical
+                ? undefined
+                : { transform: [{ translateX: -overscan + panBase }] }
+            }
           >
             <Svg
               width={svgWidth}
@@ -3343,7 +3387,6 @@ export function LifeTimeline() {
                   holds its place on screen and only the mountain layer below
                   moves (climbProps), so `overscan` is zero there and `panSV`
                   is carried by the four things that actually move. */}
-              <G transform={`translate(${-overscan + panBase} 0)`}>
               <AnimatedOptionG animatedProps={worldRide}>
               {/* today softly glows: where life is happening */}
               {!vertical && layout.nowX - todayX > 0 && (
@@ -4085,7 +4128,6 @@ export function LifeTimeline() {
                   );
                 })()}
               </AnimatedOptionG>
-              </G>
             </Svg>
           </View>
           </GestureDetector>
