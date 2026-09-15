@@ -402,10 +402,20 @@ export function buildSummitLayout(
   const openOrder = base.geometries
     .filter((g) => g.reachesNow && g.inWindow)
     .map((g) => g.branchId);
-  /** Ropes left-to-right across the face: the order the label ladder uses, so
-   * that adjacent columns always land on different rows. */
+  /**
+   * Ropes left-to-right across the face: the order the label ladder uses, so
+   * that adjacent columns always land on different rows.
+   *
+   * Every rope the mountain DRAWS belongs here — the geometry below hangs one
+   * for anything that reaches Now, regardless of whether its fork happens to
+   * fall inside the window. Filtering those out left them with no place on
+   * the ring at all, and `angleOf` gives an unknown id an angle of zero: they
+   * stacked one on top of another dead on the route, over the main line, the
+   * Now marker and the climber. Three of them in a row is what "the ropes are
+   * way too close together" looks like.
+   */
   const columnOrder = base.geometries
-    .filter((g) => g.reachesNow && g.inWindow)
+    .filter((g) => g.reachesNow)
     .slice()
     .sort((a, b) => a.laneY - b.laneY)
     .map((g) => g.branchId);
@@ -463,17 +473,23 @@ export function buildSummitLayout(
   const ringCx = Math.round((leftBound + rightBound) / 2);
   const faceRadius = Math.max(46, Math.round((rightBound - leftBound) / 2));
   /**
-   * Degrees between neighbouring ropes: the ring, shared out. One full turn
-   * divided by the ropes on it is the widest they can be without two landing
-   * in the same place, so it is what they get — the whole mountain is theirs.
-   * This used to be capped at 42° (64° on a phone), which only ever made
-   * them CLOSER than they had to be: three ropes sat inside an 84° wedge on
-   * one side of the route with the rest of the rock empty, and a busy day
-   * crowded them further still. A wider step means fewer face you at once —
-   * that is what turning is for, and the mountain turns to the next rope by
-   * itself once the ones in view are answered.
+   * How near the silhouette the outermost rope may hang. A rope exactly on
+   * the edge is drawn edge-on and reads as a mark on the rock rather than a
+   * rope, so the spread stops short of it — and the margin that leaves is
+   * also the room the outermost rope's NAME has before the frame, which is
+   * what decides whether a title has to be cut.
    */
-  const spacing = openOrder.length > 0 ? Math.min(90, 360 / openOrder.length) : 90;
+  const RING_INSET = 0.86;
+  /**
+   * What share of the ropes face you at once.
+   *
+   * An even ring puts half of them in front, and half of a busy day is still
+   * too many to read on a phone: eleven ropes and eleven names across three
+   * hundred and ninety pixels. Hanging more of them round the back is what
+   * the turn is FOR — every rope is still there, still one turn away, and the
+   * ones you can see have room to be seen.
+   */
+  const RING_FRONT = 0.34;
   /** A ledge must stay on the rock at its own depth; the ring is sized at the
    * route's, where the rock is widest. Deep rungs never bind, but a shallow
    * one would hang its ledge in the sky. */
@@ -486,15 +502,38 @@ export function buildSummitLayout(
   const angleOf = (id: string) => {
     const i = columnIndex.get(id) ?? -1;
     if (i < 0) return 0;
+    const n = columnOrder.length;
+    if (n <= 1) return 0;
     // Centred on the front (a quiet day needs no turning at all), nudged by
     // half a step so no rope hangs exactly on the route — it would sit on the
     // main line, the Now marker and the climber all at once. The nudge is
     // needed only for an ODD count: an even one already straddles the front.
     // Adding it unconditionally did the opposite of its job, putting a rope
     // dead on the route for every even number of threads.
-    const n = columnOrder.length;
     const k = i - (n - 1) / 2 + (n % 2 === 1 ? 0.5 : 0);
-    return ((k * spacing) / 180) * Math.PI;
+    // Where this rope sits on the ring, 0..1 once round, with the front at a
+    // quarter turn.
+    let t = 0.25 + k / n;
+    t -= Math.floor(t);
+    /**
+     * Even in PROJECTION, not in angle.
+     *
+     * A rope's column is `sin(angle)`, and the eye sees that — not the angle.
+     * Sharing the circle out in equal DEGREES therefore piles the ropes up
+     * toward the silhouette, where a step of angle buys almost no step of x:
+     * measured on a phone with twenty-four threads, neighbours eight to
+     * sixteen pixels apart at the sides with seventy pixels of bare rock
+     * through the middle. Spacing their SINES evenly instead puts the same
+     * ropes at an even reach across the face, and turning still walks through
+     * them in the same order — out across the front, then back across the
+     * hidden side.
+     */
+    const u =
+      t < RING_FRONT
+        ? -1 + (2 * t) / RING_FRONT
+        : 1 - (2 * (t - RING_FRONT)) / (1 - RING_FRONT);
+    const a = Math.asin(u * RING_INSET);
+    return t < RING_FRONT ? a : Math.PI - a;
   };
 
   const geometries: BranchGeometry[] = base.geometries.map((g) => {

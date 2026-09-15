@@ -269,6 +269,42 @@ function useRopeProbe(
     if (!SHOW_TESTING || typeof window === "undefined") return;
     const w = window as unknown as { __ocRopes?: Map<string, RopeProbe> };
     const reg = (w.__ocRopes ??= new Map<string, RopeProbe>());
+    // What this rope IS, alongside where it is. A check that wants only the
+    // ropes still waiting can ask; so can anyone wondering why a rope is
+    // holding still (`trembles` is the whole answer — a quiet thread, or one
+    // answered or rested today, does not move).
+    const w2 = window as unknown as { __ocRopeSpec?: Record<string, unknown> };
+    w2.__ocRopeSpec ??= {};
+    w2.__ocRopeSpec[spec.id] = {
+      coiled: spec.coiled,
+      trembles: spec.trembles,
+      level: spec.level,
+      angle: Math.round(((spec.angle * 180) / Math.PI) * 10) / 10,
+      // How legible it is right now, on the same ramp the paint uses. At the
+      // silhouette a rope in front and one behind project to the same column,
+      // which is true of any ring and unremarkable at an opacity of nothing —
+      // but it makes "are they evenly spread" unanswerable unless you can ask
+      // which ones can actually be seen.
+      /** Where the rope hangs with the turn applied and the sway taken off —
+       *  its column. A rope's drawn x wanders up to fourteen pixels either
+       *  side of it, which is more than enough to make "are they evenly
+       *  spread" unanswerable from the drawing alone. */
+      column: () => {
+        const turn = lastTurn.value;
+        if (Number.isNaN(turn)) return null;
+        const el = typeof document === "undefined" ? null : document.querySelector("canvas");
+        const left = el ? el.getBoundingClientRect().left : 0;
+        const dx =
+          Math.sin(spec.angle + turn) * spec.radius - Math.sin(spec.angle) * spec.radius;
+        return left + spec.ax + dx;
+      },
+      seen: () => {
+        const turn = lastTurn.value;
+        if (Number.isNaN(turn)) return 0;
+        const facing = Math.cos(spec.angle + turn);
+        return facing <= -0.12 ? 0 : Math.min(1, (facing + 0.12) / 0.45);
+      },
+    };
     reg.set(spec.id, (clientY: number) => {
       // The check speaks the viewport's coordinates and the scene speaks the
       // stage's. The canvas sits exactly over the stage, so its own box is the
@@ -301,6 +337,7 @@ function useRopeProbe(
     });
     return () => {
       reg.delete(spec.id);
+      delete w2.__ocRopeSpec?.[spec.id];
     };
   }, [spec, lastT, lastTurn, lastShift]);
 }

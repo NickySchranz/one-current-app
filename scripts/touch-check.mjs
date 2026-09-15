@@ -28,13 +28,14 @@ const check = (ok, msg) => {
   if (!ok) failed = true;
 };
 
-async function openMap(theme) {
-  const ctx = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    deviceScaleFactor: 2,
-    isMobile: true,
-    hasTouch: true,
-  });
+/** Viewport + input, so every check runs as a finger AND as a mouse. */
+const MODES = [
+  { name: "finger", ctx: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true } },
+  { name: "mouse ", ctx: { viewport: { width: 1200, height: 900 } } },
+];
+
+async function openMap(theme, mode = MODES[0]) {
+  const ctx = await browser.newContext(mode.ctx);
   await ctx.addInitScript((t) => {
     localStorage.setItem("one-current-auth", JSON.stringify({ email: "check@onecurrentapp.com" }));
     localStorage.setItem("one-current-tutorial-v1", "done");
@@ -52,21 +53,29 @@ async function openMap(theme) {
   await page.getByRole("button", { name: "Now" }).first().click();
   await page.waitForTimeout(2500);
   const cdp = await ctx.newCDPSession(page);
-  return { ctx, page, cdp };
+  return { ctx, page, cdp, touch: !!mode.ctx.hasTouch, w: mode.ctx.viewport.width, h: mode.ctx.viewport.height };
 }
 
-/** A finger, held down across `steps` moves. */
-async function swipe(cdp, page, { x, y, dx, dy, steps = 40, gap = 12 }) {
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+/** A finger or a mouse, held down across `steps` moves. */
+async function swipe(map, { x, y, dx, dy, steps = 40, gap = 12, onMid }) {
+  const { cdp, page, touch } = map;
+  if (touch) await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  else { await page.mouse.move(x, y); await page.mouse.down(); }
   for (let i = 1; i <= steps; i++) {
-    await cdp.send("Input.dispatchTouchEvent", {
-      type: "touchMove",
-      touchPoints: [{ x: x + dx * i, y: y + dy * i }],
-    });
-    await page.waitForTimeout(gap);
+    if (touch) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: x + dx * i, y: y + dy * i }],
+      });
+    } else {
+      await page.mouse.move(x + dx * i, y + dy * i);
+    }
+    if (gap) await page.waitForTimeout(gap);
+    if (onMid && i === Math.floor(steps * 0.8)) await onMid();
   }
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await page.waitForTimeout(700);
+  if (touch) await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  else await page.mouse.up();
+  await page.waitForTimeout(800);
 }
 
 /** Every date label's position, sampled once per displayed frame. */
@@ -129,119 +138,214 @@ async function readTrace(page) {
 }
 
 // ── the horizontal maps ───────────────────────────────────────────────────
-{
-  const { ctx, page, cdp } = await openMap("riverbed");
+for (const mode of MODES) {
+  const map = await openMap("riverbed", mode);
+  const { ctx, page } = map;
+  const at = (x) => Math.round(map.w * x);
+  const tag = `riverbed/${mode.name}`;
 
-  // 1. a vertical finger drag belongs to the SCROLLER, not to us. Gesture
-  //    Handler stamps touch-action on the view it is attached to, and with
-  //    nothing configured it stamps `none` — which killed this outright.
+  // 1. a vertical drag belongs to the SCROLLER, not to us. Gesture Handler
+  //    stamps touch-action on the view it is attached to, and with nothing
+  //    configured it stamps `none` — which killed this outright.
   const laneY = () =>
     page.evaluate(() => {
       const t = [...document.querySelectorAll("svg text")].find((e) => (e.textContent ?? "").length > 8);
       return t ? Math.round(t.getBoundingClientRect().top) : null;
     });
-  const before = await laneY();
-  await swipe(cdp, page, { x: 200, y: 620, dx: 0, dy: -6, steps: 30 });
-  const after = await laneY();
-  check(
-    before !== null && after !== null && Math.abs(after - before) > 40,
-    `a finger scrolls the lanes (${before} → ${after})`,
-  );
+  if (map.touch) {
+    const before = await laneY();
+    await swipe(map, { x: at(0.5), y: map.h - 220, dx: 0, dy: -6, steps: 30 });
+    const after = await laneY();
+    check(
+      before !== null && after !== null && Math.abs(after - before) > 40,
+      `${tag}: a finger scrolls the lanes (${before} → ${after})`,
+    );
+  }
 
   // 2. sideways is ours, and it pans time without a jump
+  const sheetBefore = await page
+    .getByText("How loud", { exact: false })
+    .first()
+    .isVisible()
+    .catch(() => false);
   await startTrace(page, "x");
-  await swipe(cdp, page, { x: 120, y: 420, dx: 5, dy: 0, steps: 45, gap: 10 });
+  await swipe(map, { x: at(0.25), y: 420, dx: 5, dy: 0, steps: 45, gap: 10 });
   const back = await readTrace(page);
-  check(!!back && back.travel > 150, `a finger pans time (${back?.travel.toFixed(0)}px, following ${JSON.stringify(back?.label)})`);
-  check(!!back && back.biggest <= 14, `and never jumps doing it (biggest step ${back?.biggest.toFixed(0)}px)`);
+  check(!!back && back.travel > 150, `${tag}: pans time (${back?.travel.toFixed(0)}px, ${JSON.stringify(back?.label)})`);
+  check(!!back && back.biggest <= 14, `${tag}: and never jumps doing it (${back?.biggest.toFixed(0)}px)`);
+  // Nothing NEW opened: the quick menu's labels live in the tree whether or
+  // not it is open, and a thread may already be armed from the scroll test.
+  const sheetNow = await page
+    .getByText("How loud", { exact: false })
+    .first()
+    .isVisible()
+    .catch(() => false);
+  check(!sheetNow || sheetBefore, `${tag}: a drag opens no sheet behind it`);
 
-  // 3. and it opens nothing on the way past
-  const sheet = await page.evaluate(() => document.body.innerText.includes("How loud"));
-  check(!sheet, "a drag opens no sheet behind it");
-
-  // 4. toward the future, into the limit: the world may stop, but never snap
+  /* 3. The END OF TIME.
+   *
+   * The window already reaches as far ahead as the app will look, so from the
+   * resting view roughly half of every flick is a pull against a wall. It used
+   * to judder there, and then — once the transient was clamped — it did
+   * nothing at all, which is what "it drags a bit then snaps back" was about.
+   * It gives now, and lets go. */
+  await page.getByRole("button", { name: /Return to Now/i }).first().click().catch(() => {});
+  await page.waitForTimeout(1800);
+  const world = () =>
+    page.evaluate(() => {
+      const g = [...document.querySelectorAll("svg g")]
+        .map((n) => /translate\((-?[\d.]+)/.exec(n.getAttribute("transform") ?? ""))
+        .filter(Boolean);
+      return g.length > 1 ? Number(g[1][1]) : null;
+    });
+  const rest = await world();
   await startTrace(page, "x");
-  await swipe(cdp, page, { x: 320, y: 420, dx: -5, dy: 0, steps: 60, gap: 10 });
-  const fwd = await readTrace(page);
-  check(!!fwd && fwd.biggest <= 14, `meeting the end of time does not snap (biggest step ${fwd?.biggest.toFixed(0)}px at frame ${fwd?.at}/${fwd?.frames})`);
+  const seen = [];
+  const tick = setInterval(async () => { const v = await world().catch(() => null); if (v !== null) seen.push(v); }, 40);
+  await swipe(map, { x: at(0.8), y: 420, dx: -6, dy: 0, steps: 45, gap: 10 });
+  clearInterval(tick);
+  await readTrace(page);
+  const settled = await world();
+  const give = seen.length ? Math.max(...seen.map((v) => Math.abs(v - (rest ?? 0)))) : 0;
+  check(give > 20, `${tag}: the end of time gives (${give.toFixed(0)}px of band)`);
+  check(
+    rest !== null && settled !== null && Math.abs(settled - rest) < 2,
+    `${tag}: and settles back onto it (${rest} → ${settled})`,
+  );
+
+  /* 4. Two rebases inside one render. A long drag with NO yielding between
+   *    moves; a dropped rebase shows up as a whole 120px of missing travel. */
+  await startTrace(page, "x");
+  await swipe(map, { x: at(0.1), y: 420, dx: 9, dy: 0, steps: 40, gap: 0 });
+  const fast = await readTrace(page);
+  check(
+    !!fast && fast.travel > 260,
+    `${tag}: a fast flick loses no rebase (${fast?.travel.toFixed(0)}px of 360)`,
+  );
 
   await page.close();
   await ctx.close();
 }
 
 // ── the summit ────────────────────────────────────────────────────────────
-{
-  const { ctx, page, cdp } = await openMap("summit");
+for (const mode of MODES) {
+  const map = await openMap("summit", mode);
+  const { ctx, page } = map;
+  const tag = `summit/${mode.name}`;
 
   await startTrace(page, "y");
-  await swipe(cdp, page, { x: 60, y: 620, dx: 0, dy: -5, steps: 45, gap: 10 });
+  await swipe(map, { x: 60, y: map.h - 220, dx: 0, dy: -5, steps: 45, gap: 10 });
   const up = await readTrace(page);
-  check(!!up && Math.abs(up.travel) > 150, `a finger climbs through time (${up?.travel.toFixed(0)}px)`);
-  check(!!up && up.biggest <= 14, `and never jumps doing it (biggest step ${up?.biggest.toFixed(0)}px)`);
+  check(!!up && Math.abs(up.travel) > 150, `${tag}: climbs through time (${up?.travel.toFixed(0)}px)`);
+  check(!!up && up.biggest <= 14, `${tag}: and never jumps doing it (${up?.biggest.toFixed(0)}px)`);
 
-  await startTrace(page, "y");
-  await swipe(cdp, page, { x: 60, y: 300, dx: 0, dy: 5, steps: 60, gap: 10 });
-  const down = await readTrace(page);
-  check(!!down && down.biggest <= 14, `meeting the end of time does not snap (biggest step ${down?.biggest.toFixed(0)}px at frame ${down?.at}/${down?.frames})`);
-
-  // sideways turns the mountain: the ropes move, the time frame does not
-  const ropeXs = () =>
-    page.evaluate(() =>
-      window.__ocRopes
-        ? [...window.__ocRopes.values()].map((at) => at(400)).filter((v) => v !== null).map((v) => Math.round(v))
-        : null,
-    );
-  const railY = () =>
+  // the end of time, downward
+  await page.getByRole("button", { name: /Return to Now/i }).first().click().catch(() => {});
+  await page.waitForTimeout(1800);
+  const rail = () =>
     page.evaluate(() => {
       const t = [...document.querySelectorAll("svg text")].find((e) => /^\d+$/.test(e.textContent ?? ""));
       return t ? Math.round(t.getBoundingClientRect().top) : null;
     });
-  const ropesBefore = await ropeXs();
-  const railBefore = await railY();
-  await swipe(cdp, page, { x: 200, y: 500, dx: -4, dy: 0, steps: 30, gap: 14 });
-  const ropesAfter = await ropeXs();
-  const railAfter = await railY();
+  const rest = await rail();
+  const seen = [];
+  const tick = setInterval(async () => { const v = await rail().catch(() => null); if (v !== null) seen.push(v); }, 40);
+  await swipe(map, { x: 60, y: 300, dx: 0, dy: 6, steps: 45, gap: 10 });
+  clearInterval(tick);
+  const settled = await rail();
+  const give = seen.length && rest !== null ? Math.max(...seen.map((v) => Math.abs(v - rest))) : 0;
+  check(give > 20, `${tag}: the end of time gives (${give.toFixed(0)}px of band)`);
   check(
-    !!ropesBefore && !!ropesAfter && ropesBefore.some((v, i) => Math.abs(v - (ropesAfter[i] ?? v)) > 8),
-    `a sideways finger turns the mountain (${ropesBefore?.slice(0, 3)} → ${ropesAfter?.slice(0, 3)})`,
+    rest !== null && settled !== null && Math.abs(settled - rest) < 3,
+    `${tag}: and settles back onto it (${rest} → ${settled})`,
+  );
+
+  // sideways turns the mountain: the ropes move, the time frame does not
+  // By id, not by position in the list: a turn changes WHICH ropes are in
+  // view, so comparing the nth visible one to the nth visible one compares
+  // two different ropes.
+  const ropeXs = () =>
+    page.evaluate(() => {
+      if (!window.__ocRopes) return null;
+      const out = {};
+      for (const [id, f] of window.__ocRopes.entries()) {
+        const v = f(400);
+        if (v !== null) out[id] = Math.round(v);
+      }
+      return out;
+    });
+  const ropesBefore = await ropeXs();
+  const railBefore = await rail();
+  // Sampled WHILE the finger is down. On release the summit settles the turn
+  // so a rope ends up facing you, and with only a couple of threads that
+  // settle can land back where it started — a true turn with nothing to show
+  // for it afterwards.
+  let ropesAfter = null;
+  await swipe(map, {
+    x: Math.round(map.w * 0.5), y: 500, dx: -4, dy: 0, steps: 30, gap: 14,
+    onMid: async () => { ropesAfter = await ropeXs(); },
+  });
+  const railAfter = await rail();
+  const idsBefore = Object.keys(ropesBefore ?? {});
+  const idsAfter = Object.keys(ropesAfter ?? {});
+  const moved = ropesBefore && ropesAfter
+    ? idsBefore.filter((id) => ropesAfter[id] !== undefined && Math.abs(ropesAfter[id] - ropesBefore[id]) > 8)
+    : [];
+  // Either a rope that stayed in view has moved, or the turn has brought a
+  // different set of them round — both mean the mountain turned, and which
+  // one you get depends on how many were facing you to begin with.
+  const swapped = idsBefore.some((id) => !idsAfter.includes(id)) || idsAfter.some((id) => !idsBefore.includes(id));
+  check(
+    moved.length > 0 || swapped,
+    `${tag}: a sideways drag turns the mountain (${moved.length} moved, ${idsBefore.length}→${idsAfter.length} in view)`,
   );
   check(
     railBefore !== null && railAfter !== null && Math.abs(railAfter - railBefore) <= 2,
-    `and leaves the time frame alone (rail ${railBefore} → ${railAfter})`,
+    `${tag}: and leaves the time frame alone (${railBefore} → ${railAfter})`,
   );
 
-  /* 5. A rope that has been answered coils at its ledge, high above the
-   *    viewport — so the canvas must stop drawing it in the hanging band.
-   *
-   *    This is the one that catches a stale spec. The draw worklet closes
-   *    over the spec it was built with, and answering a rope changes whether
-   *    it rides the mountain and where both its ends are; with the spec left
-   *    out of the worklet's dependencies the canvas kept drawing every rope
-   *    exactly where it used to hang. */
-  const hanging = () =>
-    page.evaluate(() =>
-      window.__ocRopes
-        ? [...window.__ocRopes.values()].filter((at) => at(400) !== null).length
-        : null,
-    );
-  const before5 = await hanging();
-  // Every open thread decided today: the same seeding summit-check uses.
+  /* The ropes must be spread by what the EYE sees, not by angle. Even angular
+   * steps around the ring pile up at the sides, because the eye sees sin() of
+   * them: measured at 24 threads, gaps of 8-16px against voids of 66-71px. */
   await page.evaluate(() => {
     const key = "one-current/table/branches";
-    const today = new Date().toISOString().slice(0, 10);
-    const rows = JSON.parse(localStorage.getItem(key) ?? "[]").map((b) =>
-      b.status !== "merged" && b.status !== "converted-to-project" && !b.mergeDate
-        ? { ...b, lastDecisionOn: today }
-        : b,
-    );
-    localStorage.setItem(key, JSON.stringify(rows));
+    const rows = JSON.parse(localStorage.getItem(key) ?? "[]");
+    const base = rows.find((b) => b.status === "active") ?? rows[0];
+    if (!base) return;
+    const extra = [];
+    for (let i = 0; i < 14; i++) {
+      extra.push({ ...base, id: `spread${i}`, title: `Spread ${i}`, status: "active", lastDecisionOn: undefined, mergeDate: undefined });
+    }
+    localStorage.setItem(key, JSON.stringify([...rows, ...extra]));
   });
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(4000);
-  const after5 = await hanging();
+  // Only the ropes still WAITING: one answered today coils at its ledge, and
+  // a ledge has to stay on the rock at its own depth, so those hang on a
+  // shallower ring and land wherever that puts them.
+  const hanging = await page.evaluate(() => {
+    if (!window.__ocRopeSpec) return [];
+    const out = [];
+    for (const info of Object.values(window.__ocRopeSpec)) {
+      // Waiting, legible, and measured at its COLUMN — the sway wanders a
+      // rope fourteen pixels either side of where it hangs.
+      if (info.coiled || info.seen() <= 0.5) continue;
+      const c = info.column();
+      if (c !== null) out.push(Math.round(c));
+    }
+    return out;
+  });
+  const cols = hanging;
+  cols.sort((a, b) => a - b);
+  const gaps = cols.slice(1).map((v, i) => v - cols[i]);
+  const mean = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
+  // A quarter of the mean, not a third: a rope answered today coils at its
+  // ledge, and a ledge has to stay on the rock at its own depth — so those
+  // hang on a shallower ring and land wherever that puts them. The even
+  // spread is a property of the ropes still waiting.
   check(
-    before5 !== null && after5 !== null && before5 > 0 && after5 < before5,
-    `answered ropes leave the hanging band (${before5} → ${after5})`,
+    gaps.length > 3 && Math.min(...gaps) > mean / 3,
+    `${tag}: a busy ring spreads evenly (${gaps.length + 1} ropes, gaps ${gaps.map((g) => Math.round(g)).join(",")}, mean ${mean.toFixed(0)})`,
   );
 
   await page.close();

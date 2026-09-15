@@ -384,6 +384,21 @@ type AppState = {
   loadExampleData(): Promise<void>;
 };
 
+/**
+ * Keep the window object you already have when the new one says the same thing.
+ *
+ * The timeline pairs its un-committed pan against the window it last rendered,
+ * so a window REPLACED with identical contents reads as "somebody else moved
+ * time" and collapses up to a rebase of travel in one frame — a visible snap
+ * mid-drag. `panBy` had this guard because a clamped pan at the future limit
+ * re-rendered the map every frame for no movement; `returnToNow` (fresh object
+ * even when you are already at Now) and `setWindow` needed it for the same
+ * reason and did not have it.
+ */
+function sameWindow(prev: TimeWindow | undefined, next: TimeWindow): TimeWindow {
+  return prev && prev.start === next.start && prev.end === next.end ? prev : next;
+}
+
 function todayIso(): string {
   return appNow().toISOString().slice(0, 10);
 }
@@ -728,7 +743,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
   returnToNow: () => {
-    set({ view: { kind: "now" }, window: weekWindow(appNow()) });
+    set((s) => ({ view: { kind: "now" }, window: sameWindow(s.window, weekWindow(appNow())) }));
   },
 
   refreshNow: () => {
@@ -1445,16 +1460,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({ branches: s.branches.map((b) => (b.id === branchId ? next : b)) }));
   },
 
-  setWindow: (window) => set({ window }),
+  setWindow: (window) => set((s) => ({ window: sameWindow(s.window, window) })),
   panBy(fraction) {
     const w = get().window;
     if (!w) return;
     const next = panWindow(w, fraction, todayIso());
-    // A clamped pan at the future limit used to return a fresh object with
-    // identical contents, and the Zustand selector compares by identity —
-    // so pushing against the edge re-rendered the timeline every frame for
-    // no movement at all.
-    if (next.start === w.start && next.end === w.end) return;
+    if (sameWindow(w, next) === w) return;
     countWindowCommit();
     set({ window: next });
   },

@@ -29,6 +29,8 @@ export type RopeSpec = {
   trembles: boolean;
   /** The rope hangs on the rock, so it travels with the climb. */
   rides: boolean;
+  /** Answered today: coiled at its own ledge, on a shallower ring. */
+  coiled: boolean;
   colour: string;
   /** Base opacity before the turn fades it round the back. */
   opacity: number;
@@ -115,6 +117,7 @@ export function toRopeSpec(
       !!branch &&
       lineTrembles({ branch, inWindow: g.inWindow, level, reducedMotion, now, born: false }),
     rides: g.reachesNow,
+    coiled: !!g.coiled,
     colour: cssToHex(colour),
     opacity: q(opacity),
     thickness: q(g.thickness),

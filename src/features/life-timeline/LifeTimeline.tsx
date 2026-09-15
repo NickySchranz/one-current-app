@@ -410,6 +410,32 @@ const DECIDE_PX = 8;
  * without paying much for it.
  */
 const REBASE_PX = 120;
+
+/** How many rope names the face carries at once. See `nameRows`. */
+const NAMED_AT_ONCE = 4;
+
+/**
+ * How far the world may be pulled past the end of time, and how hard it
+ * resists.
+ *
+ * The map opens on a window whose far edge is already the furthest ahead it
+ * will look, so roughly half of every flick is a pull against that wall. It
+ * used to judder there and then, once the transient was clamped, it did
+ * nothing at all — the finger moved and the world was simply dead. Neither
+ * says "there is nothing here". A band that gives, slows, and glides back
+ * does.
+ */
+const RUBBER_PX = 80;
+
+/**
+ * `over` px past the limit, resisted: the first pixels come easy and the last
+ * ones barely move, approaching RUBBER_PX but never reaching it.
+ */
+function rubber(over: number): number {
+  "worklet";
+  const a = Math.abs(over);
+  return Math.sign(over) * ((a * RUBBER_PX) / (a + RUBBER_PX));
+}
 /** How far the main line's lean must move before the geometry is rebuilt. */
 const MAIN_SHIFT_STEP = 6;
 /** Scroll offset is rounded to this before it can cause a render. */
@@ -1021,6 +1047,16 @@ export function LifeTimeline() {
   const panSentXSV = useSharedValue(0);
   /** Has this gesture already announced itself to the JS side? */
   const panningSV = useSharedValue(false);
+  /**
+   * How far past the end of time the world has been pulled, per axis.
+   *
+   * Signed the way the overshoot runs: down (positive) on the summit, left
+   * (negative) on the other maps. It is never committed to a window — there is
+   * no window past the limit to commit — so it lives only in the transform,
+   * resisted by `rubber`, and is let go when the finger lifts.
+   */
+  const panOverSV = useSharedValue(0);
+  const panOverXSV = useSharedValue(0);
 
   useEffect(() => {
     if (reducedMotion) {
@@ -1275,22 +1311,28 @@ export function LifeTimeline() {
 
   /** The mountains beyond this one: the further away, the slower they pass. */
   /** The un-committed pan, as a transform. Half-pixel like every other. */
-  const panRide = useAnimatedProps(
-    () => ({ translateY: Math.round(panSV.value * 2) / 2 }),
-    [panSV],
+  /** The summit's pan as it is actually drawn: travel plus the band's give. */
+  const panShown = useDerivedValue(
+    () => Math.round((panSV.value + rubber(panOverSV.value)) * 2) / 2,
+    [panSV, panOverSV],
   );
+  const panRide = useAnimatedProps(() => ({ translateY: panShown.value }), [panShown]);
   /**
    * The horizontal world's camera: the gutter it is drawn shifted by, plus
    * whatever the finger has moved since the last rebase.
    */
   const worldRide = useAnimatedProps(
-    () => ({ translateX: Math.round(panXSV.value * 2) / 2 }),
-    [panXSV],
+    () => ({ translateX: Math.round((panXSV.value + rubber(panOverXSV.value)) * 2) / 2 }),
+    [panXSV, panOverXSV],
   );
   /** The pinned date strip lives outside the SVG and carries it by hand. */
   const stripRide = useAnimatedStyle(
-    () => ({ transform: [{ translateX: Math.round(panXSV.value * 2) / 2 }] }),
-    [panXSV],
+    () => ({
+      transform: [
+        { translateX: Math.round((panXSV.value + rubber(panOverXSV.value)) * 2) / 2 },
+      ],
+    }),
+    [panXSV, panOverXSV],
   );
 
   const farProps = useAnimatedProps(
@@ -1596,6 +1638,12 @@ export function LifeTimeline() {
       const q = pendingRotQRef.current;
       pendingRotQRef.current = null;
       if (q !== null) setRotQ(q);
+      // The wheel commits a window the transient knows nothing about. That is
+      // safe as it stands: the re-pair reads the new window as somebody
+      // else's, sets the committed total to the live transient, and the world
+      // lands on its geometry with no offset. Zeroing the transient here
+      // instead would translate the world by the whole session's committed
+      // travel for a frame — which can be thousands of pixels.
       if (fraction !== 0) panBy(fraction);
     });
   }, [panBy]);
@@ -1672,13 +1720,20 @@ export function LifeTimeline() {
   const panAxis: "x" | "y" = vertical ? "y" : "x";
   if (window_ !== panPairsRef.current[panAxis].w) {
     const pending = panPendingRef.current;
-    panPairsRef.current[panAxis] =
-      pending && pending.axis === panAxis && pending.w === window_
-        ? { w: pending.w, px: pending.px }
-        : // Somebody else moved the window — Return to Now, a zoom, a new
-          // day, a theme change. Re-pair against the live travel on THIS
-          // axis so nothing shifts.
-          { w: window_, px: vertical ? panSV.value : panXSV.value };
+    if (pending && pending.axis === panAxis && pending.w === window_) {
+      panPairsRef.current[panAxis] = { w: pending.w, px: pending.px };
+      // Consumed. Leaving it behind would let a later render match a stale
+      // total against a window that happens to be the same object again.
+      panPendingRef.current = null;
+    } else {
+      // Somebody else moved the window — Return to Now, a new day, a theme
+      // change. Re-pair against the live travel on THIS axis so nothing
+      // shifts on screen; the geometry moved, and the transient did not.
+      panPairsRef.current[panAxis] = {
+        w: window_,
+        px: vertical ? panSV.value : panXSV.value,
+      };
+    }
   }
   const panCommitted = panPairsRef.current[panAxis].px;
   /** What React has already accounted for, taken off in the same render. */
@@ -1693,29 +1748,29 @@ export function LifeTimeline() {
    * one under-pans by exactly the gutter's share: an eighteen-pixel step
    * sideways at every rebase).
    */
-  const pxPerMs = useCallback(() => {
+  const pxPerMs = useCallback((axis: "x" | "y") => {
     const l = layoutRef.current;
     const w = useAppStore.getState().window;
     if (!w) return 0;
     const span = Date.parse(w.end) - Date.parse(w.start);
     if (span <= 0) return 0;
-    if (verticalRef.current) {
+    if (axis === "y") {
       const summit = l as SummitLayout;
       return (summit.timeLen ?? 1) / (summit.panScale ?? 1) / span;
     }
     return Math.max(1, l.metrics.width - 2 * overscanRef.current) / span;
   }, []);
 
-  const rebase = useCallback((px: number) => {
+  const rebase = useCallback((px: number, axis: "x" | "y") => {
     if (px === 0) return;
-    const scale = pxPerMs();
+    const scale = pxPerMs(axis);
     if (scale <= 0) return;
     const before = useAppStore.getState().window;
     if (!before) return;
     const span = Date.parse(before.end) - Date.parse(before.start);
     if (span <= 0) return;
     // Sideways the world follows the finger, so the WINDOW goes the other way.
-    panBy((verticalRef.current ? px : -px) / scale / span);
+    panBy((axis === "y" ? px : -px) / scale / span);
     const after = useAppStore.getState().window;
     if (!after) return;
     /**
@@ -1728,18 +1783,26 @@ export function LifeTimeline() {
      * 20–25px on a phone, at the end of every forward drag.
      */
     const movedMs = Date.parse(after.start) - Date.parse(before.start);
-    const appliedPx = (verticalRef.current ? 1 : -1) * movedMs * scale;
-    const axis = verticalRef.current ? "y" : "x";
-    panPendingRef.current = {
-      axis,
-      w: after,
-      px: panPairsRef.current[axis].px + appliedPx,
-    };
+    const appliedPx = (axis === "y" ? 1 : -1) * movedMs * scale;
+    /**
+     * Compose with a rebase that has not been rendered yet.
+     *
+     * `panPairsRef` only advances when React renders, and `scheduleOnRN` is a
+     * microtask on web — so both rebases of a fast flick can run inside one
+     * input task, before any commit. Reading the last RENDERED total for the
+     * second one silently dropped the first one's travel, leaving the map a
+     * whole rebase out of step with its own geometry. That is the "drags a
+     * bit then snaps back".
+     */
+    const pending = panPendingRef.current;
+    const base =
+      pending && pending.axis === axis ? pending.px : panPairsRef.current[axis].px;
+    panPendingRef.current = { axis, w: after, px: base + appliedPx };
     // The finger cannot travel further than the world can: hold the transient
     // to what was taken, so the map never draws where its geometry does not go.
     const short = px - appliedPx;
     if (short !== 0) {
-      if (verticalRef.current) {
+      if (axis === "y") {
         panSV.value -= short;
         panSentSV.value -= short;
       } else {
@@ -1766,20 +1829,34 @@ export function LifeTimeline() {
 
   /** Commit the remainder: the finger has lifted, or the map is going away. */
   const rebaseRest = useCallback(() => {
-    const live = verticalRef.current ? panSV : panXSV;
-    const sent = verticalRef.current ? panSentSV : panSentXSV;
+    const axis: "x" | "y" = verticalRef.current ? "y" : "x";
+    const live = axis === "y" ? panSV : panXSV;
+    const sent = axis === "y" ? panSentSV : panSentXSV;
     const rest = live.value - sent.value;
     if (rest !== 0) {
       sent.value += rest;
-      rebase(rest);
+      rebase(rest, axis);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values are stable
   }, [rebase]);
+
+  /** The band, released: back to the wall, never past it. */
+  const letGo = useCallback(() => {
+    const over = verticalRef.current ? panOverSV : panOverXSV;
+    if (over.value === 0) return;
+    over.value = withTiming(0, { duration: 260, easing: Easing.out(Easing.cubic) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values are stable
+  }, []);
+
+  /** A stable handle on the commit, for the unmount cleanup above. */
+  const rebaseRestRef = useRef(rebaseRest);
+  rebaseRestRef.current = rebaseRest;
 
   const onDragEnd = useCallback(() => {
     // Whatever travel has not been handed over yet becomes a real window, so
     // the world always settles on geometry rather than on a transform.
     rebaseRest();
+    letGo();
     if (verticalRef.current && modeRef.current === "pan") {
       // Settle so a rope ends up facing the viewer, not half round the side —
       // and let the JS side know which ropes are in front now.
@@ -1790,7 +1867,24 @@ export function LifeTimeline() {
     }
   }, []);
 
+  /**
+   * The map is going away with travel still on the transform.
+   *
+   * Gesture Handler fires neither `onEnd` nor `onFinalize` when the detector
+   * is dropped, so up to a whole rebase of pan could simply vanish — the
+   * window never hears about it and the next mount starts somewhere else.
+   */
+  useEffect(() => {
+    const commit = rebaseRestRef;
+    return () => commit.current();
+  }, []);
+
   const onDragFinalize = useCallback(() => {
+    // Also here, not only in onDragEnd: a gesture the browser takes over, or
+    // one that fails its axis test after activating, reaches this and not
+    // that.
+    rebaseRest();
+    letGo();
     if (modeRef.current !== "idle") blockTapsUntilRef.current = Date.now() + 350;
     modeRef.current = "idle";
     candidateRef.current = null;
@@ -1858,14 +1952,28 @@ export function LifeTimeline() {
           if (e.changeY !== 0) {
             // The stage's left edge is the window's: it fills the width.
             const nearDates = e.absoluteX > stageWSV.value - SUMMIT_RAIL_W - 24;
-            panSV.value = Math.min(
-              panLimitSV.value,
-              panSV.value + e.changeY * (nearDates ? 4 : 1),
-            );
+            {
+              // Down is the future, so the limit is a ceiling. Travel past it
+              // is not committable and never reaches the store: it goes into
+              // the band, which gives, slows, and is let go on release.
+              let d = e.changeY * (nearDates ? 4 : 1);
+              if (panOverSV.value > 0 && d < 0) {
+                const used = Math.min(panOverSV.value, -d);
+                panOverSV.value -= used;
+                d += used;
+              }
+              const want = panSV.value + d;
+              if (want > panLimitSV.value) {
+                panOverSV.value += want - panLimitSV.value;
+                panSV.value = panLimitSV.value;
+              } else {
+                panSV.value = want;
+              }
+            }
             const over = panSV.value - panSentSV.value;
             if (over >= REBASE_PX || over <= -REBASE_PX) {
               panSentSV.value += over;
-              scheduleOnRN(rebase, over);
+              scheduleOnRN(rebase, over, "y");
             }
           }
           return;
@@ -1887,14 +1995,27 @@ export function LifeTimeline() {
         // Dragging along the date labels scrubs faster than dragging the lanes.
         const overDates =
           e.absoluteY + mapScrollY.value > layoutHSV.value - 56;
-        panXSV.value = Math.max(
-          panLimitSV.value,
-          panXSV.value + e.changeX * (overDates ? 4 : 1),
-        );
+        {
+          // Leftwards is the future here, so the limit is a floor and the
+          // band's give is negative. Same rule otherwise.
+          let d = e.changeX * (overDates ? 4 : 1);
+          if (panOverXSV.value < 0 && d > 0) {
+            const used = Math.min(-panOverXSV.value, d);
+            panOverXSV.value += used;
+            d -= used;
+          }
+          const want = panXSV.value + d;
+          if (want < panLimitSV.value) {
+            panOverXSV.value += want - panLimitSV.value;
+            panXSV.value = panLimitSV.value;
+          } else {
+            panXSV.value = want;
+          }
+        }
         const overX = panXSV.value - panSentXSV.value;
         if (overX >= REBASE_PX || overX <= -REBASE_PX) {
           panSentXSV.value += overX;
-          scheduleOnRN(rebase, overX);
+          scheduleOnRN(rebase, overX, "x");
         }
       })
       .onEnd(() => {
@@ -1913,19 +2034,6 @@ export function LifeTimeline() {
       // Horizontal maps: sideways is ours, vertical belongs to the scroll.
       g = g.activeOffsetX([-DECIDE_PX, DECIDE_PX]).failOffsetY([-DECIDE_PX, DECIDE_PX]);
     }
-    /**
-     * And on mobile web, SAY which axis is ours.
-     *
-     * Gesture Handler stamps `touch-action` on the view it is attached to, and
-     * with nothing configured it stamps `none`. That view is an ANCESTOR of
-     * the <Svg> whose own `pan-y` was meant to leave vertical scrolling to the
-     * browser — and touch-action intersects down the tree, so `pan-y` was
-     * dead. `failOffsetY` then failed the pan with no native scroller left to
-     * take the gesture, and the lanes could not be scrolled with a finger at
-     * all. There is no builder for this yet (2.32), so it goes on the config
-     * the web delegate actually reads.
-     */
-    g.config.touchAction = vertical ? "none" : "pan-y";
     return g;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values and the RN-side handlers are stable
   }, [vertical]);
@@ -2507,7 +2615,12 @@ export function LifeTimeline() {
     if (!SummitRopes) return [];
     const now_ = new Date(nowTick);
     const built = layout.geometries
-      .filter((g) => !(g as { ropeGone?: boolean }).ropeGone)
+      // Ropes only. A thread that no longer reaches Now is HISTORY on the
+      // mountain — it keeps its time-anchored geometry, has no place on the
+      // ring, and RingG deliberately gives it no turn. Handing it to the
+      // canvas drew it as a straight vertical rope at angle zero: several of
+      // them stacked on the route, over the main line, Now and the climber.
+      .filter((g) => g.reachesNow && !(g as { ropeGone?: boolean }).ropeGone)
       .map((g) => {
         const b = byId.get(g.branchId);
         return toRopeSpec(
@@ -2610,22 +2723,49 @@ export function LifeTimeline() {
   const nameRows = useMemo(() => {
     const out = new Map<string, { row: number; maxW: number }>();
     if (!vertical || !sm) return out;
-    const facing = layout.geometries
+    const facing: { id: string; x: number; g: BranchGeometry }[] = layout.geometries
       .filter((g) => g.reachesNow && g.inWindow && g.angle !== undefined && !g.coiled)
       .map((g) => ({ id: g.branchId, x: ringXRef.current(g), g }))
-      // comfortably facing, the same threshold the ring's marks call "front"
-      .filter((r) => Math.cos((r.g.angle as number) + rotRef.current) > 0.55)
-      .sort((a, b) => a.x - b.x);
+      .filter((r) => Math.cos((r.g.angle as number) + rotRef.current) > 0.55);
+    /**
+     * At most NAMED_AT_ONCE of them, nearest the front.
+     *
+     * A threshold on the angle used to do this, and it stopped working once
+     * the ring spread by projection: the same wedge now holds half again as
+     * many ropes, six names went onto a face with room to read four, and the
+     * longest titles were cut to nothing. A count says what was always meant.
+     * Every rope is still there and still evenly spread; turning brings the
+     * next one's name round, which is what turning is for.
+     */
+    facing
+      .sort(
+        (a, b) =>
+          Math.cos((b.g.angle as number) + rotRef.current) -
+          Math.cos((a.g.angle as number) + rotRef.current),
+      )
+      .splice(NAMED_AT_ONCE);
+    facing.sort((a, b) => a.x - b.x);
+    /**
+     * Names are packed into rows so that neighbours never sit side by side —
+     * each one's room is the reach to the next name SHARING its row, so more
+     * rows means more room.
+     *
+     * Three of them once there are more than two names. Two was right while
+     * the ropes crowded at the silhouette and left a void through the middle,
+     * which gave the few names in the middle plenty of reach; spread evenly,
+     * the named ropes are neighbours and two rows left the longest titles cut
+     * to a few characters.
+     */
+    const rows = facing.length > 2 ? 3 : 2;
     for (let i = 0; i < facing.length; i++) {
-      const row = i % 2;
-      // Room to the nearest name that shares this row — i ± 2 — and to the
+      // Room to the nearest name that shares this row — i ± rows — and to the
       // frame. Half of it each side, since names are centred on their column.
-      const prev = facing[i - 2];
-      const next = facing[i + 2];
+      const prev = facing[i - rows];
+      const next = facing[i + rows];
       const left = prev ? (facing[i].x - prev.x) / 2 : facing[i].x - 8;
       const right = next ? (next.x - facing[i].x) / 2 : sm.routeX + sm.faceHalf - facing[i].x;
       out.set(facing[i].id, {
-        row,
+        row: i % rows,
         maxW: Math.max(56, Math.min(left, right) * 2 - 10),
       });
     }
@@ -3084,7 +3224,28 @@ export function LifeTimeline() {
           showsHorizontalScrollIndicator
           overScrollMode="never"
         >
-          <GestureDetector gesture={mapGesture}>
+          {/**
+            * `touchAction` says which axis is the BROWSER's on mobile web.
+            *
+            * Gesture Handler stamps it on the view it is attached to, and with
+            * nothing configured it stamps `none`. That view is an ANCESTOR of
+            * the <Svg> whose own `pan-y` was meant to leave vertical scrolling
+            * to the browser, and touch-action intersects down the tree — so
+            * `pan-y` was dead, `failOffsetY` failed the pan with no native
+            * scroller left to take it, and the lanes could not be scrolled
+            * with a finger at all.
+            *
+            * On the detector rather than the gesture config, and keyed on the
+            * orientation: the web delegate only stamps the style when the
+            * handler is created or its enabled state flips, so a summit ↔
+            * riverbed switch would otherwise leave the wrong value on the
+            * node for the rest of the session.
+            */}
+          <GestureDetector
+            key={vertical ? "summit" : "flat"}
+            gesture={mapGesture}
+            touchAction={vertical ? "none" : "pan-y"}
+          >
           <View
             onTouchEnd={() => {
               // a candidate that never picked an axis stays a tap — unless a
@@ -3534,11 +3695,17 @@ export function LifeTimeline() {
                     // drawing ITSELF IN stays on the SVG for the 1.1s it
                     // takes — the draw-in is a dash sweep on the stroke, and
                     // there is at most one of them at a time.
-                    strokesOff={vertical ? !!SummitRopes : !!BranchLines && !isBorn}
+                    // The canvas draws the ROPES; the history lines behind
+                    // them are not ropes and stay with the SVG.
+                    strokesOff={
+                      vertical
+                        ? !!SummitRopes && g.reachesNow
+                        : !!BranchLines && !isBorn
+                    }
                     // The moments are the only part of a rope a summit pan
                     // moves, so they carry the transient and the rope itself
                     // is never rebuilt for it.
-                    panOffset={vertical ? panSV : null}
+                    panOffset={vertical ? panShown : null}
                     wave={vertical ? null : calmCurrent.wave}
                     // No wave on the summit: the route is straight and still,
                     // so the dots that sit on it must be too (they compute
