@@ -409,7 +409,7 @@ const DECIDE_PX = 8;
  * as well — a hundred and twenty pixels keeps the date rail's ticks honest
  * without paying much for it.
  */
-const REBASE_PX = 120;
+const REBASE_PX = 60;
 
 /** How many rope names the face carries at once. See `nameRows`. */
 const NAMED_AT_ONCE = 4;
@@ -425,12 +425,18 @@ const NAMED_AT_ONCE = 4;
  * says "there is nothing here". A band that gives, slows, and glides back
  * does.
  */
-const RUBBER_PX = 80;
+const RUBBER_PX = 40;
 
 /**
  * `over` px past the limit, resisted: the first pixels come easy and the last
  * ones barely move, approaching RUBBER_PX but never reaching it.
  */
+/** Never further than the gutter: past it there is nothing drawn. */
+function clampTo(v: number, limit: number): number {
+  "worklet";
+  return limit <= 0 ? v : Math.max(-limit, Math.min(limit, v));
+}
+
 function rubber(over: number): number {
   "worklet";
   const a = Math.abs(over);
@@ -858,7 +864,16 @@ export function LifeTimeline() {
    * except the gridlines, the rail and the moment dots, and they are drawn
    * the full height of the canvas already.
    */
-  const overscan = vertical ? 0 : REBASE_PX;
+  /**
+   * The gutter: how much world is drawn beyond each edge of the stage.
+   *
+   * It has to cover everything the drawn offset can ever be — the travel not
+   * yet handed over (REBASE_PX), the band at the edge of time (RUBBER_PX),
+   * and one more rebase for a commit still in flight while a flick keeps
+   * going. Sized short of that, the map runs out of drawn world and the
+   * screen goes white where there is nothing left to show.
+   */
+  const overscan = vertical ? 0 : REBASE_PX * 2 + RUBBER_PX;
   const overscanRef = useRef(overscan);
   overscanRef.current = overscan;
   const buildWindow = useMemo(() => {
@@ -1042,6 +1057,8 @@ export function LifeTimeline() {
   const panSV = useSharedValue(0);
   /** The same, sideways: the horizontal maps' un-committed pan, in pixels. */
   const panXSV = useSharedValue(0);
+  /** What the rendered window stands for, for the clamp. See `worldRide`. */
+  const panCommittedSV = useSharedValue(0);
   /** How much of each transient the store has already been told about. */
   const panSentSV = useSharedValue(0);
   const panSentXSV = useSharedValue(0);
@@ -1321,18 +1338,35 @@ export function LifeTimeline() {
    * The horizontal world's camera: the gutter it is drawn shifted by, plus
    * whatever the finger has moved since the last rebase.
    */
+  /**
+   * How far the world is drawn from where its GEOMETRY sits, clamped to the
+   * gutter.
+   *
+   * The clamp is on the offset, not on the travel: travel accumulates for the
+   * whole session and `panCommittedSV` follows it one rebase at a time, so
+   * clamping the raw number would pin the map after sixty pixels and never
+   * let go. If the bookkeeping ever runs ahead of the window — a flick that
+   * outruns its own commit — the world stops at the edge of what is drawn
+   * rather than dragging a blank strip into view.
+   */
   const worldRide = useAnimatedProps(
-    () => ({ translateX: Math.round((panXSV.value + rubber(panOverXSV.value)) * 2) / 2 }),
-    [panXSV, panOverXSV],
+    () => {
+      const base = panCommittedSV.value;
+      const live = panXSV.value + rubber(panOverXSV.value);
+      return { translateX: Math.round((base + clampTo(live - base, overscan)) * 2) / 2 };
+    },
+    [panXSV, panOverXSV, panCommittedSV, overscan],
   );
   /** The pinned date strip lives outside the SVG and carries it by hand. */
   const stripRide = useAnimatedStyle(
-    () => ({
-      transform: [
-        { translateX: Math.round((panXSV.value + rubber(panOverXSV.value)) * 2) / 2 },
-      ],
-    }),
-    [panXSV, panOverXSV],
+    () => {
+      const base = panCommittedSV.value;
+      const live = panXSV.value + rubber(panOverXSV.value);
+      return {
+        transform: [{ translateX: Math.round((base + clampTo(live - base, overscan)) * 2) / 2 }],
+      };
+    },
+    [panXSV, panOverXSV, panCommittedSV, overscan],
   );
 
   const farProps = useAnimatedProps(
@@ -1739,6 +1773,12 @@ export function LifeTimeline() {
     }
   }
   const panCommitted = panPairsRef.current[panAxis].px;
+  /**
+   * The same number the viewBox is built from, mirrored for the UI thread.
+   * It is read only to know where the geometry sits, so the clamp above can
+   * measure the offset from it — never to place anything.
+   */
+  panCommittedSV.value = panCommitted;
   /** What React has already accounted for, taken off in the same render. */
   const panBase = -Math.round(panCommitted * 2) / 2;
   /**
@@ -3291,30 +3331,32 @@ export function LifeTimeline() {
               // fired hold already consumed this touch
               if (modeRef.current === "idle") endGesture();
             }}
-            /**
-             * The camera, split across two OWNERS AND TWO ELEMENTS.
-             *
-             * React puts the gutter and everything it has already committed
-             * here, on the container; Reanimated puts the un-committed travel
-             * on a group inside the SVG. They used to be nested transforms on
-             * two <G>s, one written by each — and a rebase writes them in the
-             * same commit, so they cannot disagree about WHERE the world is,
-             * but writing the parent's attribute can disturb the child's, and
-             * one frame of the pre-drag world is what that looks like.
-             *
-             * The pinned date strip below has always been built this way — an
-             * outer view carrying the base, an inner one carrying the
-             * transform — and has never flickered. Now the world matches it.
-             */
-            style={
-              vertical
-                ? undefined
-                : { transform: [{ translateX: -overscan + panBase }] }
-            }
           >
             <Svg
               width={svgWidth}
               height={svgHeight}
+              /**
+               * THE ELEMENT NEVER MOVES. Only what it shows does.
+               *
+               * The camera has two halves that must change together: React
+               * owns the window and the geometry drawn against it, the finger
+               * owns the travel not yet committed. Last round I put React's
+               * half on the view WRAPPING this element — which moves the
+               * element, and that half grows with every rebase and is
+               * unbounded over a session. After two scrolls back through time
+               * the canvas had slid three hundred and fifty pixels off the
+               * stage and left most of the screen white.
+               *
+               * So React's half goes on the viewBox: it shifts the coordinate
+               * system without moving the element, it is written in the same
+               * commit as the geometry it has to agree with, and it is a
+               * different attribute on a different element from the transform
+               * the finger drives — so neither can disturb the other, which
+               * is what nesting them as two groups was suspected of doing.
+               */
+              {...(vertical
+                ? null
+                : { viewBox: `${overscan - panBase} 0 ${svgWidth} ${svgHeight}` })}
               accessibilityLabel={summary}
               accessibilityRole="image"
               // .timeline-svg parity: drags must never select label text.

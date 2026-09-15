@@ -78,6 +78,53 @@ async function swipe(map, { x, y, dx, dy, steps = 40, gap = 12, onMid }) {
   await page.waitForTimeout(800);
 }
 
+/**
+ * Start watching whether the map still covers the screen.
+ *
+ * The check nothing here made, and the reason a regression that left 231px of
+ * a 390px phone blank shipped three times. Every other assertion asks where
+ * something IS; this one asks whether there is anything there at all.
+ *
+ * Sampled every displayed frame, because a strip that shows for ten frames
+ * mid-drag is exactly as bad as one that stays.
+ */
+const watchCoverage = (page) =>
+  page.evaluate(() => {
+    window.__cover = [];
+    const tick = () => {
+      const svg = [...document.querySelectorAll("svg")].sort(
+        (a, b) => b.clientWidth - a.clientWidth,
+      )[0];
+      if (svg) {
+        const r = svg.getBoundingClientRect();
+        // How much of the stage's width the drawn map fails to reach, either side.
+        window.__cover.push([
+          Math.round(Math.max(0, r.left)),
+          Math.round(Math.max(0, window.innerWidth - r.right)),
+        ]);
+      }
+      window.__coverR = requestAnimationFrame(tick);
+    };
+    window.__coverR = requestAnimationFrame(tick);
+  });
+
+const readCoverage = async (page) => {
+  const rows = await page.evaluate(() => {
+    if (window.__coverR) cancelAnimationFrame(window.__coverR);
+    const s = window.__cover ?? [];
+    window.__cover = [];
+    return s;
+  });
+  if (!Array.isArray(rows) || rows.length === 0) return { left: 0, right: 0, frames: 0 };
+  let left = 0;
+  let right = 0;
+  for (const [l, r] of rows) {
+    left = Math.max(left, l);
+    right = Math.max(right, r);
+  }
+  return { left, right, frames: rows.length };
+};
+
 /** Every date label's position, sampled once per displayed frame. */
 const startTrace = (page, axis) =>
   page.evaluate((ax) => {
@@ -143,6 +190,7 @@ for (const mode of MODES) {
   const { ctx, page } = map;
   const at = (x) => Math.round(map.w * x);
   const tag = `riverbed/${mode.name}`;
+  await watchCoverage(page);
 
   // 1. a vertical drag belongs to the SCROLLER, not to us. Gesture Handler
   //    stamps touch-action on the view it is attached to, and with nothing
@@ -189,6 +237,12 @@ for (const mode of MODES) {
    * to judder there, and then — once the transient was clamped — it did
    * nothing at all, which is what "it drags a bit then snaps back" was about.
    * It gives now, and lets go. */
+  const cover = await readCoverage(page);
+  check(
+    cover.left === 0 && cover.right === 0 && cover.frames > 60,
+    `${tag}: the map covers the screen throughout (worst strip left ${cover.left}px, right ${cover.right}px over ${cover.frames} frames)`,
+  );
+
   await page.close();
   await ctx.close();
 
@@ -199,6 +253,7 @@ for (const mode of MODES) {
    * drags having armed a thread or moved the window first, which is how a
    * person meets it and how this check kept measuring something else. */
   const fresh = await openMap("riverbed", mode);
+  await watchCoverage(fresh.page);
   const world = () =>
     fresh.page.evaluate(() => {
       const t = [...document.querySelectorAll("svg text")].find((e) => (e.textContent ?? "").length > 8);
@@ -244,6 +299,12 @@ for (const mode of MODES) {
     `${tag}: a fast flick loses no rebase (${fast?.travel.toFixed(0)}px of 360)`,
   );
 
+  const coverFresh = await readCoverage(fresh.page);
+  check(
+    coverFresh.left === 0 && coverFresh.right === 0 && coverFresh.frames > 60,
+    `${tag}: and covers it at the edge of time too (left ${coverFresh.left}px, right ${coverFresh.right}px)`,
+  );
+
   await fresh.page.close();
   await fresh.ctx.close();
 }
@@ -253,6 +314,7 @@ for (const mode of MODES) {
   const map = await openMap("summit", mode);
   const { ctx, page } = map;
   const tag = `summit/${mode.name}`;
+  await watchCoverage(page);
 
   await startTrace(page, "y");
   await swipe(map, { x: 60, y: map.h - 220, dx: 0, dy: -5, steps: 45, gap: 10 });
@@ -408,6 +470,12 @@ for (const mode of MODES) {
   check(
     differing > n / 1000,
     `${tag}: the ropes repaint on their own (${differing} bytes of ${n} changed in a second at rest)`,
+  );
+
+  const cover = await readCoverage(page);
+  check(
+    cover.left === 0 && cover.right === 0 && cover.frames > 60,
+    `${tag}: the map covers the screen throughout (worst strip left ${cover.left}px, right ${cover.right}px over ${cover.frames} frames)`,
   );
 
   /* The ropes must be spread by what the EYE sees, not by angle. Even angular
