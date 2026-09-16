@@ -105,11 +105,42 @@ export function BranchLinesCanvas({
    */
   const camera = useDerivedValue<CameraStep[]>(
     () => [
-      { translateX: (worldShift ? worldShift.value : 0) - worldX, translateY: 0 },
-      { translateX: 0, translateY: scrollY ? -Math.round(scrollY.value * 2) / 2 : 0 },
+      /**
+       * ONE key per entry, and it is not a style choice.
+       *
+       * `processTransform3d` (skia/types/Matrix4.js) reads
+       * `Object.keys(val)[0]` and acts on that alone, so an entry carrying
+       * both `translateX` and `translateY` has its second field silently
+       * dropped. Written as `{ translateX: 0, translateY: -scroll }` — which
+       * is what a TypeScript variance error once talked me into — this
+       * applied a zero x-shift and discarded the scroll entirely, and the
+       * threads sat still while every other layer moved under them.
+       */
+      { translateX: (worldShift ? worldShift.value : 0) - worldX },
+      { translateY: scrollY ? -Math.round(scrollY.value * 2) / 2 : 0 },
     ],
     [worldShift, worldX, scrollY],
   );
+  /**
+   * The camera, published for the checks.
+   *
+   * Not for its VALUE but for its SHAPE. `processTransform3d` acts on
+   * `Object.keys(val)[0]` and ignores the rest of the entry, so a step
+   * carrying two fields loses one of them silently — no error, no warning,
+   * just a layer that stops moving while every other layer scrolls. The
+   * compiler will not catch it either: the union is inferred through a
+   * callback, so excess-property checking never fires. A check that can read
+   * the steps can assert what the compiler cannot. Testing builds only.
+   */
+  useEffect(() => {
+    if (!SHOW_TESTING || typeof window === "undefined") return;
+    const w = window as unknown as { __ocCamera?: () => CameraStep[] };
+    w.__ocCamera = () => camera.value;
+    return () => {
+      delete w.__ocCamera;
+    };
+  }, [camera]);
+
   return (
     <Canvas style={{ width, height }} pointerEvents="none">
       <Group transform={camera}>
@@ -136,7 +167,8 @@ export function BranchLinesCanvas({
 /** How far past the canvas edge a line still counts as visible. */
 const MARGIN = 60;
 
-type CameraStep = { translateX: number; translateY: number };
+/** Exactly one of the two, because Skia only ever reads the first key. */
+type CameraStep = { translateX: number } | { translateY: number };
 type Camera = SharedValue<CameraStep[]>;
 
 function Line({
@@ -453,8 +485,14 @@ function useLineProbe(
       let dx = 0;
       let dy = 0;
       for (const t of camera.value) {
-        dx += t.translateX;
-        dy += t.translateY;
+        // The SAME rule the renderer applies — first key wins, the rest is
+        // ignored (skia/types/Matrix4.js). A probe that reimplements the
+        // camera as it was INTENDED rather than as it is DRAWN reports a
+        // healthy scene over a broken one, which is how the dropped scroll
+        // translation survived a harness built to catch exactly that.
+        const key = Object.keys(t)[0];
+        if (key === "translateX") dx += (t as { translateX: number }).translateX;
+        else if (key === "translateY") dy += (t as { translateY: number }).translateY;
       }
       return { x: box.left + b.x + dx, y: box.top + b.y + dy, w: b.width, h: b.height };
     });

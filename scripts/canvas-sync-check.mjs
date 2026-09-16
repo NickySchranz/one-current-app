@@ -42,32 +42,49 @@ const fail = (msg) => {
  */
 const readWorld = (page) =>
   page.evaluate(() => {
-    const canvas = [];
-    for (const [, probe] of window.__ocLines ?? []) {
+    /* Keyed by branch id, because the SET of drawn threads is not stable:
+       scrolling culls the ones that leave the viewport, and a median taken
+       over "whatever is on screen now" moves when the population changes
+       rather than when the layer does. Only threads present in BOTH readings
+       can say anything about travel. */
+    const canvas = {};
+    for (const [id, probe] of window.__ocLines ?? []) {
       const b = probe();
-      if (b && b.w > 20) canvas.push(b.y);
+      if (b && b.w > 20) canvas[id] = b.y;
     }
     const svg = [...document.querySelectorAll('path[stroke="transparent"]')]
       .map((el) => el.getBoundingClientRect())
       .filter((r) => r.width > 20)
-      .map((r) => r.top);
+      .map((r) => r.top)
+      .sort((a, b) => a - b);
     const scroller = [...document.querySelectorAll("div")].find(
       (d) => d.scrollHeight > d.clientHeight + 40 && /auto|scroll/.test(getComputedStyle(d).overflowY),
     );
     return { canvas, svg, scrollTop: scroller ? Math.round(scroller.scrollTop) : null };
   });
 
-const median = (xs) => {
-  if (!xs.length) return null;
-  const s = [...xs].sort((a, b) => a - b);
-  return s[Math.floor(s.length / 2)];
-};
 
-/** How far each layer travelled between two readings. They must agree. */
-const travel = (a, b) => ({
-  canvas: Math.round(median(b.canvas) - median(a.canvas)),
-  svg: Math.round(median(b.svg) - median(a.svg)),
-});
+/**
+ * How far each layer travelled between two readings. They must agree.
+ *
+ * The canvas is compared thread by thread over the threads both readings hold;
+ * the SVG has no id to key on, so it is compared as the shift that best lines
+ * its two sorted populations up — which is stable as long as the scroll did
+ * not change the population wildly, and the canvas side is the strict one.
+ */
+const travel = (a, b) => {
+  const ids = Object.keys(a.canvas).filter((id) => id in b.canvas);
+  const deltas = ids.map((id) => b.canvas[id] - a.canvas[id]).sort((x, y) => x - y);
+  const common = Math.min(a.svg.length, b.svg.length);
+  const svgDeltas = [];
+  for (let i = 0; i < common; i++) svgDeltas.push(b.svg[b.svg.length - common + i] - a.svg[a.svg.length - common + i]);
+  svgDeltas.sort((x, y) => x - y);
+  return {
+    canvas: deltas.length ? Math.round(deltas[Math.floor(deltas.length / 2)]) : null,
+    svg: svgDeltas.length ? Math.round(svgDeltas[Math.floor(svgDeltas.length / 2)]) : null,
+    n: ids.length,
+  };
+};
 
 async function run({ label, reducedMotion }) {
   /**
@@ -104,8 +121,8 @@ async function run({ label, reducedMotion }) {
   await page.waitForTimeout(3500);
 
   const rest = await readWorld(page);
-  if (rest.canvas.length < 5) {
-    fail(`${label}: only ${rest.canvas.length} threads on the canvas — the scene never loaded`);
+  if (Object.keys(rest.canvas).length < 5) {
+    fail(`${label}: only ${Object.keys(rest.canvas).length} threads on the canvas — the scene never loaded`);
     await ctx.close();
     return;
   }
@@ -149,7 +166,53 @@ async function run({ label, reducedMotion }) {
     ok(`${label}: the canvas follows the lean (both moved ${t1.svg}px)`);
   }
 
-  /* 2. AND BACK. Closing shrinks the scroll content again, and the scroller
+  /* The camera's SHAPE, before anything about its value.
+   *
+   * Skia's `processTransform3d` acts on `Object.keys(val)[0]` and ignores the
+   * rest of the entry, so `{ translateX: 0, translateY: -scroll }` applies a
+   * zero x-shift and throws the scroll away — no error, and the threads sit
+   * still while every other layer moves. TypeScript will not catch it: the
+   * union is inferred through a callback, so excess-property checking never
+   * fires. This is the only place that can. */
+  const steps = await page.evaluate(() => (window.__ocCamera ? window.__ocCamera() : null));
+  if (!steps) {
+    fail(`${label}: no camera published — cannot check its shape`);
+  } else {
+    const bad = steps.filter((t) => Object.keys(t).length !== 1);
+    if (bad.length) {
+      fail(
+        `${label}: ${bad.length} camera step(s) carry more than one key — ` +
+          `Skia will use only the first and drop the rest: ${JSON.stringify(bad)}`,
+      );
+    } else {
+      ok(`${label}: every camera step carries exactly one transform (${steps.length} steps)`);
+    }
+  }
+
+  /* 2. SCROLLING. The SVG is moved by the scroller it lives inside; the canvas
+   *    is pinned beside it and reconstructs the same motion from `mapScrollY`
+   *    through its own transform. If that transform is dropped — Skia reads
+   *    only the FIRST key of each entry, so a two-key one loses its second
+   *    field without a word — the threads sit still while every other layer
+   *    moves, and nothing throws. */
+  const preScroll = await readWorld(page);
+  await page.mouse.move(195, 500);
+  await page.mouse.wheel(0, 260);
+  await page.waitForTimeout(1000);
+  const scrolled = await readWorld(page);
+  const ts = travel(preScroll, scrolled);
+  if (Math.abs(ts.svg) < 20) {
+    console.log(`     (the map only scrolled ${ts.svg}px — weak signal)`);
+  } else if (Math.abs(ts.canvas - ts.svg) > 6) {
+    fail(
+      `${label}: the map scrolled and the canvas did not follow ` +
+        `(svg moved ${ts.svg}px, canvas moved ${ts.canvas}px)`,
+    );
+  } else {
+    ok(`${label}: the canvas follows a scroll (both moved ${ts.svg}px)`);
+  }
+
+  /* 3. AND BACK. Closing shrinks the scroll content again, and the scroller
    *    clamps its own offset on the way out — a clamp that is not always a
    *    scroll event, which is how the canvas kept a scroll position the
    *    scroller had already abandoned. */
@@ -170,7 +233,7 @@ async function run({ label, reducedMotion }) {
     ok(`${label}: the canvas follows the panel closing (both moved ${t2.svg}px)`);
   }
 
-  /* 3. Round trip: back where it started, on both layers. */
+  /* 4. Round trip: back where it started, on both layers. */
   const t3 = travel(rest, closed);
   if (Math.abs(t3.canvas - t3.svg) > 6) {
     fail(`${label}: after a full cycle the layers disagree by ${Math.abs(t3.canvas - t3.svg)}px`);
