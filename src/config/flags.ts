@@ -28,50 +28,67 @@ export const PERF_COUNTERS = __DEV__ || process.env.EXPO_PUBLIC_PERF === "1";
 /**
  * Draw the summit's ropes on a Skia canvas instead of as SVG paths.
  *
- * OFF, and the reason is a correction rather than a preference.
+ * OFF, and the reason has changed twice. Both corrections are worth keeping,
+ * because they are the same mistake made at two different depths.
  *
- * The canvas was turned on because it measured at half the SVG renderer's
- * idle cost. That measurement was wrong, and the way it was wrong is worth
- * keeping: react-native-skia repaints when a value it is handed CHANGES by
- * identity, and the canvas handed back the same mutated path object every
- * frame. So it was not repainting the sway at all — it redrew only when
- * something made React re-render, which is why on a phone the ropes swayed
- * while the mountain was being turned and stopped dead the moment it settled.
+ * The canvas was first turned ON because it measured at half the SVG
+ * renderer's idle cost. That was wrong: react-native-skia repaints when a
+ * value it is handed CHANGES BY IDENTITY, and the canvas handed back the same
+ * mutated path object every frame, so it was not repainting the sway at all.
  * The cheap number was the cost of a canvas that was not drawing.
  *
- * Made to draw properly (see the two paths in SummitRopesCanvas), the same
- * scene measures, at 44 threads:
+ * It was then turned OFF on a second measurement — and that one was taken on
+ * a build where the same bug was still live in `BranchLinesCanvas` and in the
+ * rope benchmark, and where the guard state was kept in shared values the
+ * worklet also wrote, which re-triggers the worklet's own mapper and defeats
+ * the guard entirely (`mappers.js`: a mapper subscribes to every shared value
+ * its worklet reads). Both are fixed. These are the first numbers this file
+ * has carried that were taken on a canvas that was actually drawing:
  *
- *              idle p50        idle script   drag p50     dropped (idle)
- *   Skia       33.3ms (30fps)  49.5%         116.7ms      159
- *   SVG        16.7ms (60fps)  13.5%          16.7ms        0
+ *   summit, 44 threads, idle     p50          script   dropped/6s
+ *     SVG                        16.7ms 60fps  11.9%     0
+ *     Skia                       16.7ms 60fps  39.0%    78
  *
- * So the SVG ropes are not the fallback; they are the faster renderer here.
- * The canvas stays behind this flag — it is written, correct, and might yet
- * win on hardware with a GPU, which this box does not have — but nothing
- * ships on it. `EXPO_PUBLIC_SKIA=1` turns it on to measure.
+ * So SVG still wins here, and the reason is not the one anybody guessed. An
+ * ablation that cuts the fill to a third while leaving the geometry identical
+ * (`renderer-bench.mjs --layers 1`) HALVES Skia's frame time, and removing
+ * the twist — some seven thousand path commands a frame — moves it by 0.4 of
+ * a percentage point. The cost is not geometry and not the scene tree. It is
+ * rasterisation, and on this box that runs in WebAssembly on a CPU, because
+ * headless Chromium falls back to SwiftShader. The SVG it is being compared
+ * against is rasterised by the browser's own native, SIMD, multi-threaded
+ * Skia. That is not a renderer comparison; it is a build comparison.
+ *
+ * The decision belongs on a device.
+ *
+ * **ON as of this build, by request.** The owner wants to see the canvas on
+ * real hardware, which is the one thing this box cannot provide — headless
+ * Chromium has no GPU. Set `EXPO_PUBLIC_SKIA=0` to put the SVG ropes back.
  */
-export const SKIA_ROPES = process.env.EXPO_PUBLIC_SKIA === "1";
+export const SKIA_ROPES = process.env.EXPO_PUBLIC_SKIA !== "0";
 
 /**
  * Draw the horizontal themes' thread lines on a Skia canvas.
  *
- * OFF by default, and the reason is a measurement rather than a doubt about
- * the code. On the summit the canvas is a clear win: about half the script
- * cost and well under half the style recalculation, with the same frame
- * pacing. On the riverbed maps the same change is close to a wash — it trades
- * script for fill, and the twelve-odd full-width wavy lines on screen are a
- * great deal more stroke area than a handful of short ropes:
+ * OFF, and this flag's old comment described a measurement that never
+ * happened: it reported "60fps both at idle" for a canvas whose `drawn` and
+ * `dashed` worklets returned the same SkPath object every frame and therefore
+ * never repainted. Measured drawing, at 44 threads on the riverbed:
  *
- *   44 threads, riverbed, same code, SVG vs Skia
- *   idle  60fps both   script 22.8% -> 18.3%   recalc 159ms -> 64ms
- *   drag  p50 33.3ms both   p95 50ms -> 67ms   dropped 135 -> 170
+ *                    idle p50        script   dropped/6s
+ *     SVG             16.7ms 60fps    37.6%     21
+ *     Skia            66.6ms 15fps    20.1%     98
  *
- * The box those numbers come from has no GPU: headless Chromium falls back to
- * SwiftShader, which is the condition that most favours the browser's own
- * rasteriser and most punishes a canvas. On real hardware the fill is close
- * to free and the script saving should stand — but that has not been
- * measured, so the default follows the evidence there is. Set
- * EXPO_PUBLIC_SKIA_LINES=1 to turn it on and measure it somewhere with a GPU.
+ * Read those two columns together, because they disagree in the useful
+ * direction: the canvas does exactly what it was built to do — it takes 37.6%
+ * of a frame's script down to 20.1% by deleting forty-four path strings a
+ * tick and the SVG attribute writes behind them — and then loses anyway, four
+ * times over, on the pixels. Same conclusion as the ropes, arrived at from
+ * the opposite side.
+ *
+ * Measure it somewhere with a GPU.
+ *
+ * **ON as of this build, by request**, for the same reason as the ropes. Set
+ * `EXPO_PUBLIC_SKIA_LINES=0` to put the SVG lines back.
  */
-export const SKIA_LINES = process.env.EXPO_PUBLIC_SKIA_LINES === "1";
+export const SKIA_LINES = process.env.EXPO_PUBLIC_SKIA_LINES !== "0";

@@ -54,6 +54,12 @@ export function PerfOverlay() {
       {row("geometry", r.perSecond.geometry, r.perSecond.geometry > 2)}
       {row("commits", r.perSecond.commit, r.perSecond.commit > 4)}
       {row("paths", r.perSecond.path, r.perSecond.path > 400)}
+      {/* Recordings a second, which answers a different question from paths:
+          how often a frame happens at all. The sway asks for thirty; anything
+          near display rate means a guard is not holding, and anything above
+          zero while only the camera is moving means the world is being rebuilt
+          to move it. */}
+      {row("pictures", r.perSecond.picture, r.perSecond.picture > 35)}
       <T style={{ fontSize: 9, lineHeight: 12, color: "#8a8a8a", marginTop: 2 }}>
         {`${r.renderer}  ·  tap-free`}
       </T>

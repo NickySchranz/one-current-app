@@ -55,32 +55,46 @@ function useSkiaComponent<P>(
   load: () => Promise<ComponentType<P>>,
 ): ComponentType<P> | null {
   const [comp, setComp] = useState<ComponentType<P> | null>(null);
-  /** Once the GPU has dropped us, do not keep climbing back onto it. */
-  const [lost, setLost] = useState(false);
 
   /**
-   * A canvas whose WebGL context has gone draws NOTHING, and on the summit
-   * that is every rope — the worst failure available here, and one mobile
-   * Safari hands out freely when memory is tight or the tab comes back from
-   * the background. The SVG ropes are still in the tree, one prop away, so
-   * the answer is to stop being a canvas: dropping the component re-arms
-   * `strokesOff={false}` and the map draws itself the old way.
+   * The canvas does NOT hand back to the SVG, by request.
+   *
+   * It used to, three ways, and each of them was a kindness that made the
+   * renderer impossible to look at: a lost WebGL context dropped the
+   * component, a failed CanvasKit fetch was swallowed, and the window before
+   * the WASM arrived drew SVG strokes that then swapped underneath you. All
+   * three meant "what is on screen" and "which renderer drew it" could
+   * disagree without saying so — which is the same class of problem as a
+   * canvas that measures fast because it is not drawing.
+   *
+   * So a lost context now re-arms the canvas rather than retiring it, and a
+   * failed load is reported rather than hidden. If Skia cannot draw, the map
+   * is empty and that is the honest answer.
    */
   useEffect(() => {
     if (!comp || Platform.OS !== "web" || typeof document === "undefined") return;
     const canvas = document.querySelector("canvas");
     if (!canvas) return;
     const onLost = (e: Event) => {
+      // Preventing the default is what makes the context restorable at all.
       e.preventDefault();
-      setLost(true);
+      console.warn("[one-current] WebGL context lost — rebuilding the canvas, not falling back");
+    };
+    const onRestored = () => {
+      // A restored context needs a fresh surface, and the surface is built in
+      // the component's own layout effect, so remount it.
       setComp(null);
     };
     canvas.addEventListener("webglcontextlost", onLost);
-    return () => canvas.removeEventListener("webglcontextlost", onLost);
+    canvas.addEventListener("webglcontextrestored", onRestored);
+    return () => {
+      canvas.removeEventListener("webglcontextlost", onLost);
+      canvas.removeEventListener("webglcontextrestored", onRestored);
+    };
   }, [comp]);
 
   useEffect(() => {
-    if (!enabled || comp || lost) return;
+    if (!enabled || comp) return;
     let live = true;
     void (async () => {
       try {
@@ -90,17 +104,20 @@ function useSkiaComponent<P>(
         }
         const next = await load();
         if (live) setComp(() => next);
-      } catch {
-        // No CanvasKit — an old browser, a blocked fetch, a missing wasm on
-        // the host. The SVG strokes are still there and still correct; the
-        // app is simply not faster. Never a blank map.
+      } catch (err) {
+        // No silent SVG underneath any more: say so, loudly, in the console
+        // and on `window`, so "the map is blank" has an answer.
+        console.error("[one-current] CanvasKit failed to load — the world will not draw", err);
+        if (typeof window !== "undefined") {
+          (window as unknown as { __ocSkiaError?: unknown }).__ocSkiaError = err;
+        }
       }
     })();
     return () => {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `load` is a fresh closure every render by design
-  }, [enabled, comp, lost]);
+  }, [enabled, comp]);
 
   return enabled ? comp : null;
 }

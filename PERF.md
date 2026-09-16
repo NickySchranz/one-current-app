@@ -278,3 +278,111 @@ been drawn somewhere it cannot go.
   same counters via `src/dev/PerfOverlay.tsx`, so the numbers are reachable
   there — they have not been read here, and nothing above should be presented
   as a device result.
+
+## The canvas, measured while it was drawing
+
+Everything above this heading that compares SVG with Skia was measured on a
+canvas that was not repainting. This section replaces those numbers. It does
+not replace the SVG-only work, which stands.
+
+### What was wrong
+
+Reanimated's `valueSetter` refuses an assignment whose value is the object the
+shared value already holds:
+
+```js
+// react-native-reanimated/lib/module/valueSetter.js
+if (mutable._value === value && !forceUpdate) { return; }
+```
+
+No listener fires. So a `useDerivedValue` that rewinds one `SkPath` and hands
+the same object back tells the renderer nothing, and the animation is built,
+discarded, and never drawn. `flags.ts` recorded this for the summit ropes and
+it was fixed there — but the identical bug was still live in
+`BranchLinesCanvas` (`drawn` and `dashed`) and in `dev/RopeBenchSkia`, which
+is the SVG-vs-Skia decision gate itself. Every "Skia is faster" and every
+"Skia is a wash" number in this file came from one of those three.
+
+Two more, found the same way and fixed:
+
+- **A guard kept in a shared value defeats itself.** A mapper subscribes to
+  every shared value its worklet reads (`mappers.js`, `extractInputs`), so a
+  `lastT`/`lastWave`/`which` written from inside the worklet marks the mapper
+  dirty on every write. It re-ran at display rate no matter what the guard
+  said. Guard state is plain memory now.
+- **`createPicture` leaks its recorder.** `skia/core/Picture.js` builds a
+  `PictureRecorder` per call and never disposes it, unlike the library's own
+  `StaticContainer` and `drawAsPicture`. At thirty recordings a second that is
+  thirty abandoned WASM objects a second. One recorder is reused now.
+
+`scripts/renderer-bench.mjs` now screenshots the scene twice, 140ms apart, and
+refuses to time a renderer whose pixels did not change. That class of result
+cannot be published from here again.
+
+### The numbers
+
+44 threads, headless Chromium on Linux, **SwiftShader — no GPU**.
+
+| scene | renderer | idle p50 | script | dropped/6s |
+|---|---|---|---|---|
+| summit | SVG | 16.7 ms (60fps) | 11.9% | 0 |
+| summit | Skia | 16.7 ms (60fps) | 39.0% | 78 |
+| riverbed | SVG | 16.7 ms (60fps) | 37.6% | 21 |
+| riverbed | Skia | 66.6 ms (15fps) | **20.1%** | 98 |
+
+The rope bench, same scene both sides, 8s steady state:
+
+| ropes | SVG | Skia (one `<Path>` per rope) | Skia (one `<Picture>`) |
+|---|---|---|---|
+| 20 | 60fps, 5.2% | 60fps, 22.0% | 60fps, 20.2% |
+| 60 | 60fps, 12.2% | 26.0fps, 48.9% | 27.1fps, 46.5% |
+| 140 | 60fps, 26.3% | 11.4fps, 53.9% | 12.6fps, 51.4% |
+
+### What the numbers say, which is not what they look like
+
+**It is not the scene tree.** Collapsing 140 ropes from 420 `<Path>` nodes to
+a single recorded `<Picture>` — the architecture the summit actually uses —
+moved 140 ropes from 11.4fps to 12.6fps. Worth having, not the problem.
+
+**It is not the geometry.** The summit's twist was ~146 hand-laid rungs per
+rope against the ten cubics the rope itself costs — roughly seven thousand
+path commands a frame. Moving it onto the paint as a dash removed all of them
+and took idle script from 38.8% to 38.4%.
+
+**It is the fill.** `renderer-bench.mjs --layers 1` draws one stroke instead of
+three: identical geometry, identical path count, a third of the pixels. At 140
+ropes that takes Skia from 12.6fps to 25.7fps. Nothing else in these
+experiments moves the number by more than a rounding error.
+
+And the riverbed row is the same finding from the other side: the canvas takes
+script from 37.6% to 20.1% — it really does delete forty-four path strings a
+tick and the SVG attribute writes behind them — and still loses four to one on
+frame time.
+
+So this is a rasterisation result, and on this box rasterisation is CanvasKit
+compiled to WebAssembly running on a CPU, against SVG rasterised by Chromium's
+own native, SIMD, multi-threaded Skia. **That is a build comparison, not a
+renderer comparison**, and it is exactly the axis a GPU changes. Nothing here
+licenses a conclusion about a phone in either direction.
+
+### Still true, and platform-independent
+
+The corrected canvas no longer: allocates a `PictureRecorder` per frame, runs
+a CSS colour parser three times per visible rope per frame
+(`skia/web/JsiSkColor.js` — the hex is already normalised at spec-build time),
+re-triggers its own mapper through its guard, or strands its Skia handles on
+unmount. Those are wins wherever it runs.
+
+### One real bug found and not yet fixed
+
+`views/SkiaPictureView.web.js` builds a **new `WebGLRenderer`** — and so a new
+GL surface — on every layout event, and never disposes the previous one. A
+probe confirms it does *not* fire during a drag (0 new contexts over a 240px
+drag) but does on every resize (+1 surface each). Browser resize, orientation
+change and a mobile keyboard opening all hit it.
+
+### Limitations
+
+Unchanged and now load-bearing: no GPU, and **not measured on iOS or Android**
+— there is still no `ios/`, `android/` or `eas.json`. The decision belongs on
+a device, and these numbers cannot make it.

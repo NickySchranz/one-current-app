@@ -119,12 +119,24 @@ function Line({
   fade: number;
   reducedMotion: boolean;
 }) {
-  // A line that never moves is built once from its own path string and kept;
-  // only a moving one needs a path it can rewind and refill.
-  const path = useMemo(
-    () => (spec.count === 0 ? (Skia.Path.MakeFromSVGString(spec.d) ?? Skia.Path.Make()) : Skia.Path.Make()),
+  /**
+   * A line that never moves is built once from its own path string and kept.
+   *
+   * A moving one gets TWO paths, used turn and turn about, and that is not a
+   * flourish — it is the difference between drawing and not drawing.
+   * Reanimated's `valueSetter` refuses an assignment whose value is the same
+   * object it already holds (`valueSetter.js:54`), so handing back one
+   * rewound-and-refilled path tells the renderer nothing and the slither
+   * never repaints. It is the same mistake `flags.ts` records for the ropes,
+   * and it is why the riverbed's SVG-vs-canvas table measured a canvas that
+   * was standing still.
+   */
+  const stillPath = useMemo(
+    () => (spec.count === 0 ? (Skia.Path.MakeFromSVGString(spec.d) ?? Skia.Path.Make()) : null),
     [spec.count, spec.d],
   );
+  const buffers = useMemo(() => [Skia.Path.Make(), Skia.Path.Make()], []);
+  const dashBuffers = useMemo(() => [Skia.Path.Make(), Skia.Path.Make()], []);
   /**
    * The scroll is a TRANSFORM, not a rebuild.
    *
@@ -147,7 +159,6 @@ function Line({
   if (specSV.value !== spec) specSV.value = spec;
   const rides = !reducedMotion && !!wave && (spec.attachStart || spec.attachEnd);
   const slithers = !reducedMotion && spec.trembles;
-  const still = spec.count === 0;
 
   // The rate this line's own wave needs — the same table BranchLine's hook
   // uses, so a quiet line is not rebuilt thirty times a second to move a
@@ -166,10 +177,19 @@ function Line({
    * along the line without walking it a second time.
    */
   const xy = useMemo(() => new Float32Array(Math.max(2, spec.count) * 2), [spec.count]);
-  const dashPath = useMemo(() => Skia.Path.Make(), []);
 
-  const lastT = useSharedValue(Number.NaN);
-  const lastWave = useSharedValue(Number.NaN);
+  /**
+   * What the last build was made from, and which buffer holds it.
+   *
+   * A PLAIN OBJECT, and that is the whole point. A mapper's inputs are every
+   * shared value its worklet closes over (`mappers.js`, `extractInputs`), so
+   * a guard kept in a shared value that the worklet also writes marks the
+   * mapper dirty on every write — it re-runs at display rate no matter what
+   * the guard says, which is a guard that costs more than it saves. These
+   * were `useSharedValue(NaN)` and did exactly that. Plain memory is just
+   * memory.
+   */
+  const seen = useMemo(() => ({ t: Number.NaN, wave: Number.NaN, i: 0, di: 0 }), []);
 
   const drawn = useDerivedValue<SkPathType>(() => {
     const spec = specSV.value;
@@ -180,11 +200,17 @@ function Line({
     // SVG, which the browser clips per node, a canvas pays for every stroke
     // it is asked to lay down.
     if (spec.maxY + shiftNow < -MARGIN || spec.minY + shiftNow > height + MARGIN) {
-      if (!path.isEmpty() && !still) path.reset();
-      lastT.value = Number.NaN;
-      return path;
+      if (stillPath) return stillPath;
+      const shown = buffers[seen.i];
+      if (shown.isEmpty()) return shown;
+      // Emptying it has to be SEEN, so the clear lands on the other buffer.
+      seen.i = 1 - seen.i;
+      seen.t = Number.NaN;
+      const cleared = buffers[seen.i];
+      cleared.reset();
+      return cleared;
     }
-    if (still) return path;
+    if (stillPath) return stillPath;
     const t = tick.value;
     // Quantized, and then USED quantized — the strength of the main wave is
     // a live spring, so an unrounded copy of it in the guard means the guard
@@ -200,15 +226,19 @@ function Line({
     // One number standing for the whole wave state: if it and the slither
     // tick are where they were, the path already holds the answer.
     const waveKey = waveOn ? waveT * 10000 + ampP * 100 + freqP : -1;
-    if (t === lastT.value && waveKey === lastWave.value) {
-      return path;
+    if (t === seen.t && waveKey === seen.wave) {
+      return buffers[seen.i];
     }
-    lastT.value = t;
-    lastWave.value = waveKey;
+    seen.t = t;
+    seen.wave = waveKey;
     countPathBuildUI();
 
     const pts = spec.pts;
     const n = spec.count;
+    // The other buffer: a new identity, which is the only way the renderer
+    // can tell this frame from the last one.
+    seen.i = 1 - seen.i;
+    const path = buffers[seen.i];
     path.reset();
     for (let i = 0; i < n; i++) {
       const o = i * PT_STRIDE;
@@ -231,7 +261,7 @@ function Line({
     // `spec` belongs in here — see the note in SummitRopesCanvas: the worklet
     // closes over what this array names, and this body reads the spec's
     // geometry, level and lane throughout.
-  }, [specSV, tick, wave, scrollY, path, still, slithers, rides, height, xy, lastT, lastWave]);
+  }, [specSV, tick, wave, scrollY, stillPath, buffers, seen, slithers, rides, height, xy]);
 
   useLineProbe(spec, drawn);
 
@@ -262,6 +292,10 @@ function Line({
     // holds the frame that is actually on screen.
     const src = drawn.value;
     const phase = flowQ.value;
+    // Two buffers here for the same reason as the line itself: the same
+    // object handed back twice is a frame the renderer cannot see.
+    seen.di = 1 - seen.di;
+    const dashPath = dashBuffers[seen.di];
     dashPath.reset();
     if (!spec.flows || spec.count < 2 || src.isEmpty()) return dashPath;
     const on = spec.flowDash[0];
@@ -282,7 +316,7 @@ function Line({
       dashPath.lineTo(ax + (dx / len) * on, ay + (dy / len) * on);
     }
     return dashPath;
-  }, [drawn, flowQ, dashPath, xy, spec]);
+  }, [drawn, flowQ, dashBuffers, seen, xy, spec]);
 
   return (
     <Group transform={camera}>

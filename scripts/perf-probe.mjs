@@ -115,7 +115,8 @@ async function phase(name, body) {
   );
   console.log(
     `  per sec   renders ${per(counters.total.render)}  geometry ${per(counters.total.geometry)}  ` +
-      `commits ${per(counters.total.commit)}  paths ${per(counters.total.path)}`,
+      `commits ${per(counters.total.commit)}  paths ${per(counters.total.path)}  ` +
+      `pictures ${per(counters.total.picture ?? 0)}`,
   );
   return { name, frames, scriptMs, wallS, counters };
 }

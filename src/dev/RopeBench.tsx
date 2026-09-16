@@ -11,7 +11,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { swayOffsetAt } from "@/features/life-timeline/useSquiggle";
 import { countPathBuildUI } from "./perf-counters";
-import { LEVEL, STEP_PX, makeRopes, type Rope } from "./rope-bench-shared";
+import { LEVEL, STEP_PX, layers, makeRopes, type Rope } from "./rope-bench-shared";
 
 const AnimatedSvgPath = Animated.createAnimatedComponent(SvgPath);
 
@@ -31,7 +31,7 @@ const AnimatedSvgPath = Animated.createAnimatedComponent(SvgPath);
  *
  * Reached with ?bench=svg or ?bench=skia on a build carrying EXPO_PUBLIC_PERF.
  */
-export function RopeBenchScreen({ mode }: { mode: "svg" | "skia" }) {
+export function RopeBenchScreen({ mode }: { mode: "svg" | "skia" | "picture" }) {
   const [SkiaScene, setSkiaScene] = useState<ComponentType<SceneProps> | null>(null);
   const clock = useSharedValue(0);
   useMemo(() => {
@@ -43,7 +43,7 @@ export function RopeBenchScreen({ mode }: { mode: "svg" | "skia" }) {
   // module is evaluated, so a static import captures it before the WASM
   // exists and every draw fails with "PathBuilder of undefined".
   useEffect(() => {
-    if (mode !== "skia") return;
+    if (mode === "svg") return;
     let live = true;
     void (async () => {
       if (Platform.OS === "web") {
@@ -51,7 +51,8 @@ export function RopeBenchScreen({ mode }: { mode: "svg" | "skia" }) {
         await LoadSkiaWeb();
       }
       const mod = await import("./RopeBenchSkia");
-      if (live) setSkiaScene(() => mod.SkiaRopes as ComponentType<SceneProps>);
+      const next = mode === "picture" ? mod.SkiaRopesPicture : mod.SkiaRopes;
+      if (live) setSkiaScene(() => next as ComponentType<SceneProps>);
     })();
     return () => {
       live = false;
@@ -77,6 +78,7 @@ type SceneProps = { ropes: Rope[]; clock: { value: number }; width: number; heig
 
 /** Today's approach: sample the visible slice, serialise, hand to three nodes. */
 function SvgRope({ rope, clock, height }: { rope: Rope; clock: { value: number }; height: number }) {
+  const n = useMemo(() => layers(), []);
   const total = rope.bottom - rope.top;
   const tick = useDerivedValue(() => Math.round(clock.value * 30) / 30, [clock]);
   const d = useDerivedValue(() => {
@@ -96,8 +98,10 @@ function SvgRope({ rope, clock, height }: { rope: Rope; clock: { value: number }
   return (
     <>
       <AnimatedSvgPath animatedProps={props} stroke="#8894a0" strokeWidth={7} fill="none" opacity={0.35} />
-      <AnimatedSvgPath animatedProps={props} stroke="#3d4a55" strokeWidth={3} fill="none" />
-      <AnimatedSvgPath animatedProps={props} stroke="#ffffff" strokeWidth={1} fill="none" opacity={0.25} />
+      {n > 1 && <AnimatedSvgPath animatedProps={props} stroke="#3d4a55" strokeWidth={3} fill="none" />}
+      {n > 2 && (
+        <AnimatedSvgPath animatedProps={props} stroke="#ffffff" strokeWidth={1} fill="none" opacity={0.25} />
+      )}
     </>
   );
 }

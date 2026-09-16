@@ -38,13 +38,24 @@ import { WholenessMoment } from "@/features/life-timeline/WholenessMoment";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 
 /**
- * `?bench=svg` / `?bench=skia` renders nothing but the rope scene, so the
- * probe measures renderer cost with no app around it. Perf builds only.
+ * `?bench=svg` / `?bench=skia` / `?bench=picture` renders nothing but the rope
+ * scene, so the probe measures renderer cost with no app around it.
+ *
+ * The third mode is the one that matters. `skia` draws each rope as its own
+ * `<Path>` node, which is what a mechanical translation of the SVG tree looks
+ * like — and react-native-skia flattens the whole canvas into ONE recording
+ * driven by ONE mapper, so every node is replayed on every frame whatever
+ * changed. `picture` draws the identical scene as a single recorded picture,
+ * which is what the app's summit actually does. The gap between them is the
+ * cost of the tree, and it is the number this benchmark exists to report.
+ *
+ * Perf builds only.
  */
-function benchMode(): "svg" | "skia" | null {
+type BenchMode = "svg" | "skia" | "picture";
+function benchMode(): BenchMode | null {
   if (!PERF_COUNTERS || Platform.OS !== "web" || typeof window === "undefined") return null;
   const m = new URLSearchParams(window.location.search).get("bench");
-  return m === "svg" || m === "skia" ? m : null;
+  return m === "svg" || m === "skia" || m === "picture" ? m : null;
 }
 
 function AppShell() {

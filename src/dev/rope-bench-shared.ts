@@ -7,6 +7,16 @@ export function ropeCount(): number {
   const n = Number(new URLSearchParams(window.location.search).get("ropes"));
   return Number.isFinite(n) && n > 0 ? n : 20;
 }
+/**
+ * How many of the three strokes to lay down. `?layers=1` keeps the geometry
+ * identical and cuts the fill to a third, which is the only clean way to ask
+ * whether a renderer is bound by building paths or by filling pixels.
+ */
+export function layers(): number {
+  if (typeof window === "undefined") return 3;
+  const n = Number(new URLSearchParams(window.location.search).get("layers"));
+  return n === 1 || n === 2 ? n : 3;
+}
 export const STEP_PX = 20;
 export const LEVEL = 4;
 /** Knots per wavelength for the cubic fit. Four is visually exact for a sine. */

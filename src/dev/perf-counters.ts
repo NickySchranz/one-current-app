@@ -28,7 +28,15 @@
 import { makeMutable, type SharedValue } from "react-native-reanimated";
 import { PERF_COUNTERS } from "@/config/flags";
 
-export type PerfEvent = "render" | "geometry" | "commit" | "path" | "cross";
+export type PerfEvent =
+  | "render"
+  | "geometry"
+  | "commit"
+  | "path"
+  | "cross"
+  /** SkPicture recordings. The number that says whether a canvas is redrawing
+   *  because something moved, or because nothing stopped it. */
+  | "picture";
 
 /**
  * Path builds happen inside worklets, on the UI runtime. A plain JS counter
@@ -39,11 +47,27 @@ export type PerfEvent = "render" | "geometry" | "commit" | "path" | "cross";
  * measurement changing the thing it measures.
  */
 export const pathBuildsSV: SharedValue<number> | null = PERF_COUNTERS ? makeMutable(0) : null;
+/**
+ * Recordings, counted separately from path builds.
+ *
+ * The two answer different questions and the difference is the whole
+ * diagnosis: paths-per-second says how much geometry a frame costs, and
+ * pictures-per-second says how often a frame happens at all. A canvas quantized
+ * to 30Hz that is in fact re-recording at display rate reads as a perfectly
+ * ordinary path count divided by a rope count nobody checks.
+ */
+export const picturesSV: SharedValue<number> | null = PERF_COUNTERS ? makeMutable(0) : null;
 
 /** Call from inside a worklet, right where a `d` string or SkPath is built. */
 export function countPathBuildUI(): void {
   "worklet";
   if (pathBuildsSV) pathBuildsSV.value += 1;
+}
+
+/** Call from inside a worklet, right where a picture is recorded. */
+export function countPictureUI(): void {
+  "worklet";
+  if (picturesSV) picturesSV.value += 1;
 }
 
 export type PerfReading = {
@@ -57,10 +81,10 @@ export type PerfReading = {
   renderer: "svg" | "skia";
 };
 
-const KINDS: PerfEvent[] = ["render", "geometry", "commit", "path", "cross"];
+const KINDS: PerfEvent[] = ["render", "geometry", "commit", "path", "cross", "picture"];
 
 const zero = (): Record<PerfEvent, number> =>
-  ({ render: 0, geometry: 0, commit: 0, path: 0, cross: 0 });
+  ({ render: 0, geometry: 0, commit: 0, path: 0, cross: 0, picture: 0 });
 
 const EMPTY: PerfReading = Object.freeze({
   perSecond: Object.freeze(zero()) as Record<PerfEvent, number>,
@@ -113,21 +137,25 @@ export function setRenderer(next: "svg" | "skia"): void {
   renderer = next;
 }
 
-/** Fold the UI-side path counter into the JS-side totals. Called on read. */
-function drainPathBuilds(): void {
-  if (!pathBuildsSV) return;
-  const seen = pathBuildsSV.value;
-  if (seen === drainedPaths) return;
-  const delta = seen - drainedPaths;
-  drainedPaths = seen;
-  total.path += delta;
-  window_.path += delta;
+/** Fold the UI-side counters into the JS-side totals. Called on read. */
+function drainUI(): void {
+  drainOne(pathBuildsSV, "path");
+  drainOne(picturesSV, "picture");
 }
-let drainedPaths = 0;
+const drained: Partial<Record<PerfEvent, number>> = {};
+function drainOne(sv: SharedValue<number> | null, kind: PerfEvent): void {
+  if (!sv) return;
+  const seen = sv.value;
+  const was = drained[kind] ?? 0;
+  if (seen === was) return;
+  drained[kind] = seen;
+  total[kind] += seen - was;
+  window_[kind] += seen - was;
+}
 
 export function snapshot(): PerfReading {
   if (!PERF_COUNTERS) return EMPTY;
-  drainPathBuilds();
+  drainUI();
   const now = Date.now();
   return {
     perSecond: { ...perSecond },
@@ -139,10 +167,10 @@ export function snapshot(): PerfReading {
 
 export function reset(): void {
   if (!PERF_COUNTERS) return;
-  if (pathBuildsSV) {
-    pathBuildsSV.value = 0;
-    drainedPaths = 0;
-  }
+  if (pathBuildsSV) pathBuildsSV.value = 0;
+  if (picturesSV) picturesSV.value = 0;
+  drained.path = 0;
+  drained.picture = 0;
   total = zero();
   window_ = zero();
   perSecond = zero();

@@ -2669,8 +2669,9 @@ export function LifeTimeline() {
    * canvas reads itself, so this list is rebuilt only when the layout is.
    */
   const wantsSkiaRopes = SKIA_ROPES && vertical;
+  const wantsSkiaLines = SKIA_LINES && !vertical;
   const SummitRopes = useSummitRopesCanvas(wantsSkiaRopes);
-  const BranchLines = useBranchLinesCanvas(SKIA_LINES && !vertical);
+  const BranchLines = useBranchLinesCanvas(wantsSkiaLines);
   useEffect(() => {
     setRenderer(SummitRopes || BranchLines ? "skia" : "svg");
   }, [SummitRopes, BranchLines]);
@@ -3797,10 +3798,15 @@ export function LifeTimeline() {
                     // there is at most one of them at a time.
                     // The canvas draws the ROPES; the history lines behind
                     // them are not ropes and stay with the SVG.
+                    // Gated on the INTENT to use the canvas, not on the
+                    // canvas having arrived. CanvasKit is ~2.9MB of WASM, and
+                    // keying this on `!!SummitRopes` meant the SVG strokes
+                    // drew for that second and then swapped out underneath
+                    // you — two renderers in one session, with no way to tell
+                    // from a screenshot which one you were looking at. The map
+                    // now waits, bare, for the renderer it is going to use.
                     strokesOff={
-                      vertical
-                        ? !!SummitRopes && g.reachesNow
-                        : !!BranchLines && !isBorn
+                      vertical ? wantsSkiaRopes && g.reachesNow : wantsSkiaLines && !isBorn
                     }
                     // The moments are the only part of a rope a summit pan
                     // moves, so they carry the transient and the rope itself
