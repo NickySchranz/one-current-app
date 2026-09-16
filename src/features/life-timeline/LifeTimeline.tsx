@@ -700,6 +700,40 @@ export function LifeTimeline() {
    * long awake before it can be scrolled into view — nothing pops.
    */
   const [scrollBand, setScrollBand] = useState(0);
+  /**
+   * ONE place the vertical scroll is recorded, so the scroller's offset and
+   * everything drawn from it cannot disagree. `scrollYRef` places the flying
+   * coins and the climber's anchor; `mapScrollY` is the Skia canvas's
+   * vertical camera; the band drives which lanes are worth rendering.
+   */
+  const takeScroll = useCallback(
+    (y: number) => {
+      scrollYRef.current = y;
+      mapScrollY.value = y;
+      const b = Math.round(y / BAND_PX);
+      setScrollBand((prev) => (prev === b ? prev : b));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mapScrollY is a stable shared value
+    [],
+  );
+  /**
+   * Ask the scroller where it actually is, for the times it moved itself.
+   *
+   * `getScrollableNode()` is the handle react-native-web gives to the real
+   * scrolling element (`ScrollView/index.js:192`); the ref itself is the
+   * component, and reading `scrollTop` off that quietly returns undefined —
+   * which is a re-sync that never happens and a bug that looks fixed.
+   *
+   * Native has no equivalent read and needs none: a native scroller reports
+   * every change, including the ones it makes to itself.
+   */
+  const syncScroll = useCallback(() => {
+    const view = scrollRef.current as unknown as {
+      getScrollableNode?: () => { scrollTop?: number } | null;
+    } | null;
+    const node = view?.getScrollableNode?.();
+    if (node && typeof node.scrollTop === "number") takeScroll(node.scrollTop);
+  }, [takeScroll]);
 
   const scrollHRef = useRef(0);
   scrollHRef.current = scrollH;
@@ -1778,12 +1812,24 @@ export function LifeTimeline() {
       panPendingRef.current = null;
     } else {
       // Somebody else moved the window — Return to Now, a new day, a theme
-      // change. Re-pair against the live travel on THIS axis so nothing
-      // shifts on screen; the geometry moved, and the transient did not.
-      panPairsRef.current[panAxis] = {
-        w: window_,
-        px: vertical ? panSV.value : panXSV.value,
-      };
+      // change, opening an integrated thread. Re-pair against the live travel
+      // on THIS axis so nothing shifts on screen; the geometry moved, and the
+      // transient did not.
+      const live = vertical ? panSV.value : panXSV.value;
+      panPairsRef.current[panAxis] = { w: window_, px: live };
+      /**
+       * And mark that travel as SENT, because this branch has just declared
+       * that the geometry accounts for it.
+       *
+       * Without this, `rest = pan − panSent` at `rebaseRest` is travel the
+       * new window already absorbed, and it is handed to the store a second
+       * time. That moves `panCommitted` without moving `panXSV`, which is
+       * exactly the gap `clampTo(live − base, overscan)` measures — and once
+       * it passes the overscan the world pins at the gutter and the whole map
+       * draws offset, for the rest of the session.
+       */
+      if (vertical) panSentSV.value = live;
+      else panSentXSV.value = live;
     }
   }
   const panCommitted = panPairsRef.current[panAxis].px;
@@ -3319,12 +3365,29 @@ export function LifeTimeline() {
             setScrollH((prev) => (prev === h ? prev : h));
           }}
           onScroll={(e) => {
-            scrollYRef.current = e.nativeEvent.contentOffset.y;
-            mapScrollY.value = e.nativeEvent.contentOffset.y;
+            takeScroll(e.nativeEvent.contentOffset.y);
             scrollXRef.current = e.nativeEvent.contentOffset.x;
-            const b = Math.round(e.nativeEvent.contentOffset.y / BAND_PX);
-            setScrollBand((prev) => (prev === b ? prev : b));
           }}
+          /**
+           * The scroller can move without telling anyone.
+           *
+           * A focused panel grows the content by its own height and then
+           * shrinks it again on the way out, and on the way out the scroller
+           * CLAMPS its offset against the smaller content. A clamp is not
+           * always a scroll event, and nothing else here re-reads the
+           * position — so `mapScrollY` kept the offset from before the panel
+           * opened, and the Skia strokes stayed translated by up to a tray's
+           * height away from the SVG dots, labels and gridlines they belong
+           * to. Permanently, until the next real scroll, which is why
+           * scrolling appeared to fix it.
+           *
+           * The SVG never had this problem because it lives INSIDE the
+           * scroller and is moved by it. The canvas is pinned beside it and
+           * reconstructs the same motion, so the one number they share has to
+           * be true. Asking the scroller whenever the content resizes is the
+           * cheapest way to keep it true.
+           */
+          onContentSizeChange={() => syncScroll()}
           scrollEventThrottle={16}
           showsVerticalScrollIndicator
           showsHorizontalScrollIndicator

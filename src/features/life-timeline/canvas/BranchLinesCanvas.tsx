@@ -226,8 +226,35 @@ function Line({
    * the guard says, which is a guard that costs more than it saves. These
    * were `useSharedValue(NaN)` and did exactly that. Plain memory is just
    * memory.
+   *
+   * `spec` is in here, and leaving it out was a bug you could watch happen.
+   * The key was time and the wave and nothing else, so a line whose SHAPE had
+   * changed — the map leans when a thread is focused, and every lane moves —
+   * re-ran this worklet, failed to notice, and handed back the geometry it
+   * drew before. A loud thread hid it, because its tick moves ten to thirty
+   * times a second and drags the rebuild along behind it. A quiet one did
+   * not: with no slither and a calm main line, `t` is pinned at 0 and the
+   * wave key at -1 for as long as the day stays calm, so after the first
+   * build the guard could never fall through again and the line was frozen
+   * for the session. Under reduced motion that was every line on the map.
+   *
+   * The spec is safe to compare by identity: `keepUnchanged` in
+   * `spec-cache.ts` hands back the PREVIOUS object whenever every field
+   * matches within its epsilon, so a new object means something really moved.
+   * That cache exists to make exactly this comparison possible.
    */
-  const seen = useMemo(() => ({ t: Number.NaN, wave: Number.NaN, i: 0, di: 0 }), []);
+  const seen = useMemo(
+    () => ({
+      spec: null as LineSpec | null,
+      t: Number.NaN,
+      wave: Number.NaN,
+      /** The viewport the cull was measured against. */
+      h: Number.NaN,
+      i: 0,
+      di: 0,
+    }),
+    [],
+  );
 
   const drawn = useDerivedValue<SkPathType>(() => {
     const spec = specSV.value;
@@ -264,11 +291,13 @@ function Line({
     // One number standing for the whole wave state: if it and the slither
     // tick are where they were, the path already holds the answer.
     const waveKey = waveOn ? waveT * 10000 + ampP * 100 + freqP : -1;
-    if (t === seen.t && waveKey === seen.wave) {
+    if (spec === seen.spec && t === seen.t && waveKey === seen.wave && height === seen.h) {
       return buffers[seen.i];
     }
+    seen.spec = spec;
     seen.t = t;
     seen.wave = waveKey;
+    seen.h = height;
     countPathBuildUI();
 
     const pts = spec.pts;

@@ -9,7 +9,7 @@ import {
   type SkPaint,
   type SkPicture,
 } from "@shopify/react-native-skia";
-import { useDerivedValue, type SharedValue } from "react-native-reanimated";
+import { useDerivedValue, useSharedValue, type SharedValue } from "react-native-reanimated";
 import { swayOffsetAt } from "../useSquiggle";
 import { countPathBuildUI, countPictureUI } from "@/dev/perf-counters";
 import { SHOW_TESTING } from "@/config/flags";
@@ -127,6 +127,9 @@ export function SummitRopesCanvas({
        *  Float32Array every call (`skia/web/JsiSkColor.js`), and this one was
        *  running three times per visible rope per frame for a constant. */
       dark: Skia.Color(DARK),
+      /** Something safe to hand back once the kit has been freed. Never
+       *  disposed, and never drawn into. */
+      empty: emptyPicture(),
     };
   }, []);
 
@@ -144,13 +147,22 @@ export function SummitRopesCanvas({
    */
   const colours = useMemo(() => ropes.map((r) => Skia.Color(r.colour)), [ropes]);
 
-  /** What the last recording was made from, and what it produced. */
+  /**
+   * What the last recording was made from, and what it produced.
+   *
+   * The rope LIST is compared by identity, not by its length. A rope list
+   * changes without changing length every time a thread is answered, rested
+   * or renamed — the spec is rebuilt in place — and keying on `count` meant
+   * the picture went on showing the ropes as they were. `keepUnchanged` in
+   * `spec-cache.ts` hands back the previous array members whenever nothing
+   * moved, so a new array here means something really did.
+   */
   const seen = useMemo(
     () => ({
       t: Number.NaN,
       turn: Number.NaN,
       shift: Number.NaN,
-      count: -1,
+      ropes: null as RopeSpec[] | null,
       picture: null as SkPicture | null,
       /** The one before it, kept a generation so nothing draws a freed object. */
       stale: null as SkPicture | null,
@@ -159,14 +171,35 @@ export function SummitRopesCanvas({
   );
 
   /**
+   * A kill switch the DRAW worklet reads before it touches anything.
+   *
+   * Reanimated stops a mapper through `scheduleOnUI`, which is asynchronous,
+   * so a worklet can and does run once more after React has torn the
+   * component down. Disposing the recorder in the cleanup and hoping was
+   * worth one `Cannot pass deleted object as a pointer of type
+   * PictureRecorder` per unmount.
+   *
+   * A shared value rather than a field on `seen`, because on native the
+   * worklet holds its own copy of a plain object and would never see the
+   * write. This one is set from React and read on the UI thread, which is
+   * exactly what a shared value is for.
+   */
+  const dead = useSharedValue(false);
+
+  /**
    * Nothing here is garbage: a Skia handle owns memory on the other side of
    * the WebAssembly boundary, and dropping the JS wrapper does not free it.
    * The canvas is unmounted whenever the map leaves, the renderer is flipped
    * or the GL context is lost, and each of those used to strand a recorder,
    * four paths and two pictures.
+   *
+   * `seen.picture` is deliberately NOT freed: it is the one the renderer may
+   * still be holding as it tears down. One small picture per unmount is a
+   * fair price for never handing the compositor a dangling pointer.
    */
   useEffect(
     () => () => {
+      dead.value = true;
       kit.rec.dispose();
       kit.rope.dispose();
       kit.rungs.dispose();
@@ -174,14 +207,17 @@ export function SummitRopesCanvas({
       kit.core.dispose();
       kit.ridge.dispose();
       seen.stale?.dispose();
-      seen.picture?.dispose();
+      seen.stale = null;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- both are stable for the life of the component
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- all three are stable for the life of the component
     [],
   );
 
   const still = reducedMotion;
   const picture = useDerivedValue<SkPicture>(() => {
+    // Read FIRST, before any Skia handle is touched: this worklet outlives the
+    // component by one run, and by then the kit is freed.
+    if (dead.value) return seen.picture ?? kit.empty;
     const turn = rot ? rot.value : 0;
     const shift = Math.round((climb.value + (pan ? pan.value : 0)) * 2) / 2;
     const t = still ? 0 : Math.round(clock.value * 30) / 30;
@@ -192,7 +228,7 @@ export function SummitRopesCanvas({
       t === seen.t &&
       turn === seen.turn &&
       shift === seen.shift &&
-      ropes.length === seen.count
+      ropes === seen.ropes
     ) {
       // The SAME object, deliberately: `valueSetter` refuses an assignment
       // whose value is already there, so nothing downstream is told and
@@ -202,7 +238,7 @@ export function SummitRopesCanvas({
     seen.t = t;
     seen.turn = turn;
     seen.shift = shift;
-    seen.count = ropes.length;
+    seen.ropes = ropes;
 
     const canvas = kit.rec.beginRecording(bounds);
     {
@@ -314,7 +350,7 @@ export function SummitRopesCanvas({
     seen.stale = seen.picture;
     seen.picture = next;
     return next;
-  }, [ropes, rot, pan, climb, clock, still, height, bounds, kit, colours, seen]);
+  }, [ropes, rot, pan, climb, clock, still, height, bounds, kit, colours, seen, dead]);
 
   useRopeProbes(ropes, seen, still);
 
@@ -346,6 +382,15 @@ const RUNG_MODE: "dash" | "segments" = "dash";
 /** The rope's shading: translucent black, so it darkens whatever colour the
  *  thread wears. `branchColor` speaks hsl(), which Skia cannot mix. */
 const DARK = "#141b22";
+
+/** One empty picture, recorded once, outliving everything that draws. */
+function emptyPicture(): SkPicture {
+  const rec = Skia.PictureRecorder();
+  rec.beginRecording(Skia.XYWHRect(0, 0, 1, 1));
+  const p = rec.finishRecordingAsPicture();
+  rec.dispose();
+  return p;
+}
 
 function paint(p: SkPaint, colour: SkColor, alpha: number, width: number): void {
   "worklet";
