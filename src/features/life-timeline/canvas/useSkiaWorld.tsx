@@ -23,6 +23,9 @@ export type BranchLinesProps = {
   waveNowX: number;
   wavePeriodMs: number;
   scrollY: SharedValue<number> | null;
+  /** React's half of the world camera (the viewBox number) and the finger's. */
+  worldX: number;
+  worldShift: SharedValue<number> | null;
   dimExcept: string | null;
   keepId: string | null;
   width: number;

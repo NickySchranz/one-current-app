@@ -1349,13 +1349,27 @@ export function LifeTimeline() {
    * outruns its own commit — the world stops at the edge of what is drawn
    * rather than dragging a blank strip into view.
    */
-  const worldRide = useAnimatedProps(
+  /**
+   * The finger's half of the world camera, as ONE number.
+   *
+   * It is a shared value rather than a body inside `useAnimatedProps` because
+   * the SVG is no longer the only thing that has to move: the thread lines are
+   * drawn on a Skia canvas that sits outside the `<Svg>` and therefore outside
+   * its viewBox and its world group. Both renderers now read this, so they
+   * cannot drift apart — which they did, by the full overscan, for as long as
+   * the canvas had no horizontal camera at all.
+   */
+  const worldShiftSV = useDerivedValue(
     () => {
       const base = panCommittedSV.value;
       const live = panXSV.value + rubber(panOverXSV.value);
-      return { translateX: Math.round((base + clampTo(live - base, overscan)) * 2) / 2 };
+      return Math.round((base + clampTo(live - base, overscan)) * 2) / 2;
     },
     [panXSV, panOverXSV, panCommittedSV, overscan],
+  );
+  const worldRide = useAnimatedProps(
+    () => ({ translateX: worldShiftSV.value }),
+    [worldShiftSV],
   );
   /** The pinned date strip lives outside the SVG and carries it by hand. */
   const stripRide = useAnimatedStyle(
@@ -2725,6 +2739,11 @@ export function LifeTimeline() {
     for (const g of layout.geometries) {
       const b = byId.get(g.branchId);
       if (!b) continue;
+      // `BranchLine` returns null for these, so the SVG never drew them and
+      // the canvas must not either: out of the window a thread has no place
+      // on the map, and drawing it anyway ran threads off into a future the
+      // rest of the map does not show.
+      if (!g.inWindow) continue;
       const level = Math.max(1, Math.min(5, g.loudness));
       const highlighted = g.branchId === focusedBranchId || g.branchId === armedBranchId;
       const dimmed = !!focusedBranchId && g.branchId !== focusedBranchId;
@@ -3212,6 +3231,13 @@ export function LifeTimeline() {
               waveNowX={layout.nowX}
               wavePeriodMs={wavePeriodMs}
               scrollY={mapScrollY}
+              // The world camera, both halves. React owns the first (it is the
+              // number the viewBox is built from, and it changes only on a
+              // commit); the finger owns the second. Without them the canvas
+              // drew every thread a full overscan into the future and left it
+              // there while the map panned underneath.
+              worldX={overscan - panBase}
+              worldShift={worldShiftSV}
               dimExcept={canvasDimExcept}
               keepId={focusedBranchId ?? armedBranchId}
               width={size.width}

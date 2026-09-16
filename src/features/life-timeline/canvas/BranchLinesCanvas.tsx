@@ -40,6 +40,8 @@ export function BranchLinesCanvas({
   waveNowX,
   wavePeriodMs,
   scrollY,
+  worldX,
+  worldShift,
   dimExcept,
   keepId,
   width,
@@ -63,6 +65,24 @@ export function BranchLinesCanvas({
   /** The stage scrolls vertically; the canvas is pinned, so it carries it. */
   scrollY: SharedValue<number> | null;
   /**
+   * The world camera, in the two halves the map has always had.
+   *
+   * `worldX` is React's: the number the `<Svg>` builds its viewBox from, which
+   * changes only when a window is committed. `worldShift` is the finger's: the
+   * transient the world group rides. They are separate because they are
+   * written by different runtimes on different frames, and collapsing them
+   * into one is what produces the one-frame flick `pan-jump-check` exists to
+   * catch (PERF.md).
+   *
+   * The canvas lives OUTSIDE the `<Svg>`, so it inherits neither. It had
+   * neither, and drew every thread a full overscan — a hundred and sixty
+   * pixels — into the future, pinned there while the map panned beneath it.
+   * The fork and merge dots stayed on the SVG and stayed correct, so a line
+   * and the point it integrates at were drawn in different places.
+   */
+  worldX: number;
+  worldShift: SharedValue<number> | null;
+  /**
    * While Pip is holding one thread the others stand back. It is a prop
    * rather than part of the spec on purpose: the spec carries the SAMPLED
    * geometry, and Pip moves often — rebuilding it to fade a line would
@@ -75,12 +95,29 @@ export function BranchLinesCanvas({
   height: number;
   reducedMotion: boolean;
 }) {
+  /**
+   * ONE camera for the whole canvas, not one per line.
+   *
+   * Every line used to build its own `[{ translateY }]` every frame — the
+   * same number, forty-four times, each one a shared value in the single
+   * mapper react-native-skia starts over the whole tree, and each one an
+   * array and an object allocated per frame.
+   */
+  const camera = useDerivedValue<CameraStep[]>(
+    () => [
+      { translateX: (worldShift ? worldShift.value : 0) - worldX, translateY: 0 },
+      { translateX: 0, translateY: scrollY ? -Math.round(scrollY.value * 2) / 2 : 0 },
+    ],
+    [worldShift, worldX, scrollY],
+  );
   return (
     <Canvas style={{ width, height }} pointerEvents="none">
+      <Group transform={camera}>
       {lines.map((l) => (
         <Line
           key={l.id}
           spec={l}
+          camera={camera}
           clock={clock}
           wave={wave}
           waveNowX={waveNowX}
@@ -91,6 +128,7 @@ export function BranchLinesCanvas({
           reducedMotion={reducedMotion}
         />
       ))}
+      </Group>
     </Canvas>
   );
 }
@@ -98,8 +136,12 @@ export function BranchLinesCanvas({
 /** How far past the canvas edge a line still counts as visible. */
 const MARGIN = 60;
 
+type CameraStep = { translateX: number; translateY: number };
+type Camera = SharedValue<CameraStep[]>;
+
 function Line({
   spec,
+  camera,
   clock,
   wave,
   waveNowX,
@@ -110,6 +152,9 @@ function Line({
   reducedMotion,
 }: {
   spec: LineSpec;
+  /** The one camera the whole canvas is drawn under; carried only so the
+   *  testing probe can report where a line actually IS. */
+  camera: Camera;
   clock: SharedValue<number>;
   wave: WaveHandles | null;
   waveNowX: number;
@@ -138,17 +183,10 @@ function Line({
   const buffers = useMemo(() => [Skia.Path.Make(), Skia.Path.Make()], []);
   const dashBuffers = useMemo(() => [Skia.Path.Make(), Skia.Path.Make()], []);
   /**
-   * The scroll is a TRANSFORM, not a rebuild.
-   *
-   * Paths are built in the layout's own coordinates and the canvas is pinned
-   * to the viewport, so scrolling moves the group rather than every point in
-   * every path. It is also the only way a line that never changes shape can
-   * be built once and left alone.
+   * The scroll and the pan are a TRANSFORM, not a rebuild — and the transform
+   * belongs to the canvas, once, not to each line. Paths are built in the
+   * layout's own coordinates, so moving the world moves the group.
    */
-  const camera = useDerivedValue(
-    () => [{ translateY: scrollY ? -Math.round(scrollY.value * 2) / 2 : 0 }],
-    [scrollY],
-  );
   /**
    * The line's description, held in a shared value rather than closed over —
    * see the note beside `specSV` in SummitRopesCanvas. Naming it in a
@@ -263,7 +301,7 @@ function Line({
     // geometry, level and lane throughout.
   }, [specSV, tick, wave, scrollY, stillPath, buffers, seen, slithers, rides, height, xy]);
 
-  useLineProbe(spec, drawn);
+  useLineProbe(spec, drawn, camera);
 
   // The travelling dashes, quantized to a quarter pixel like the SVG layer.
   const flowQ = useDerivedValue(() => {
@@ -319,7 +357,7 @@ function Line({
   }, [drawn, flowQ, dashBuffers, seen, xy, spec]);
 
   return (
-    <Group transform={camera}>
+    <>
       {spec.haloed && (
         <SkPath
           path={drawn}
@@ -351,7 +389,7 @@ function Line({
           strokeCap="butt"
         />
       )}
-    </Group>
+    </>
   );
 }
 
@@ -366,7 +404,14 @@ function Line({
  */
 type LineProbe = () => { x: number; y: number; w: number; h: number } | null;
 
-function useLineProbe(spec: LineSpec, drawn: SharedValue<SkPathType>): void {
+function useLineProbe(
+  spec: LineSpec,
+  drawn: SharedValue<SkPathType>,
+  /** The camera the line is drawn under. Without it the probe reports where
+   *  the path was BUILT, which since the world moved onto a transform is not
+   *  where it is — a harness reading this would call a correct map broken. */
+  camera: Camera,
+): void {
   useEffect(() => {
     if (!SHOW_TESTING || typeof window === "undefined") return;
     const w = window as unknown as { __ocLines?: Map<string, LineProbe> };
@@ -376,10 +421,16 @@ function useLineProbe(spec: LineSpec, drawn: SharedValue<SkPathType>): void {
       const box = el ? el.getBoundingClientRect() : { left: 0, top: 0 };
       const b = drawn.value.getBounds();
       if (!b || b.width <= 0) return null;
-      return { x: box.left + b.x, y: box.top + b.y, w: b.width, h: b.height };
+      let dx = 0;
+      let dy = 0;
+      for (const t of camera.value) {
+        dx += t.translateX;
+        dy += t.translateY;
+      }
+      return { x: box.left + b.x + dx, y: box.top + b.y + dy, w: b.width, h: b.height };
     });
     return () => {
       reg.delete(spec.id);
     };
-  }, [spec, drawn]);
+  }, [spec, drawn, camera]);
 }
